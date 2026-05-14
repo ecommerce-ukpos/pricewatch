@@ -1,0 +1,29 @@
+name: Run scraper
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # runs every night at 2am UTC
+  workflow_dispatch:       # also adds a manual "Run" button in GitHub
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180   # 3 hour timeout, enough for 2635 SKUs
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python scraper.py  # ← change this if your script has a different name
