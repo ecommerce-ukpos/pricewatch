@@ -263,3 +263,7 @@ async def list_runs(limit: int = Query(20, le=100)):
     sb = get_sb()
     rows = sb.table("sync_runs").select("*").order("started_at", desc=True).limit(limit).execute().data
     return {"data": rows}
+    
+# Vercel serverless handler
+from mangum import Mangum
+handler = Mangum(app)
