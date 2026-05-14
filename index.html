@@ -30,7 +30,7 @@
   --radius:8px;
   --radius-lg:12px;
 }
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg-app);color:var(--text);font-size:13px;line-height:1.5}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg-app);color:var(--text);font-size:15px;line-height:1.5}
 a{color:var(--blue);text-decoration:underline;text-decoration-color:rgba(24,95,165,.3);text-underline-offset:2px}
 a:hover{text-decoration-color:var(--blue)}
 
@@ -38,14 +38,14 @@ a:hover{text-decoration-color:var(--blue)}
 .app{display:flex;height:100vh;overflow:hidden}
 .nav{width:var(--nav-w);background:var(--bg-card);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto}
 .nav-logo{padding:14px;border-bottom:1px solid var(--border)}
-.nav-logo h1{font-size:14px;font-weight:600;display:flex;align-items:center;gap:6px;color:var(--text)}
-.nav-logo p{font-size:10px;color:var(--text2);margin-top:2px}
-.nav-sect{font-size:10px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;padding:12px 14px 3px}
-.nav-item{display:flex;align-items:center;gap:7px;padding:7px 14px;font-size:12px;cursor:pointer;color:var(--text2);border-left:2px solid transparent;transition:all .12s;user-select:none}
+.nav-logo h1{font-size:18px;font-weight:600;display:flex;align-items:center;gap:6px;color:var(--text)}
+.nav-logo p{font-size:13px;color:var(--text2);margin-top:2px}
+.nav-sect{font-size:13px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;padding:12px 14px 3px}
+.nav-item{display:flex;align-items:center;gap:7px;padding:7px 14px;font-size:14px;cursor:pointer;color:var(--text2);border-left:2px solid transparent;transition:all .12s;user-select:none}
 .nav-item:hover{background:var(--bg-sec);color:var(--text)}
 .nav-item.active{background:var(--bg-sec);color:var(--text);font-weight:500;border-left-color:var(--blue)}
 .nav-item i{font-size:15px;width:15px;flex-shrink:0}
-.nav-badge{margin-left:auto;padding:1px 6px;border-radius:99px;font-size:10px;font-weight:600}
+.nav-badge{margin-left:auto;padding:1px 6px;border-radius:99px;font-size:13px;font-weight:600}
 .nb-blue{background:var(--blue-bg);color:var(--blue)}
 .nb-amber{background:var(--amber-bg);color:var(--amber)}
 
@@ -63,19 +63,19 @@ a:hover{text-decoration-color:var(--blue)}
 /* ── Cards ── */
 .card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px}
 .card-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
-.card-hd h3{font-size:13px;font-weight:600}
+.card-hd h3{font-size:16px;font-weight:600}
 
 /* ── Metrics ── */
 .metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
 .metric{background:var(--bg-sec);border-radius:var(--radius);padding:10px 12px}
-.metric label{font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;display:block}
+.metric label{font-size:14px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;display:block}
 .metric .val{font-size:22px;font-weight:600;margin-top:3px;line-height:1}
-.metric .sub{font-size:10px;margin-top:2px}
-.m-red .val,.m-red .sub{color:var(--red)}
-.m-amber .val,.m-amber .sub{color:var(--amber)}
-.m-green .val,.m-green .sub{color:var(--green)}
-.m-blue .val{color:var(--blue)}
-.m-gray .val{color:var(--text2)}
+.metric .sub{font-size:12px;margin-top:2px}
+.m-red .val,.m-red .sub{color:var(--red);background:#ff00003d;}
+.m-amber .val,.m-amber .sub{color:var(--amber);background:#fac77578}
+.m-green .val,.m-green .sub{color:var(--green);background:#6399224a}
+.m-blue .val{color:var(--blue);background:#185fa542}
+.m-gray .val{color:var(--text2);background:#e5e3dc82}
 
 /* ── Pills ── */
 .vat{display:inline-flex;align-items:center;gap:2px;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;white-space:nowrap}
@@ -94,8 +94,8 @@ a:hover{text-decoration-color:var(--blue)}
 
 /* ── Table ── */
 .tw{overflow-x:auto}
-table{width:100%;border-collapse:collapse;font-size:11px}
-th{text-align:left;padding:6px 8px;color:var(--text2);font-weight:600;font-size:10px;border-bottom:1px solid var(--border);white-space:nowrap;background:var(--bg-card);position:sticky;top:0;z-index:1}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:6px 8px;color:var(--text2);font-weight:600;font-size:13px;border-bottom:1px solid var(--border);white-space:nowrap;background:var(--bg-card);position:sticky;top:0;z-index:1}
 td{padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:middle}
 tr:last-child td{border-bottom:none}
 tr:hover td{background:var(--bg-sec)}
@@ -103,14 +103,14 @@ tr.oos-row td{opacity:.65}
 
 /* ── Product links ── */
 .prod-link{display:inline-flex;flex-direction:column;gap:1px;text-decoration:none;color:inherit}
-.pl-id{font-family:'SF Mono',monospace;font-size:10px;color:var(--blue);text-decoration:underline;text-decoration-color:rgba(24,95,165,.3);text-underline-offset:2px}
+.pl-id{font-family:'SF Mono',monospace;font-size:13px;color:var(--blue);text-decoration:underline;text-decoration-color:rgba(24,95,165,.3);text-underline-offset:2px}
 .pl-id:hover{text-decoration-color:var(--blue)}
-.pl-name{font-size:10px;color:var(--text2);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl-name{font-size:13px;color:var(--text2);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .comp-link{display:inline-flex;flex-direction:column;gap:1px;text-decoration:none;color:inherit}
-.cl-comp{font-size:10px;color:var(--text2);white-space:nowrap}
+.cl-comp{font-size:13px;color:var(--text2);white-space:nowrap}
 .cl-price{font-weight:600;color:var(--blue);text-decoration:underline;text-decoration-color:rgba(24,95,165,.3);text-underline-offset:2px;white-space:nowrap}
 .cl-price:hover{text-decoration-color:var(--blue)}
-.cl-title{font-size:10px;color:var(--text3);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cl-title{font-size:13px;color:var(--text3);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ── Diff ── */
 .d-crit{font-weight:600;color:var(--red)}
@@ -126,7 +126,7 @@ tr.oos-row td{opacity:.65}
 
 /* ── Alerts ── */
 .alert-list{display:flex;flex-direction:column;gap:6px}
-.alert-row{padding:8px 10px;border-radius:var(--radius);font-size:11px;border:1px solid transparent}
+.alert-row{padding:8px 10px;border-radius:var(--radius);font-size:13px;border:1px solid transparent}
 .ar-crit{background:var(--red-bg);border-color:#f7c1c1;color:#501313}
 .ar-warn{background:var(--amber-bg);border-color:#fac775;color:#412402}
 .ar-info{background:var(--blue-bg);border-color:#b5d4f4;color:#042c53}
@@ -142,7 +142,7 @@ tr.oos-row td{opacity:.65}
 .ap-side a{color:inherit;text-decoration:underline;text-decoration-color:rgba(0,0,0,.2);text-underline-offset:2px;font-weight:600}
 
 /* ── Buttons ── */
-.btn{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;font-size:11px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;background:var(--bg-card);color:var(--text);font-family:inherit;transition:background .12s}
+.btn{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;font-size:13px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;background:var(--bg-card);color:var(--text);font-family:inherit;transition:background .12s}
 .btn:hover{background:var(--bg-sec)}
 .btn.prim{background:var(--blue);color:#e6f1fb;border-color:var(--blue)}
 .btn.prim:hover{background:#0c447c}
@@ -241,11 +241,11 @@ tr.oos-row td{opacity:.65}
 
       <div class="two-col">
         <div class="card">
-          <div class="card-hd"><h3>Price position distribution</h3><span style="font-size:10px;color:var(--text2)">vs cheapest competitor</span></div>
+          <div class="card-hd"><h3>Price position distribution</h3><span style="font-size:13px;color:var(--text2)">vs cheapest competitor</span></div>
           <div class="chart-wrap"><canvas id="distChart" role="img" aria-label="Bar chart of price position distribution across 500 SKUs"></canvas></div>
         </div>
         <div class="card">
-          <div class="card-hd"><h3>Alerts <span id="alert-ts" style="font-size:11px;font-weight:400;color:var(--text2)"></span></h3></div>
+          <div class="card-hd"><h3>Alerts <span id="alert-ts" style="font-size:13px;font-weight:400;color:var(--text2)"></span></h3></div>
           <div class="alert-list" id="dash-alerts"><div class="loading"><span class="spinner"></span> Loading alerts…</div></div>
         </div>
       </div>
