@@ -26,4 +26,4 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.uaqakssusydpjzrcznhb }}
           SUPABASE_SERVICE_KEY: ${{ secrets.sb_secret_EIMoTlM0NuX6D6mFYM_Igg_rdkTSq_i }}
-        run: python scraper.py  # ← change this if your script has a different name
+        run: python scraper/scraper.py  # ← change this if your script has a different name
