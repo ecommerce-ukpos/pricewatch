@@ -1,0 +1,12 @@
+.env
+.env.local
+.env.*.local
+__pycache__/
+*.pyc
+*.pyo
+.playwright/
+node_modules/
+.vercel/
+*.egg-info/
+dist/
+.DS_Store
