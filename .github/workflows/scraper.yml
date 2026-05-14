@@ -26,7 +26,7 @@ jobs:
         run: npx playwright install chromium --with-deps
 
       - name: Run scraper
-        env:
-          SUPABASE_URL: ${{ secrets.uaqakssusydpjzrcznhb }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.sb_secret_EIMoTlM0NuX6D6mFYM_Igg_rdkTSq_i }}
+env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python scraper/scraper.py
