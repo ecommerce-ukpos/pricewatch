@@ -6,7 +6,7 @@
       "use": "@vercel/python"
     },
     {
-      "src": "frontend/**",
+      "src": "frontend/index.html",
       "use": "@vercel/static"
     }
   ],
@@ -16,8 +16,12 @@
       "dest": "api/main.py"
     },
     {
+      "src": "/",
+      "dest": "frontend/index.html"
+    },
+    {
       "src": "/(.*)",
-      "dest": "frontend/$1"
+      "dest": "frontend/index.html"
     }
   ],
   "crons": [
@@ -25,9 +29,5 @@
       "path": "/api/cron/nightly",
       "schedule": "0 1 * * *"
     }
-  ],
-  "env": {
-    "SUPABASE_URL": "@supabase_url",
-    "SUPABASE_SERVICE_KEY": "@supabase_service_key"
-  }
+  ]
 }
