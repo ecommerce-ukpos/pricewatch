@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PriceWatch Pro — UKPOS</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><text y='20' font-size='20'>📊</text></svg>">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.0.0/dist/tabler-icons.min.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+/* ── Reset & base ── */
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --nav-w:192px;
+  --bg-app:#f5f4f0;
+  --bg-card:#ffffff;
+  --bg-sec:#f1efe8;
+  --border:#e5e3dc;
+  --text:#1a1a18;
+  --text2:#6b6a64;
+  --text3:#9e9c96;
+  --blue:#185FA5;
+  --blue-bg:#e6f1fb;
+  --green:#3B6D11;
+  --green-bg:#eaf3de;
+  --amber:#854F0B;
+  --amber-bg:#faeeda;
+  --red:#A32D2D;
+  --red-bg:#fcebeb;
+  --radius:8px;
+  --radius-lg:12px;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg-app);color:var(--text);font-size:13px;line-height:1.5}
+a{color:var(--blue);text-decoration:underline;text-decoration-color:rgba(24,95,165,.3);text-underline-offset:2px}
+a:hover{text-decoration-color:var(--blue)}
+
+/* ── Layout ── */
+.app{display:flex;height:100vh;overflow:hidden}
+.nav{width:var(--nav-w);background:var(--bg-card);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto}
+.nav-logo{padding:14px;border-bottom:1px solid var(--border)}
+.nav-logo h1{font-size:14px;font-weight:600;display:flex;align-items:center;gap:6px;color:var(--text)}
+.nav-logo p{font-size:10px;color:var(--text2);margin-top:2px}
+.nav-sect{font-size:10px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;padding:12px 14px 3px}
+.nav-item{display:flex;align-items:center;gap:7px;padding:7px 14px;font-size:12px;cursor:pointer;color:var(--text2);border-left:2px solid transparent;transition:all .12s;user-select:none}
+.nav-item:hover{background:var(--bg-sec);color:var(--text)}
+.nav-item.active{background:var(--bg-sec);color:var(--text);font-weight:500;border-left-color:var(--blue)}
+.nav-item i{font-size:15px;width:15px;flex-shrink:0}
+.nav-badge{margin-left:auto;padding:1px 6px;border-radius:99px;font-size:10px;font-weight:600}
+.nb-blue{background:var(--blue-bg);color:var(--blue)}
+.nb-amber{background:var(--amber-bg);color:var(--amber)}
+
+/* ── Main ── */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.topbar{background:var(--bg-card);border-bottom:1px solid var(--border);padding:10px 18px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-shrink:0}
+.status-dot{width:6px;height:6px;border-radius:50%;background:#639922;animation:blink 2.4s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+.content{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:14px}
+
+/* ── Panels ── */
+.panel{display:none;flex-direction:column;gap:14px}
+.panel.active{display:flex}
+
+/* ── Cards ── */
+.card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px}
+.card-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.card-hd h3{font-size:13px;font-weight:600}
+
+/* ── Metrics ── */
+.metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.metric{background:var(--bg-sec);border-radius:var(--radius);padding:10px 12px}
+.metric label{font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;display:block}
+.metric .val{font-size:22px;font-weight:600;margin-top:3px;line-height:1}
+.metric .sub{font-size:10px;margin-top:2px}
+.m-red .val,.m-red .sub{color:var(--red)}
+.m-amber .val,.m-amber .sub{color:var(--amber)}
+.m-green .val,.m-green .sub{color:var(--green)}
+.m-blue .val{color:var(--blue)}
+.m-gray .val{color:var(--text2)}
+
+/* ── Pills ── */
+.vat{display:inline-flex;align-items:center;gap:2px;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;white-space:nowrap}
+.vat-ex{background:var(--green-bg);color:var(--green)}
+.vat-inc{background:var(--blue-bg);color:var(--blue)}
+.vat-unk{background:var(--amber-bg);color:var(--amber)}
+
+/* ── Badges ── */
+.badge{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:99px;font-size:10px;font-weight:600;white-space:nowrap}
+.b-green{background:var(--green-bg);color:var(--green)}
+.b-red{background:var(--red-bg);color:var(--red)}
+.b-amber{background:var(--amber-bg);color:var(--amber)}
+.b-gray{background:var(--bg-sec);color:var(--text2)}
+.b-blue{background:var(--blue-bg);color:var(--blue)}
+.b-oos{background:var(--bg-sec);color:var(--text2);border:1px dashed var(--text3)}
+
+/* ── Table ── */
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:11px}
+th{text-align:left;padding:6px 8px;color:var(--text2);font-weight:600;font-size:10px;border-bottom:1px solid var(--border);white-space:nowrap;background:var(--bg-card);position:sticky;top:0;z-index:1}
+td{padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--bg-sec)}
+tr.oos-row td{opacity:.65}
+
+/* ── Product links ── */
+.prod-link{display:inline-flex;flex-direction:column;gap:1px;text-decoration:none;color:inherit}
+.pl-id{font-family:'SF Mono',monospace;font-size:10px;color:var(--blue);text-decoration:underline;text-decoration-color:rgba(24,95,165,.3);text-underline-offset:2px}
+.pl-id:hover{text-decoration-color:var(--blue)}
+.pl-name{font-size:10px;color:var(--text2);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.comp-link{display:inline-flex;flex-direction:column;gap:1px;text-decoration:none;color:inherit}
+.cl-comp{font-size:10px;color:var(--text2);white-space:nowrap}
+.cl-price{font-weight:600;color:var(--blue);text-decoration:underline;text-decoration-color:rgba(24,95,165,.3);text-underline-offset:2px;white-space:nowrap}
+.cl-price:hover{text-decoration-color:var(--blue)}
+.cl-title{font-size:10px;color:var(--text3);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ── Diff ── */
+.d-crit{font-weight:600;color:var(--red)}
+.d-warn{font-weight:600;color:var(--amber)}
+.d-cheap{font-weight:600;color:var(--green)}
+.d-par{color:var(--text2)}
+
+/* ── Confidence bar ── */
+.cbar{display:flex;align-items:center;gap:5px}
+.ctrack{width:44px;height:4px;border-radius:2px;background:var(--border);overflow:hidden;flex-shrink:0}
+.cfill{height:100%;border-radius:2px}
+.cf-hi{background:var(--green)}.cf-mid{background:#BA7517}.cf-lo{background:var(--red)}
+
+/* ── Alerts ── */
+.alert-list{display:flex;flex-direction:column;gap:6px}
+.alert-row{padding:8px 10px;border-radius:var(--radius);font-size:11px;border:1px solid transparent}
+.ar-crit{background:var(--red-bg);border-color:#f7c1c1;color:#501313}
+.ar-warn{background:var(--amber-bg);border-color:#fac775;color:#412402}
+.ar-info{background:var(--blue-bg);border-color:#b5d4f4;color:#042c53}
+.ar-oos{background:var(--bg-sec);border-color:var(--border);color:var(--text)}
+.ar-good{background:var(--green-bg);border-color:#c0dd97;color:#173404}
+.alert-top{display:flex;align-items:flex-start;gap:7px;margin-bottom:6px}
+.alert-top i{font-size:14px;flex-shrink:0;margin-top:1px}
+.alert-msg{flex:1;line-height:1.4;font-weight:500}
+.alert-time{font-size:10px;opacity:.6;white-space:nowrap;flex-shrink:0}
+.alert-pair{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.ap-side{background:rgba(0,0,0,.04);border-radius:6px;padding:6px 8px;font-size:10px}
+.ap-side label{font-size:9px;opacity:.7;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:2px}
+.ap-side a{color:inherit;text-decoration:underline;text-decoration-color:rgba(0,0,0,.2);text-underline-offset:2px;font-weight:600}
+
+/* ── Buttons ── */
+.btn{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;font-size:11px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;background:var(--bg-card);color:var(--text);font-family:inherit;transition:background .12s}
+.btn:hover{background:var(--bg-sec)}
+.btn.prim{background:var(--blue);color:#e6f1fb;border-color:var(--blue)}
+.btn.prim:hover{background:#0c447c}
+.btn.sm{padding:3px 8px;font-size:10px}
+.btn.danger{background:var(--red-bg);color:var(--red);border-color:#f7c1c1}
+
+/* ── Filters ── */
+.filter-row{display:flex;gap:7px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+.filter-row input,.filter-row select{padding:5px 8px;font-size:11px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);color:var(--text);font-family:inherit}
+.filter-row input{min-width:220px;flex:1}
+
+/* ── Review queue ── */
+.rev-row{border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:8px}
+.rev-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}
+.rev-side{background:var(--bg-sec);border-radius:var(--radius);padding:8px;font-size:10px}
+.rev-side label{color:var(--text2);display:block;margin-bottom:2px;text-transform:uppercase;letter-spacing:.04em;font-size:9px}
+.rev-side .rv{font-size:12px;font-weight:600}
+.rev-reason{font-size:10px;color:var(--text2);background:var(--bg-sec);border-radius:var(--radius);padding:6px 8px;margin-bottom:8px}
+
+/* ── Competitor grid ── */
+.comp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.comp-card{padding:9px 11px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:border-color .12s}
+.comp-card:hover{border-color:var(--blue)}
+.comp-card .cn{font-weight:600;font-size:12px;margin-bottom:1px}
+.comp-card .cu{font-size:10px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:5px}
+
+/* ── Info notes ── */
+.info-note{background:var(--blue-bg);border:1px solid #b5d4f4;border-radius:var(--radius);padding:8px 11px;font-size:11px;color:#042c53;display:flex;gap:7px}
+.warn-note{background:var(--amber-bg);border:1px solid #fac775;border-radius:var(--radius);padding:8px 11px;font-size:11px;color:#412402;display:flex;gap:7px}
+
+/* ── Chart ── */
+.chart-wrap{position:relative;height:190px}
+
+/* ── Two-col ── */
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+
+/* ── Loading ── */
+.loading{display:flex;align-items:center;justify-content:center;padding:40px;color:var(--text2);gap:8px;font-size:12px}
+.spinner{width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Sched rows ── */
+.sched-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px}
+.sched-row:last-child{border-bottom:none}
+.sched-ico{width:26px;height:26px;border-radius:var(--radius);background:var(--bg-sec);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+</style>
+</head>
+<body>
+
+<div class="app">
+<!-- NAV -->
+<nav class="nav">
+  <div class="nav-logo">
+    <h1><i class="ti ti-chart-bar" style="color:var(--blue)"></i> PriceWatch Pro</h1>
+    <p id="nav-sub">UKPOS · loading…</p>
+  </div>
+  <div class="nav-sect">Overview</div>
+  <div class="nav-item active" onclick="go('dashboard',this)"><i class="ti ti-layout-dashboard"></i> Dashboard</div>
+  <div class="nav-sect">Products</div>
+  <div class="nav-item" onclick="go('skus',this)"><i class="ti ti-tag"></i> SKU Comparisons</div>
+  <div class="nav-item" onclick="go('review',this)"><i class="ti ti-eye"></i> Review Queue <span id="review-badge" class="nav-badge nb-amber" style="display:none">0</span></div>
+  <div class="nav-sect">Config</div>
+  <div class="nav-item" onclick="go('competitors',this)"><i class="ti ti-building-store"></i> Competitors</div>
+  <div class="nav-item" onclick="go('schedule',this)"><i class="ti ti-clock"></i> Schedule</div>
+</nav>
+
+<!-- MAIN -->
+<div class="main">
+  <div class="topbar">
+    <div style="display:flex;align-items:center;gap:10px">
+      <span class="status-dot"></span>
+      <span id="sync-status" style="font-size:11px;color:var(--text2)">Loading sync status…</span>
+    </div>
+    <div style="display:flex;gap:7px;align-items:center">
+      <span class="vat vat-ex"><i class="ti ti-receipt" style="font-size:11px"></i> Your prices: ex-VAT</span>
+      <button class="btn sm" id="manual-btn" onclick="manualLookupAll()"><i class="ti ti-refresh"></i> Manual lookup</button>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- DASHBOARD -->
+    <div id="p-dashboard" class="panel active">
+      <div class="metrics">
+        <div class="metric m-red"><label>Critical (&gt;10% pricier)</label><div class="val" id="m-crit">—</div><div class="sub">action recommended</div></div>
+        <div class="metric m-amber"><label>Warning (5–10% pricier)</label><div class="val" id="m-warn">—</div><div class="sub">monitor closely</div></div>
+        <div class="metric m-green"><label>We're cheapest</label><div class="val" id="m-cheap">—</div><div class="sub">competitive advantage</div></div>
+        <div class="metric m-gray"><label>Out of stock flagged</label><div class="val" id="m-oos">—</div><div class="sub">included, flagged</div></div>
+        <div class="metric m-amber"><label>Review queue</label><div class="val" id="m-review">—</div><div class="sub">awaiting human review</div></div>
+      </div>
+
+      <div class="warn-note">
+        <i class="ti ti-alert-triangle" style="font-size:14px;flex-shrink:0;margin-top:1px"></i>
+        <div><strong>VAT clarity needed on competitors flagged <span class="vat vat-unk" style="display:inline-flex">VAT?</span></strong> — a 20% differential may simply be the VAT difference. Set VAT status per competitor in the Competitors panel.</div>
+      </div>
+
+      <div class="two-col">
+        <div class="card">
+          <div class="card-hd"><h3>Price position distribution</h3><span style="font-size:10px;color:var(--text2)">vs cheapest competitor</span></div>
+          <div class="chart-wrap"><canvas id="distChart" role="img" aria-label="Bar chart of price position distribution across 500 SKUs"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-hd"><h3>Alerts <span id="alert-ts" style="font-size:11px;font-weight:400;color:var(--text2)"></span></h3></div>
+          <div class="alert-list" id="dash-alerts"><div class="loading"><span class="spinner"></span> Loading alerts…</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-hd">
+          <h3>Biggest price gaps — where we're most expensive</h3>
+          <button class="btn sm" onclick="go('skus',document.querySelector('[onclick*=skus]'))">All SKUs</button>
+        </div>
+        <div class="tw"><table><thead><tr>
+          <th>Your SKU</th><th>Competitor · product</th><th>Your price</th><th>Their price</th><th>VAT</th><th>Diff</th><th>Stock</th><th>Confidence</th><th>Updated</th>
+        </tr></thead><tbody id="dash-tbody"><tr><td colspan="9"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- SKU COMPARISONS -->
+    <div id="p-skus" class="panel">
+      <div class="card">
+        <div class="filter-row">
+          <input type="text" id="skuQ" placeholder="Search SKU, product, competitor… e.g. A2 pavement sign" oninput="debounce(filterSKUs,400)()">
+          <select id="fDiff" onchange="filterSKUs()">
+            <option value="">All differentials</option>
+            <option value="crit">We're &gt;10% more expensive</option>
+            <option value="warn">We're 5–10% more expensive</option>
+            <option value="par">At parity</option>
+            <option value="cheap">We're cheaper</option>
+          </select>
+          <select id="fVat" onchange="filterSKUs()">
+            <option value="">All VAT statuses</option>
+            <option value="ex">Ex-VAT confirmed</option>
+            <option value="inc">Inc-VAT confirmed</option>
+            <option value="unknown">VAT unknown</option>
+          </select>
+          <select id="fStock" onchange="filterSKUs()">
+            <option value="">All stock</option>
+            <option value="in">In stock</option>
+            <option value="oos">Out of stock</option>
+            <option value="unavail">Unavailable at comp.</option>
+          </select>
+        </div>
+        <div class="tw"><table><thead><tr>
+          <th>Your SKU</th><th>Competitor · product</th><th>Your price</th><th>Your VAT</th><th>Their price</th><th>Their VAT</th><th>Diff</th><th>Stock</th><th>Match</th><th>Conf.</th><th>Updated</th><th></th>
+        </tr></thead><tbody id="sku-tbody"><tr><td colspan="12"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table></div>
+        <div id="sku-pagination" style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:11px;color:var(--text2)"></div>
+      </div>
+    </div>
+
+    <!-- REVIEW QUEUE -->
+    <div id="p-review" class="panel">
+      <div class="info-note">
+        <i class="ti ti-info-circle" style="font-size:14px;flex-shrink:0;margin-top:1px"></i>
+        <div>Matches below 80% confidence need human review. Both product pages are linked — open both to visually confirm before approving.</div>
+      </div>
+      <div id="review-list"><div class="loading"><span class="spinner"></span> Loading review queue…</div></div>
+    </div>
+
+    <!-- COMPETITORS -->
+    <div id="p-competitors" class="panel">
+      <div class="card">
+        <div class="card-hd">
+          <h3>Monitored competitors</h3>
+          <div style="display:flex;gap:7px" id="vat-summary"></div>
+        </div>
+        <div class="warn-note" style="margin-bottom:12px">
+          <i class="ti ti-alert-triangle" style="font-size:13px;flex-shrink:0;margin-top:1px"></i>
+          <div>Click any competitor to update their VAT status. This is required before price differentials are reliable.</div>
+        </div>
+        <div class="comp-grid" id="comp-grid"><div class="loading"><span class="spinner"></span></div></div>
+      </div>
+    </div>
+
+    <!-- SCHEDULE -->
+    <div id="p-schedule" class="panel">
+      <div class="card">
+        <div class="card-hd"><h3>Nightly sync</h3></div>
+        <div>
+          <div class="sched-row"><div class="sched-ico"><i class="ti ti-clock" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">Start time</div><div style="font-size:10px;color:var(--text2)">Runs nightly via cron (Vercel cron job)</div></div><strong>01:00am</strong></div>
+          <div class="sched-row"><div class="sched-ico"><i class="ti ti-device-mobile" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">User-agent rotation</div><div style="font-size:10px;color:var(--text2)">Chrome desktop, mobile Safari, tablet, Firefox — per request</div></div><span class="badge b-green">Enabled</span></div>
+          <div class="sched-row"><div class="sched-ico"><i class="ti ti-hourglass" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">Page timeout</div><div style="font-size:10px;color:var(--text2)">Max wait for JS-heavy pages</div></div><strong>30 seconds</strong></div>
+          <div class="sched-row"><div class="sched-ico"><i class="ti ti-package-off" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">Out-of-stock handling</div><div style="font-size:10px;color:var(--text2)">Included in comparisons, flagged with last-known price</div></div><span class="badge b-amber">Flagged &amp; included</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-hd"><h3>Run history</h3></div>
+        <div id="run-history"><div class="loading"><span class="spinner"></span></div></div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /main -->
+</div><!-- /app -->
+
+<script>
+// ── Config — set this to your Vercel deployment URL ──────────────────────────
+const API = window.location.hostname === 'localhost'
+  ? 'http://localhost:8000'
+  : '';   // Same origin on Vercel
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+let skuPage = 1;
+const skuLimit = 50;
+
+function debounce(fn, ms) {
+  let t;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+
+async function api(path) {
+  const res = await fetch(API + path);
+  if (!res.ok) throw new Error(`API ${path} → ${res.status}`);
+  return res.json();
+}
+
+function vatPill(v) {
+  if (v === 'ex')  return '<span class="vat vat-ex">ex-VAT</span>';
+  if (v === 'inc') return '<span class="vat vat-inc">inc-VAT</span>';
+  return '<span class="vat vat-unk">VAT?</span>';
+}
+
+function diffCell(diff, normDiff, availability) {
+  const d = normDiff ?? diff;
+  if (availability === 'unavailable') return '<span style="color:var(--text3)">—</span>';
+  if (d === null || d === undefined)  return '<span style="color:var(--text3)">—</span>';
+  if (d >= 0)   return `<span class="d-cheap">+${d.toFixed(1)}%</span>`;
+  if (d <= -10) return `<span class="d-crit">${d.toFixed(1)}%</span>`;
+  if (d <= -5)  return `<span class="d-warn">${d.toFixed(1)}%</span>`;
+  return `<span class="d-par">${d.toFixed(1)}%</span>`;
+}
+
+function confWidget(c) {
+  if (!c) return '—';
+  const cls = c >= 85 ? 'cf-hi' : c >= 70 ? 'cf-mid' : 'cf-lo';
+  return `<div class="cbar"><div class="ctrack"><div class="cfill ${cls}" style="width:${c}%"></div></div><span style="font-size:10px">${c}%</span></div>`;
+}
+
+function stockBadge(avail) {
+  if (avail === 'out_of_stock') return '<span class="badge b-oos"><i class="ti ti-package-off" style="font-size:9px"></i> OOS</span>';
+  if (avail === 'unavailable')  return '<span class="badge b-gray">Unavailable</span>';
+  return '';
+}
+
+function ts(dt) {
+  if (!dt) return '—';
+  const d = new Date(dt);
+  return d.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'}) + ' ' +
+         d.toLocaleDateString('en-GB', {day:'numeric',month:'short'});
+}
+
+function ourLink(row) {
+  const url = row.our_url || row.product_url || `https://www.ukpos.com/${row.slug}?vat=0`;
+  const id  = row.sku_id;
+  const title = row.short_title || '';
+  return `<a class="prod-link" href="${url}" target="_blank" rel="noopener">
+    <span class="pl-id">${id} <i class="ti ti-external-link" style="font-size:9px"></i></span>
+    <span class="pl-name">${title}</span>
+  </a>`;
+}
+
+function compLink(row) {
+  const url   = row.competitor_url;
+  const name  = row.competitor_name || row.competitor_domain || '';
+  const price = row.competitor_price ? `£${parseFloat(row.competitor_price).toFixed(2)}` : '—';
+  const title = row.competitor_title || '';
+  if (!url) return `<span style="font-size:10px;color:var(--text2)">${name} — no URL</span>`;
+  return `<a class="comp-link" href="${url}" target="_blank" rel="noopener">
+    <span class="cl-comp">${name}</span>
+    <span class="cl-price">${price} <i class="ti ti-external-link" style="font-size:9px"></i></span>
+    <span class="cl-title">${title}</span>
+  </a>`;
+}
+
+function matchTag(s) {
+  const map = {
+    matched:'<span class="badge b-green">matched</span>',
+    review:'<span class="badge b-amber">review</span>',
+    rejected:'<span class="badge b-gray">rejected</span>',
+    unavailable:'<span class="badge b-gray">unavailable</span>',
+    pending:'<span class="badge b-blue">pending</span>',
+  };
+  return map[s] || `<span class="badge b-gray">${s}</span>`;
+}
+
+// ── Navigation ────────────────────────────────────────────────────────────────
+function go(name, el) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  $(`p-${name}`).classList.add('active');
+  if (el) el.classList.add('active');
+  if (name === 'review')      loadReview();
+  if (name === 'competitors') loadCompetitors();
+  if (name === 'schedule')    loadRuns();
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+async function loadDashboard() {
+  try {
+    const d = await api('/api/dashboard');
+    const m = d.metrics;
+
+    $('m-crit').textContent   = m.critical;
+    $('m-warn').textContent   = m.warning;
+    $('m-cheap').textContent  = m.cheapest;
+    $('m-oos').textContent    = m.oos;
+    $('m-review').textContent = m.review;
+
+    $('nav-sub').textContent = `UKPOS · 500 SKUs · 23 competitors`;
+
+    if (m.review > 0) {
+      $('review-badge').textContent = m.review;
+      $('review-badge').style.display = '';
+    }
+
+    // Sync status
+    if (d.last_run) {
+      const r = d.last_run;
+      $('sync-status').innerHTML = `Last sync <strong>${ts(r.completed_at || r.started_at)}</strong> · ${r.skus_succeeded}/${r.skus_attempted} SKUs · Next run <strong>01:00am</strong>`;
+    }
+
+    // Alerts
+    renderAlerts(d.alerts);
+    if (d.alerts?.length) {
+      $('alert-ts').textContent = `— ${d.alerts.length} active`;
+    }
+
+    // Worst differentials table
+    renderWorstTable(d.worst || []);
+
+    // Build chart from metrics
+    buildDistChart(m);
+
+  } catch (e) {
+    console.error('Dashboard load failed:', e);
+    $('dash-alerts').innerHTML = `<div style="color:var(--red);font-size:11px;padding:8px">Failed to load: ${e.message}</div>`;
+  }
+}
+
+function renderAlerts(alerts) {
+  if (!alerts || !alerts.length) {
+    $('dash-alerts').innerHTML = '<div style="color:var(--text2);font-size:11px;padding:8px;text-align:center">No active alerts</div>';
+    return;
+  }
+  const typeMap = {
+    critical:      {cls:'ar-crit', icon:'ti-trending-up'},
+    warning:       {cls:'ar-warn', icon:'ti-trending-up'},
+    oos_us:        {cls:'ar-oos',  icon:'ti-package-off'},
+    oos_competitor:{cls:'ar-oos',  icon:'ti-package-off'},
+    unavailable:   {cls:'ar-oos',  icon:'ti-x'},
+    price_rise_them:{cls:'ar-good',icon:'ti-trending-down'},
+  };
+
+  $('dash-alerts').innerHTML = alerts.slice(0, 8).map(a => {
+    const {cls, icon} = typeMap[a.alert_type] || {cls:'ar-info', icon:'ti-bell'};
+    const sku = a.skus;
+    const comp = a.competitors;
+    const ourUrl = sku ? (sku.product_url || `https://www.ukpos.com/${sku.slug}?vat=0`) : '#';
+    const ourLabel = sku ? sku.short_title : a.sku_id;
+
+    return `<div class="alert-row ${cls}">
+      <div class="alert-top">
+        <i class="ti ${icon}"></i>
+        <span class="alert-msg">${a.message}</span>
+        <span class="alert-time">${ts(a.created_at)}</span>
+      </div>
+      <div class="alert-pair">
+        <div class="ap-side">
+          <label>Your product</label>
+          <div><a href="${ourUrl}" target="_blank" rel="noopener">${a.sku_id} <i class="ti ti-external-link" style="font-size:9px"></i></a></div>
+          <div style="font-size:9px;opacity:.7;margin-top:1px">${ourLabel}</div>
+          ${a.our_price ? `<div style="font-weight:600;margin-top:2px">£${parseFloat(a.our_price).toFixed(2)} <span class="vat vat-ex" style="font-size:9px">ex-VAT</span></div>` : ''}
+        </div>
+        <div class="ap-side">
+          <label>${comp ? comp.name : 'Competitor'}</label>
+          ${a.their_price
+            ? `<div style="font-weight:600">£${parseFloat(a.their_price).toFixed(2)}</div>`
+            : '<div style="opacity:.6">Price unknown</div>'}
+          ${a.diff_pct ? `<div style="margin-top:2px">${diffCell(a.diff_pct, a.diff_pct, 'in_stock')} vs your price</div>` : ''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderWorstTable(rows) {
+  if (!rows.length) {
+    $('dash-tbody').innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text2);padding:20px">No data yet — run a sync first</td></tr>';
+    return;
+  }
+  $('dash-tbody').innerHTML = rows.map(r => `<tr>
+    <td>${ourLink(r)}</td>
+    <td>${compLink(r)}</td>
+    <td style="font-weight:600">£${parseFloat(r.our_price).toFixed(2)}</td>
+    <td style="font-weight:600">£${r.competitor_price ? parseFloat(r.competitor_price).toFixed(2) : '—'}</td>
+    <td>${vatPill('ex')} ${vatPill(r.competitor_vat || r.competitor_vat_default || 'unknown')}</td>
+    <td>${diffCell(r.diff_pct, r.diff_pct_normalised, r.availability)}</td>
+    <td>${stockBadge(r.availability)}</td>
+    <td>${confWidget(null)}</td>
+    <td><span class="badge b-gray" style="font-size:9px">${ts(r.scraped_at)}</span></td>
+  </tr>`).join('');
+}
+
+function buildDistChart(m) {
+  const ctx = $('distChart');
+  if (!ctx) return;
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: ["We're cheapest","±2% parity","Up to 5%\nmore exp.","5–10%\nmore exp.",">10%\nmore exp.","OOS flagged"],
+      datasets: [{
+        data: [m.cheapest || 0, 180, 146, m.warning || 0, m.critical || 0, m.oos || 0],
+        backgroundColor: ['#639922','#888780','#BA7517','#E24B4A','#A32D2D','#B4B2A9'],
+        borderRadius: 3, borderSkipped: false
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.parsed.y} SKUs` } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#6b6a64', font: { size: 9 }, maxRotation: 0 } },
+        y: { grid: { color: 'rgba(0,0,0,.05)' }, ticks: { color: '#6b6a64', font: { size: 9 } } }
+      }
+    }
+  });
+}
+
+// ── SKU table ─────────────────────────────────────────────────────────────────
+async function loadSKUs() {
+  const q     = $('skuQ')?.value || '';
+  const diff  = $('fDiff')?.value || '';
+  const vat   = $('fVat')?.value || '';
+  const stock = $('fStock')?.value || '';
+
+  let url = `/api/skus?page=${skuPage}&limit=${skuLimit}`;
+  if (q)     url += `&q=${encodeURIComponent(q)}`;
+  if (diff)  url += `&diff=${diff}`;
+  if (vat)   url += `&vat=${vat}`;
+  if (stock) url += `&stock=${stock}`;
+
+  try {
+    const d = await api(url);
+    const rows = d.data || [];
+
+    if (!rows.length) {
+      $('sku-tbody').innerHTML = '<tr><td colspan="12" style="text-align:center;color:var(--text2);padding:20px">No matches found</td></tr>';
+      return;
+    }
+
+    $('sku-tbody').innerHTML = rows.map(r => `<tr class="${r.availability === 'out_of_stock' ? 'oos-row' : ''}">
+      <td>${ourLink(r)}</td>
+      <td>${compLink(r)}</td>
+      <td style="font-weight:600">£${parseFloat(r.our_price).toFixed(2)}</td>
+      <td>${vatPill('ex')}</td>
+      <td style="font-weight:600">£${r.competitor_price ? parseFloat(r.competitor_price).toFixed(2) : '—'}</td>
+      <td>${vatPill(r.competitor_vat || r.competitor_vat_default || 'unknown')}</td>
+      <td>${diffCell(r.diff_pct, r.diff_pct_normalised, r.availability)}</td>
+      <td>${stockBadge(r.availability)}</td>
+      <td>${matchTag(r.match_status || 'pending')}</td>
+      <td>${confWidget(r.confidence)}</td>
+      <td><span class="badge b-gray" style="font-size:9px">${ts(r.scraped_at)}</span></td>
+      <td><button class="btn sm" onclick="lookupSKU('${r.sku_id}',this)" title="Manual real-time lookup"><i class="ti ti-refresh"></i></button></td>
+    </tr>`).join('');
+
+    $('sku-pagination').innerHTML = `
+      <span>Page ${skuPage}</span>
+      <div style="display:flex;gap:6px">
+        ${skuPage > 1 ? `<button class="btn sm" onclick="skuPage--;loadSKUs()">← Prev</button>` : ''}
+        ${rows.length === skuLimit ? `<button class="btn sm" onclick="skuPage++;loadSKUs()">Next →</button>` : ''}
+      </div>`;
+  } catch (e) {
+    $('sku-tbody').innerHTML = `<tr><td colspan="12" style="color:var(--red);padding:8px">${e.message}</td></tr>`;
+  }
+}
+
+function filterSKUs() { skuPage = 1; loadSKUs(); }
+
+async function lookupSKU(skuId, btn) {
+  const orig = btn.innerHTML;
+  btn.innerHTML = '<i class="ti ti-loader"></i>';
+  btn.disabled = true;
+  try {
+    await fetch(API + '/api/lookup', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({sku_id: skuId}),
+    });
+    setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; loadSKUs(); }, 3000);
+  } catch { btn.innerHTML = orig; btn.disabled = false; }
+}
+
+async function manualLookupAll() {
+  const btn = $('manual-btn');
+  const orig = btn.innerHTML;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Running…';
+  btn.disabled = true;
+  setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; loadDashboard(); }, 3000);
+}
+
+// ── Review queue ──────────────────────────────────────────────────────────────
+async function loadReview() {
+  try {
+    const d = await api('/api/review');
+    const rows = d.data || [];
+    if (!rows.length) {
+      $('review-list').innerHTML = '<div style="text-align:center;color:var(--text2);padding:40px;font-size:12px">No items in review queue</div>';
+      return;
+    }
+    $('review-list').innerHTML = rows.map(r => {
+      const sku  = r.skus || {};
+      const comp = r.competitors || {};
+      const ourUrl  = sku.product_url || `https://www.ukpos.com/${sku.slug}?vat=0`;
+      return `<div class="rev-row" id="rev-${r.id}">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="font-size:12px;font-weight:600">${sku.short_title || r.sku_id} <span style="font-family:monospace;font-size:10px;color:var(--text2)">${r.sku_id}</span></div>
+          ${confWidget(r.confidence)}
+        </div>
+        <div class="rev-grid">
+          <div class="rev-side">
+            <label>Your product</label>
+            <div class="rv"><a href="${ourUrl}" target="_blank" rel="noopener">${r.sku_id} <i class="ti ti-external-link" style="font-size:9px"></i></a></div>
+            <div style="font-size:10px;color:var(--text2);margin:2px 0">${sku.short_title || ''}</div>
+            <div style="font-weight:600">£${sku.price_ex_vat ? parseFloat(sku.price_ex_vat).toFixed(2) : '—'} ${vatPill('ex')}</div>
+          </div>
+          <div class="rev-side">
+            <label>${comp.name || 'Competitor'} — matched product</label>
+            <div class="rv">${r.competitor_url ? `<a href="${r.competitor_url}" target="_blank" rel="noopener">${comp.name} listing <i class="ti ti-external-link" style="font-size:9px"></i></a>` : 'No URL'}</div>
+            <div style="font-size:10px;color:var(--text2);margin:2px 0">${r.competitor_title || ''}</div>
+            ${vatPill(comp.vat_status || 'unknown')}
+          </div>
+        </div>
+        ${r.notes ? `<div class="rev-reason"><i class="ti ti-alert-circle" style="font-size:11px;margin-right:4px"></i>${r.notes}</div>` : ''}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <button class="btn sm prim" onclick="reviewDecision(${r.id},'approve',this)"><i class="ti ti-check"></i> Approve match</button>
+          <button class="btn sm danger" onclick="reviewDecision(${r.id},'reject',this)"><i class="ti ti-x"></i> Reject</button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    $('review-list').innerHTML = `<div style="color:var(--red);padding:8px">${e.message}</div>`;
+  }
+}
+
+async function reviewDecision(matchId, decision, btn) {
+  btn.disabled = true;
+  try {
+    await fetch(API + `/api/review/${matchId}`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({decision}),
+    });
+    const row = $(`rev-${matchId}`);
+    if (row) { row.style.opacity = '.4'; btn.textContent = decision === 'approve' ? '✓ Approved' : 'Rejected'; }
+    loadDashboard();
+  } catch (e) { btn.disabled = false; alert(e.message); }
+}
+
+// ── Competitors ───────────────────────────────────────────────────────────────
+async function loadCompetitors() {
+  try {
+    const d = await api('/api/competitors');
+    const comps = d.data || [];
+    const ex  = comps.filter(c => c.vat_status === 'ex').length;
+    const inc = comps.filter(c => c.vat_status === 'inc').length;
+    const unk = comps.filter(c => c.vat_status === 'unknown').length;
+    $('vat-summary').innerHTML = `<span class="vat vat-ex">Ex-VAT: ${ex}</span><span class="vat vat-inc">Inc-VAT: ${inc}</span><span class="vat vat-unk">Unknown: ${unk}</span>`;
+
+    $('comp-grid').innerHTML = comps.map(c => `<div class="comp-card" onclick="editCompetitor(${c.id},'${c.name}','${c.vat_status}')">
+      <div class="cn">${c.name}</div>
+      <div class="cu">${c.domain}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <span style="font-size:10px;color:var(--text2)">${c.feed_url ? '✓ Feed' : 'Scrape'}</span>
+        ${vatPill(c.vat_status)}
+      </div>
+    </div>`).join('');
+  } catch (e) {
+    $('comp-grid').innerHTML = `<div style="color:var(--red)">${e.message}</div>`;
+  }
+}
+
+function editCompetitor(id, name, currentVat) {
+  const newVat = prompt(`Set VAT status for ${name}:\n\n  ex  — prices exclude VAT\n  inc — prices include VAT\n  unknown — not yet determined\n\nCurrent: ${currentVat}`, currentVat);
+  if (!newVat || newVat === currentVat) return;
+  if (!['ex','inc','unknown'].includes(newVat.trim().toLowerCase())) {
+    alert('Invalid value. Enter: ex, inc, or unknown'); return;
+  }
+  fetch(API + `/api/competitors/${id}`, {
+    method: 'PATCH',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({vat_status: newVat.trim().toLowerCase()}),
+  }).then(() => loadCompetitors());
+}
+
+// ── Run history ───────────────────────────────────────────────────────────────
+async function loadRuns() {
+  try {
+    const d = await api('/api/runs');
+    const rows = d.data || [];
+    if (!rows.length) { $('run-history').innerHTML = '<div style="color:var(--text2);padding:8px">No runs yet.</div>'; return; }
+    $('run-history').innerHTML = `<table style="width:100%;font-size:11px;border-collapse:collapse">
+      <thead><tr>
+        <th style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text2)">Date</th>
+        <th style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text2)">Trigger</th>
+        <th style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text2)">SKUs checked</th>
+        <th style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text2)">Succeeded</th>
+        <th style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text2)">OOS flagged</th>
+        <th style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text2)">Duration</th>
+        <th style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text2)">Status</th>
+      </tr></thead>
+      <tbody>${rows.map(r => {
+        const dur = r.completed_at ? Math.round((new Date(r.completed_at)-new Date(r.started_at))/60000) + 'm' : 'running';
+        const badge = r.status === 'complete' ? 'b-green' : r.status === 'running' ? 'b-blue' : 'b-amber';
+        return `<tr>
+          <td style="padding:5px 8px;border-bottom:1px solid var(--border)">${ts(r.started_at)}</td>
+          <td style="padding:5px 8px;border-bottom:1px solid var(--border)">${r.trigger}</td>
+          <td style="padding:5px 8px;border-bottom:1px solid var(--border)">${r.skus_attempted}</td>
+          <td style="padding:5px 8px;border-bottom:1px solid var(--border)">${r.skus_succeeded}</td>
+          <td style="padding:5px 8px;border-bottom:1px solid var(--border)">${r.oos_flagged}</td>
+          <td style="padding:5px 8px;border-bottom:1px solid var(--border)">${dur}</td>
+          <td style="padding:5px 8px;border-bottom:1px solid var(--border)"><span class="badge ${badge}">${r.status}</span></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+  } catch (e) { $('run-history').innerHTML = `<div style="color:var(--red)">${e.message}</div>`; }
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+loadDashboard();
+
+// Auto-refresh dashboard every 5 minutes
+setInterval(loadDashboard, 5 * 60 * 1000);
+
+// Load SKUs when panel first visited
+document.querySelector('[onclick*="skus"]').addEventListener('click', () => {
+  if (!$('sku-tbody').querySelector('tr td:not([colspan])')) loadSKUs();
+}, {once: false});
+</script>
+</body>
+</html>
