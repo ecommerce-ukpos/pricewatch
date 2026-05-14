@@ -3,18 +3,15 @@ scraper/scraper.py
 ──────────────────
 Nightly price comparison scraper for PriceWatch Pro.
 
-Strategy (in order of preference per competitor):
-  1. Discovered Google Shopping feed / sitemap XML
-  2. Google Shopping search (short_title + dimension tokens)
-  3. Playwright direct page scrape (fallback)
-
 Environment variables:
     SUPABASE_URL
     SUPABASE_SERVICE_KEY
     SCRAPER_WORKERS          (default: 2)
     SCRAPER_PAGE_TIMEOUT_MS  (default: 30000)
-    SCRAPER_DELAY_MIN        (default: 8)   — min seconds between requests per worker
-    SCRAPER_DELAY_MAX        (default: 15)  — max seconds between requests per worker
+    SCRAPER_DELAY_MIN        (default: 8)
+    SCRAPER_DELAY_MAX        (default: 15)
+    SCRAPER_SKU_LIMIT        (default: 250)
+    SCRAPER_COMPETITOR_LIMIT (default: 23)
     LOG_LEVEL                (default: INFO)
 """
 
@@ -37,12 +34,14 @@ logging.basicConfig(
 )
 log = logging.getLogger("pricewatch")
 
-SUPABASE_URL  = os.environ["SUPABASE_URL"]
-SUPABASE_KEY  = os.environ["SUPABASE_SERVICE_KEY"]
-WORKERS       = int(os.getenv("SCRAPER_WORKERS", "2"))
-TIMEOUT_MS    = int(os.getenv("SCRAPER_PAGE_TIMEOUT_MS", "30000"))
-DELAY_MIN     = float(os.getenv("SCRAPER_DELAY_MIN", "8"))
-DELAY_MAX     = float(os.getenv("SCRAPER_DELAY_MAX", "15"))
+SUPABASE_URL       = os.environ["SUPABASE_URL"]
+SUPABASE_KEY       = os.environ["SUPABASE_SERVICE_KEY"]
+WORKERS            = int(os.getenv("SCRAPER_WORKERS", "2"))
+TIMEOUT_MS         = int(os.getenv("SCRAPER_PAGE_TIMEOUT_MS", "30000"))
+DELAY_MIN          = float(os.getenv("SCRAPER_DELAY_MIN", "8"))
+DELAY_MAX          = float(os.getenv("SCRAPER_DELAY_MAX", "15"))
+SKU_LIMIT          = int(os.getenv("SCRAPER_SKU_LIMIT", "250"))
+COMPETITOR_LIMIT   = int(os.getenv("SCRAPER_COMPETITOR_LIMIT", "23"))
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -109,17 +108,6 @@ def detect_oos(page_text: str) -> bool:
 def parse_price(text: str) -> Optional[float]:
     m = re.search(r"£?\s*([\d,]+\.?\d*)", text.replace(",", ""))
     return float(m.group(1)) if m else None
-
-def build_search_query(sku: dict) -> str:
-    title = sku["short_title"]
-    dims  = re.findall(r"\b(?:A\d|[0-9]+(?:\.[0-9]+)?(?:cm|mm|m)|[0-9]+x[0-9]+)\b", title, re.I)
-    qty   = f"x{sku['unit_qty']}" if sku.get("unit_qty") else ""
-    query = title
-    if dims:
-        query = f"{title} {' '.join(dims)}"
-    if qty and qty not in query:
-        query = f"{query} {qty}"
-    return query.strip()
 
 def diff_pct(our_price: float, their_price: float) -> float:
     if our_price == 0:
@@ -295,39 +283,51 @@ class PriceScraper:
     async def write_snapshot(self, snapshot: dict):
         self.sb.table("price_snapshots").insert(snapshot).execute()
 
-    async def upsert_match(self, snapshot: dict, sku: dict, competitor: dict):
+    async def flush_matches_for_sku(self, sku: dict, snapshots: list[dict], competitors: list[dict]):
         """
-        Upsert into competitor_matches whenever we get a valid price back.
-          confidence >= 80 → matched  (auto-approved, used in dashboard)
-          confidence < 80  → review   (flagged for human review queue)
-        Only runs when a price was successfully scraped.
+        Called once all 23 competitor snapshots for a single SKU are complete.
+        Upserts a competitor_matches row for every snapshot that returned a price.
         """
-        if not snapshot.get("competitor_price"):
-            return
-        if not snapshot.get("competitor_url"):
-            return
+        comp_map = {c["id"]: c for c in competitors}
+        rows_to_upsert = []
 
-        confidence   = snapshot.get("confidence") or 0
-        match_status = "matched" if confidence >= 80 else "review"
+        for snapshot in snapshots:
+            if not snapshot.get("competitor_price"):
+                continue
+            if not snapshot.get("competitor_url"):
+                continue
 
-        self.sb.table("competitor_matches").upsert(
-            {
+            confidence   = snapshot.get("confidence") or 0
+            match_status = "matched" if confidence >= 80 else "review"
+            comp         = comp_map.get(snapshot["competitor_id"], {})
+
+            rows_to_upsert.append({
                 "sku_id":           sku["sku_id"],
-                "competitor_id":    competitor["id"],
+                "competitor_id":    snapshot["competitor_id"],
                 "competitor_url":   snapshot["competitor_url"],
                 "competitor_title": None,
                 "match_status":     match_status,
                 "confidence":       confidence,
                 "match_method":     "scrape",
                 "updated_at":       datetime.now(timezone.utc).isoformat(),
-            },
-            on_conflict="sku_id,competitor_id",
-        ).execute()
+            })
 
-        log.info(
-            f"Match upserted: {sku['sku_id']} × {competitor['domain']} "
-            f"— {match_status} (conf {confidence}%)"
-        )
+            log.info(
+                f"  Match queued: {sku['sku_id']} × {comp.get('domain','?')} "
+                f"— {match_status} (conf {confidence}%)"
+            )
+
+        if rows_to_upsert:
+            self.sb.table("competitor_matches").upsert(
+                rows_to_upsert,
+                on_conflict="sku_id,competitor_id",
+            ).execute()
+            log.info(
+                f"Flushed {len(rows_to_upsert)} matches for SKU {sku['sku_id']} "
+                f"({len(snapshots) - len(rows_to_upsert)} had no price)"
+            )
+        else:
+            log.info(f"No matches to flush for SKU {sku['sku_id']} — no prices found")
 
     async def create_alerts(self, snapshot: dict, sku: dict, competitor: dict):
         alerts    = []
@@ -395,15 +395,34 @@ async def run_scraper(trigger: str = "scheduled"):
         "started_at": datetime.now(timezone.utc).isoformat(),
     }).execute()
 
-    log.info(f"Starting sync run {run_id} (workers={WORKERS}, delay={DELAY_MIN}–{DELAY_MAX}s)")
+    log.info(
+        f"Starting sync run {run_id} "
+        f"(workers={WORKERS}, delay={DELAY_MIN}–{DELAY_MAX}s, "
+        f"sku_limit={SKU_LIMIT}, competitor_limit={COMPETITOR_LIMIT})"
+    )
 
-    skus_result  = sb.table("skus").select("*").eq("active", True).execute()
-    comps_result = sb.table("competitors").select("*").eq("active", True).execute()
-    skus         = skus_result.data
-    competitors  = comps_result.data
+    # Load first N SKUs and first N competitors only
+    skus_result  = (
+        sb.table("skus")
+        .select("*")
+        .eq("active", True)
+        .limit(SKU_LIMIT)
+        .execute()
+    )
+    comps_result = (
+        sb.table("competitors")
+        .select("*")
+        .eq("active", True)
+        .order("id")
+        .limit(COMPETITOR_LIMIT)
+        .execute()
+    )
+    skus        = skus_result.data
+    competitors = comps_result.data
 
     log.info(f"Loaded {len(skus)} SKUs and {len(competitors)} competitors")
 
+    # Load all existing matches into a lookup map
     matches_result = sb.table("competitor_matches").select("*").execute()
     match_map      = {
         (m["sku_id"], m["competitor_id"]): m
@@ -413,43 +432,55 @@ async def run_scraper(trigger: str = "scheduled"):
     scraper = PriceScraper(sb, run_id)
     stats   = {"attempted": 0, "succeeded": 0, "failed": 0, "oos": 0}
 
-    work = [
-        (sku, comp, match_map.get((sku["sku_id"], comp["id"])))
-        for sku in skus
-        for comp in competitors
-    ]
+    # ── Per-SKU semaphore: process one SKU at a time across all competitors ──
+    # This ensures flush_matches_for_sku fires cleanly after all 23 competitor
+    # checks for that SKU are done, before moving to the next SKU.
+    sku_semaphore = asyncio.Semaphore(WORKERS)
 
-    semaphore = asyncio.Semaphore(WORKERS)
+    async def process_sku(sku: dict):
+        """Scrape all competitors for one SKU, then flush matches in one batch."""
+        async with sku_semaphore:
+            log.info(f"Processing SKU {sku['sku_id']} — {sku['short_title']}")
+            sku_snapshots = []
 
-    async def process_one(sku, competitor, match):
-        async with semaphore:
-            stats["attempted"] += 1
-            try:
-                snapshot = await scraper.process_sku_competitor(browser, sku, competitor, match)
-                await scraper.write_snapshot(snapshot)
-                await scraper.upsert_match(snapshot, sku, competitor)
-                await scraper.create_alerts(snapshot, sku, competitor)
+            for competitor in competitors:
+                match    = match_map.get((sku["sku_id"], competitor["id"]))
+                stats["attempted"] += 1
 
-                if snapshot["availability"] == "error":
+                try:
+                    snapshot = await scraper.process_sku_competitor(
+                        browser, sku, competitor, match
+                    )
+                    await scraper.write_snapshot(snapshot)
+                    await scraper.create_alerts(snapshot, sku, competitor)
+                    sku_snapshots.append(snapshot)
+
+                    if snapshot["availability"] == "error":
+                        stats["failed"] += 1
+                    else:
+                        stats["succeeded"] += 1
+                        if snapshot["availability"] == "out_of_stock":
+                            stats["oos"] += 1
+
+                except Exception as e:
                     stats["failed"] += 1
-                else:
-                    stats["succeeded"] += 1
-                    if snapshot["availability"] == "out_of_stock":
-                        stats["oos"] += 1
+                    log.error(
+                        f"Error processing {sku['sku_id']} vs {competitor['domain']}: {e}"
+                    )
 
-            except Exception as e:
-                stats["failed"] += 1
-                log.error(f"Error processing {sku['sku_id']} vs {competitor['domain']}: {e}")
+                finally:
+                    # Overnight pacing between each competitor check
+                    delay = random.uniform(DELAY_MIN, DELAY_MAX)
+                    log.debug(f"Sleeping {delay:.1f}s")
+                    await asyncio.sleep(delay)
 
-            finally:
-                # Overnight pacing — random delay between each request per worker
-                delay = random.uniform(DELAY_MIN, DELAY_MAX)
-                log.debug(f"Sleeping {delay:.1f}s before next request")
-                await asyncio.sleep(delay)
+            # ── All 23 competitors done for this SKU — flush matches now ──
+            await scraper.flush_matches_for_sku(sku, sku_snapshots, competitors)
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True)
-        tasks   = [process_one(sku, comp, match) for sku, comp, match in work]
+        # Process SKUs with limited concurrency
+        tasks   = [process_sku(sku) for sku in skus]
         await asyncio.gather(*tasks)
         await browser.close()
 
