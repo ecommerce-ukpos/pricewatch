@@ -1,12 +1,10 @@
 {
   "version": 2,
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/main.py" }
+  "routes": [
+    { "src": "/api/(.*)", "dest": "/api/$1.py" },
+    { "src": "/(.*)", "dest": "/index.html" }
   ],
   "crons": [
-    {
-      "path": "/api/cron/nightly",
-      "schedule": "0 1 * * *"
-    }
+    { "path": "/api/cron/nightly", "schedule": "0 1 * * *" }
   ]
 }
