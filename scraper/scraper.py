@@ -222,122 +222,157 @@ class PriceScraper:
         return ua
 
     async def new_context(self, browser: Browser) -> BrowserContext:
-        return await browser.new_context(
+        ctx = await browser.new_context(
             user_agent=self.next_ua(),
             viewport={"width": 1280, "height": 800},
             locale="en-GB",
-            extra_http_headers={"Accept-Language": "en-GB,en;q=0.9"},
+            extra_http_headers={
+                "Accept-Language": "en-GB,en;q=0.9",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Upgrade-Insecure-Requests": "1",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+            },
         )
+        # Hide webdriver flag — key stealth measure
+        await ctx.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-GB', 'en'] });
+            window.chrome = { runtime: {} };
+        """)
+        return ctx
 
-    # ── Strategy 1: Google Shopping ───────────────────────────────────────────
+    # ── Strategy 1: Bing Shopping (primary) + Google Shopping (secondary) ──────
 
     async def search_google_shopping(
         self, context: BrowserContext, sku: dict, competitor_domain: str
     ) -> Optional[dict]:
         """
-        Search Google Shopping for the product and find the competitor's listing.
+        Search Bing Shopping (primary) then Google Shopping (fallback) for the product.
         Returns dict with url, price, title, vat_hint if found — or None.
-
-        Google Shopping URL format:
-          https://www.google.com/search?tbm=shop&q=QUERY&gl=gb&hl=en-GB
+        Uses product name only — never the SKU ID.
         """
-        query      = build_search_query(sku)
-        search_url = (
-            f"https://www.google.com/search?tbm=shop"
-            f"&q={quote_plus(query)}"
-            f"&gl=gb&hl=en-GB"
-            f"&num=20"
-        )
-        clean_dom  = competitor_domain.lstrip("www.")
-        page       = await context.new_page()
+        query     = build_search_query(sku)
+        clean_dom = competitor_domain.lstrip("www.")
 
-        try:
-            log.debug(f"  GShop: '{query}' looking for {clean_dom}")
-            await page.goto(search_url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
-            await page.wait_for_timeout(2000)
+        shopping_engines = [
+            {
+                "name": "Bing Shopping",
+                "url":  f"https://www.bing.com/shop?q={quote_plus(query)}&mkt=en-GB",
+            },
+            {
+                "name": "Google Shopping",
+                "url":  f"https://www.google.com/search?tbm=shop&q={quote_plus(query)}&gl=gb&hl=en-GB&num=20",
+            },
+        ]
 
-            body_text = await page.inner_text("body")
+        for engine in shopping_engines:
+            search_url  = engine["url"]
+            engine_name = engine["name"]
+            page        = await context.new_page()
 
-            # Check for CAPTCHA
-            if any(x in body_text.lower() for x in ["captcha", "unusual traffic", "i'm not a robot"]):
-                log.warning(f"  Google Shopping CAPTCHA hit for '{query}'")
+            try:
+                log.debug(f"  {engine_name}: '{query}' looking for {clean_dom}")
+                await page.goto(search_url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
+                await page.wait_for_timeout(random.uniform(2000, 3500))
+
+                body_text = await page.inner_text("body")
+
+                # CAPTCHA / bot detection check
+                if any(x in body_text.lower() for x in [
+                    "captcha", "unusual traffic", "i'm not a robot", "prove you're human"
+                ]):
+                    log.warning(f"  {engine_name} CAPTCHA — trying next engine")
+                    await page.close()
+                    continue
+
+                # Extract product cards — selectors for both Bing and Google Shopping
+                results = await page.evaluate(r"""
+                    () => {
+                        const items = [];
+                        const selectors = [
+                            '.br-item', '.br-pdItem', '.pa_item', '.rl_product',
+                            '.sh-dgr__content', '[data-docid]', '.KZmu8e', '.Lq5OHe',
+                            'li[data-idx]', '.product-card',
+                        ];
+                        let cards = [];
+                        for (const sel of selectors) {
+                            cards = document.querySelectorAll(sel);
+                            if (cards.length > 2) break;
+                        }
+                        if (cards.length === 0) {
+                            const seen = new Set();
+                            document.querySelectorAll('a[href]').forEach(a => {
+                                const block = a.closest('div,li,article');
+                                const text  = block?.innerText || '';
+                                if (/£[\s\d]/.test(text) && !seen.has(text.slice(0,40))) {
+                                    seen.add(text.slice(0,40));
+                                    if (block) cards = [...cards, block];
+                                }
+                            });
+                        }
+                        cards.forEach(card => {
+                            if (!card) return;
+                            const text  = card.innerText || '';
+                            const links = Array.from(card.querySelectorAll('a[href]'))
+                                              .map(a => a.href)
+                                              .filter(h => h.startsWith('http'));
+                            const title = (
+                                card.querySelector('h3,h4,h2,[role=heading],.title,.name')?.innerText || ''
+                            ).trim();
+                            const priceMatch = text.match(/£\s?([\d,]+\.?\d*)/);
+                            const price = priceMatch ? parseFloat(priceMatch[1].replace(',','')) : null;
+                            if (links.length > 0 || price) {
+                                items.push({ text, links, title, price });
+                            }
+                        });
+                        return items;
+                    }
+                """)
+
                 await page.close()
-                return None
 
-            # Extract all shopping result blocks
-            # Each result is typically in a div with class containing 'sh-dgr__content'
-            # or similar — use JS to extract structured data
-            results = await page.evaluate("""
-                () => {
-                    const items = [];
-                    // Try multiple Google Shopping result selectors (layout changes frequently)
-                    const selectors = [
-                        '.sh-dgr__content',
-                        '.sh-pr__product-results .g',
-                        '[data-docid]',
-                        '.KZmu8e',
-                        '.Lq5OHe',
-                    ];
-                    let cards = [];
-                    for (const sel of selectors) {
-                        cards = document.querySelectorAll(sel);
-                        if (cards.length > 0) break;
-                    }
-                    cards.forEach(card => {
-                        const text  = card.innerText || '';
-                        const links = Array.from(card.querySelectorAll('a[href]'))
-                                          .map(a => a.href);
-                        const title = card.querySelector('h3, h4, [role=heading]')?.innerText || '';
-                        // Price: look for £ patterns
-                        const priceMatch = text.match(/£\\s?([\\d,]+\\.?\\d*)/);
-                        const price = priceMatch ? parseFloat(priceMatch[1].replace(',','')) : null;
-                        items.push({ text, links, title, price });
-                    });
-                    return items;
-                }
-            """)
-
-            # Find the result that belongs to our target competitor
-            for result in results:
-                links = result.get("links", [])
-                title = result.get("title", "")
-                price = result.get("price")
-
-                # Check if any link belongs to our competitor
-                comp_link = next(
-                    (l for l in links if clean_dom in l and "google" not in l),
-                    None
-                )
-
-                if not comp_link:
-                    # Also check the text for the domain name
-                    if clean_dom not in result.get("text", "").lower():
-                        continue
-
-                # Score this result
-                conf = fuzzy_confidence(sku, title, comp_link or "")
-
-                if conf >= 40:   # minimum threshold to consider a Shopping result valid
-                    log.debug(
-                        f"  GShop match: '{title[:50]}' "
-                        f"£{price} conf={conf}% url={comp_link}"
+                # Find the result that belongs to our target competitor
+                for result in results:
+                    links     = result.get("links", [])
+                    title     = result.get("title", "")
+                    price     = result.get("price")
+                    comp_link = next(
+                        (l for l in links if clean_dom in l and "google" not in l and "bing" not in l),
+                        None
                     )
-                    return {
-                        "url":       comp_link,
-                        "price":     price,
-                        "title":     title,
-                        "confidence": conf,
-                        "vat_hint":  detect_vat(result.get("text", "")),
-                    }
+                    if not comp_link:
+                        if clean_dom not in result.get("text", "").lower():
+                            continue
 
-            log.debug(f"  GShop: no result for {clean_dom} in Shopping results")
-            return None
+                    conf = fuzzy_confidence(sku, title, comp_link or "")
+                    if conf >= 40:
+                        log.debug(
+                            f"  {engine_name} match: '{title[:50]}' "
+                            f"£{price} conf={conf}% url={comp_link}"
+                        )
+                        return {
+                            "url":        comp_link,
+                            "price":      price,
+                            "title":      title,
+                            "confidence": conf,
+                            "vat_hint":   detect_vat(result.get("text", "")),
+                        }
 
-        except Exception as e:
-            log.debug(f"  GShop error for {clean_dom}: {e}")
-            return None
-        finally:
-            await page.close()
+                log.debug(f"  {engine_name}: no matching result for {clean_dom}")
+
+            except Exception as e:
+                log.debug(f"  {engine_name} error for {clean_dom}: {e}")
+                try:
+                    await page.close()
+                except Exception:
+                    pass
+
+        log.debug(f"  Shopping: no result for {clean_dom} via any engine")
+        return None
 
     # ── Strategy 2: Google/Bing site search ───────────────────────────────────
 
@@ -763,7 +798,16 @@ async def run_scraper(trigger: str = "scheduled"):
             await scraper.flush_matches_for_sku(sku, sku_snapshots, comps)
 
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=True)
+        browser = await pw.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-dev-shm-usage",
+                "--disable-infobars",
+                "--window-size=1280,800",
+            ],
+        )
         await asyncio.gather(*[process_sku(sku) for sku in skus])
         await browser.close()
 
