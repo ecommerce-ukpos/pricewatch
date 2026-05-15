@@ -340,7 +340,7 @@ tr.oos-row td{opacity:.65}
 
 <script>
 // ── Config — set this to your Vercel deployment URL ──────────────────────────
-const API = 'https://uaqakssusydpjzrcznhb.supabase.co/functions/v1/api';   // Same origin on Vercel
+const API = 'https://etagaoxrhgimywutzkqf.supabase.co/functions/v1/api';   // Same origin on Vercel
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -441,7 +441,7 @@ function go(name, el) {
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 async function loadDashboard() {
   try {
-    const d = await api('/api/dashboard');
+    const d = await api('/dashboard');
     const m = d.metrics;
 
     $('m-crit').textContent   = m.critical;
@@ -576,7 +576,7 @@ async function loadSKUs() {
   const vat   = $('fVat')?.value || '';
   const stock = $('fStock')?.value || '';
 
-  let url = `/api/skus?page=${skuPage}&limit=${skuLimit}`;
+  let url = `/skus?page=${skuPage}&limit=${skuLimit}`;
   if (q)     url += `&q=${encodeURIComponent(q)}`;
   if (diff)  url += `&diff=${diff}`;
   if (vat)   url += `&vat=${vat}`;
@@ -624,7 +624,7 @@ async function lookupSKU(skuId, btn) {
   btn.innerHTML = '<i class="ti ti-loader"></i>';
   btn.disabled = true;
   try {
-    await fetch(API + '/api/lookup', {
+    await fetch(API + '/lookup', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({sku_id: skuId}),
@@ -644,7 +644,7 @@ async function manualLookupAll() {
 // ── Review queue ──────────────────────────────────────────────────────────────
 async function loadReview() {
   try {
-    const d = await api('/api/review');
+    const d = await api('/review');
     const rows = d.data || [];
     if (!rows.length) {
       $('review-list').innerHTML = '<div style="text-align:center;color:var(--text2);padding:40px;font-size:12px">No items in review queue</div>';
@@ -688,7 +688,7 @@ async function loadReview() {
 async function reviewDecision(matchId, decision, btn) {
   btn.disabled = true;
   try {
-    await fetch(API + `/api/review/${matchId}`, {
+    await fetch(API + `/review/${matchId}`, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({decision}),
@@ -702,7 +702,7 @@ async function reviewDecision(matchId, decision, btn) {
 // ── Competitors ───────────────────────────────────────────────────────────────
 async function loadCompetitors() {
   try {
-    const d = await api('/api/competitors');
+    const d = await api('/competitors');
     const comps = d.data || [];
     const ex  = comps.filter(c => c.vat_status === 'ex').length;
     const inc = comps.filter(c => c.vat_status === 'inc').length;
@@ -728,7 +728,7 @@ function editCompetitor(id, name, currentVat) {
   if (!['ex','inc','unknown'].includes(newVat.trim().toLowerCase())) {
     alert('Invalid value. Enter: ex, inc, or unknown'); return;
   }
-  fetch(API + `/api/competitors/${id}`, {
+  fetch(API + `/competitors/${id}`, {
     method: 'PATCH',
     headers: {'Content-Type':'application/json'},
     body: JSON.stringify({vat_status: newVat.trim().toLowerCase()}),
@@ -738,7 +738,7 @@ function editCompetitor(id, name, currentVat) {
 // ── Run history ───────────────────────────────────────────────────────────────
 async function loadRuns() {
   try {
-    const d = await api('/api/runs');
+    const d = await api('/runs');
     const rows = d.data || [];
     if (!rows.length) { $('run-history').innerHTML = '<div style="color:var(--text2);padding:8px">No runs yet.</div>'; return; }
     $('run-history').innerHTML = `<table style="width:100%;font-size:11px;border-collapse:collapse">
