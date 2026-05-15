@@ -451,8 +451,8 @@ async function loadDashboard() {
     $('m-review').textContent = m.review;
 
     const skuCount = d.sku_count || 0;
-    $('nav-sub').textContent = `UKPOS · ${skuCount.toLocaleString()} SKUs · 23 competitors`;
-
+    $('nav-sub').textContent = `UKPOS · ${(d.sku_count || 0).toLocaleString()} SKUs · ${d.competitor_count || 23} competitors`;
+    
     if (m.review > 0) {
       $('review-badge').textContent = m.review;
       $('review-badge').style.display = '';
@@ -554,7 +554,7 @@ function buildDistChart(m) {
     data: {
       labels: ["We're cheapest","±2% parity","Up to 5%\nmore exp.","5–10%\nmore exp.",">10%\nmore exp.","OOS flagged"],
       datasets: [{
-        data: [m.cheapest || 0, 180, 146, m.warning || 0, m.critical || 0, m.oos || 0],
+        data: [m.cheapest || 0, m.parity || 0, m.slight || 0, m.warning || 0, m.critical || 0, m.oos || 0],
         backgroundColor: ['#639922','#888780','#BA7517','#E24B4A','#A32D2D','#B4B2A9'],
         borderRadius: 3, borderSkipped: false
       }]
