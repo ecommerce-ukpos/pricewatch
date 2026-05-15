@@ -450,7 +450,8 @@ async function loadDashboard() {
     $('m-oos').textContent    = m.oos;
     $('m-review').textContent = m.review;
 
-    $('nav-sub').textContent = `UKPOS · 500 SKUs · 23 competitors`;
+    const skuCount = d.sku_count || 0;
+    $('nav-sub').textContent = `UKPOS · ${skuCount.toLocaleString()} SKUs · 23 competitors`;
 
     if (m.review > 0) {
       $('review-badge').textContent = m.review;
