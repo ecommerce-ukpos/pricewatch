@@ -1,34 +1,33 @@
 name: Run scraper
-
 on:
   schedule:
     - cron: '0 2 * * *'
   workflow_dispatch:
-
+    inputs:
+      scraper_skus:
+        description: 'Comma-separated SKU IDs to scrape (leave blank for all)'
+        required: false
+        default: ''
 jobs:
   scrape:
     runs-on: ubuntu-22.04
     timeout-minutes: 180
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install dependencies
         run: pip install -r requirements.txt
-
       - name: Install Playwright browsers
         run: |
           pip install playwright
           python -m playwright install chromium
-
       - name: Run scraper
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SCRAPER_SKUS: ${{ github.event.inputs.scraper_skus }}
         run: python scraper/scraper.py
