@@ -3,13 +3,17 @@ scraper/scraper.py
 ──────────────────
 Nightly price comparison scraper for PriceWatch Pro.
 
-Flow per SKU × competitor:
-  1. Check competitor_matches for an existing confirmed URL
-  2. If none, search DuckDuckGo: site:competitor.com "short_title"
-  3. Fetch the best result URL and extract price + VAT + OOS
-  4. Score match confidence (title similarity + dimensions + qty)
-  5. Write price_snapshot
-  6. After all 23 competitors done for a SKU, flush competitor_matches in one batch
+Matching strategy (in priority order per SKU × competitor):
+  1. Existing confirmed URL in competitor_matches → scrape directly
+  2. Google Shopping search → find competitor's listing, extract price + URL
+  3. Google Web search (site:competitor.com product name) → scrape that page
+  4. Bing Web search fallback if Google blocks
+
+Google Shopping is the primary discovery mechanism because:
+  - Returns structured price + title + merchant data without visiting the page
+  - Surfaces the exact product the competitor is selling for a given search term
+  - Price is often extractable directly from the SERP (no page visit needed)
+  - Naturally handles synonyms ("snap frame" / "click frame" / "poster frame")
 
 Environment variables:
     SUPABASE_URL
@@ -103,81 +107,42 @@ OOS_PATTERNS = [
     r"not\s+available",
 ]
 
-# ── Stop words for title matching ──────────────────────────────────────────────
 STOP_WORDS = {
     "the","a","an","and","of","for","with","in","to","self","adhesive",
     "pack","set","lot","box","bag","new","uk","free","delivery","shipping",
+    "holders","holder","signs","sign","displays","display",
 }
 
 
-def detect_vat(page_text: str) -> str:
-    text = page_text.lower()
-    for pat in VAT_INC_PATTERNS:
-        if re.search(pat, text):
-            return "inc"
-    for pat in VAT_EX_PATTERNS:
-        if re.search(pat, text):
-            return "ex"
-    return "unknown"
-
-def detect_oos(page_text: str) -> bool:
-    return any(re.search(p, page_text.lower()) for p in OOS_PATTERNS)
-
-def parse_price(text: str) -> Optional[float]:
-    """Extract the first plausible GBP price from a string."""
-    text = text.replace(",", "").replace("£", "")
-    m = re.search(r"\b(\d{1,5}\.\d{2})\b", text)
-    if m:
-        val = float(m.group(1))
-        if 0.01 < val < 99999:
-            return val
-    return None
-
-def diff_pct(our_price: float, their_price: float) -> float:
-    if our_price == 0:
-        return 0.0
-    return round(((their_price - our_price) / our_price) * 100, 2)
-
-def normalise_price(price: float, vat_status: str) -> float:
-    """Convert inc-VAT price to ex-VAT for fair comparison."""
-    if vat_status == "inc":
-        return round(price / 1.2, 2)
-    return price
+# ── Query building ─────────────────────────────────────────────────────────────
 
 def build_search_query(sku: dict) -> str:
     """
-    Build a tight search query from the SKU title.
-    Strips pack quantities and keeps key descriptive tokens + dimensions.
-    Example: 'A2 Pavement Sign Double Sided Water Base' → '"A2 Pavement Sign" "Water Base"'
+    Build a natural-language search query from the SKU short title.
+    Never uses the SKU ID. Strips pack quantities, keeps everything else.
+
+    "Spring Hinge Sign Holders x 100"  → "Spring Hinge Sign Holders"
+    "A2 Pavement Sign Double Sided"    → "A2 Pavement Sign Double Sided"
+    "Snap Frame A1 Silver 25mm"        → "Snap Frame A1 Silver 25mm"
     """
     title = sku["short_title"]
+    clean = re.sub(r"\bx\s*\d+\b", "", title, flags=re.I)
+    clean = re.sub(r"\bpack\s+of\s+\d+\b", "", clean, flags=re.I)
+    clean = re.sub(r"\b\d+\s*pack\b", "", clean, flags=re.I)
+    clean = re.sub(r"\s+", " ", clean).strip().rstrip("-—–").strip()
+    return clean
 
-    # Extract dimension tokens — these must match
-    dims = re.findall(
-        r"\b(?:A[0-9]|[0-9]+(?:\.[0-9]+)?(?:cm|mm|m)|[0-9]+x[0-9]+mm?)\b",
-        title, re.I
-    )
 
-    # Strip qty tokens like "x 100", "Pack of 50"
-    clean = re.sub(r"\b(?:x\s*\d+|pack\s+of\s+\d+|\d+\s*pack)\b", "", title, flags=re.I)
-    clean = re.sub(r"\s+", " ", clean).strip()
-
-    # Build query: title tokens + required dimensions
-    if dims:
-        # Quote the cleaned title and append dimension requirement
-        query = f'"{clean}" {" ".join(dims)}'
-    else:
-        query = f'"{clean}"'
-
-    return query
+# ── Confidence scoring ─────────────────────────────────────────────────────────
 
 def fuzzy_confidence(sku: dict, comp_title: str, comp_url: str) -> int:
     """
-    Score 0-100. Weights:
-      - Token overlap with SKU short_title:  up to 40 pts
-      - Dimension match (A2, 5cm etc):       up to 30 pts
-      - Pack quantity match:                 up to 20 pts
-      - URL contains SKU-like terms:         up to 10 pts
+    Score 0-100 for how well a competitor listing matches our SKU.
+
+    Token overlap:      up to 40 pts
+    Dimension match:    up to 30 pts  (penalty for mismatch)
+    Pack qty match:     up to 20 pts  (penalty for mismatch)
+    URL keyword hits:   up to 10 pts
     """
     score = 0
     st    = sku["short_title"].lower()
@@ -188,38 +153,62 @@ def fuzzy_confidence(sku: dict, comp_title: str, comp_url: str) -> int:
     s_tok = set(re.findall(r"\b[a-z0-9]{2,}\b", st)) - STOP_WORDS
     c_tok = set(re.findall(r"\b[a-z0-9]{2,}\b", ct)) - STOP_WORDS
     if s_tok:
-        overlap = len(s_tok & c_tok) / len(s_tok)
-        score  += int(overlap * 40)
+        score += int((len(s_tok & c_tok) / len(s_tok)) * 40)
 
     # Dimension match
-    s_dims = set(re.findall(r"\b(?:a[0-9]|[0-9]+(?:\.[0-9]+)?(?:cm|mm)|[0-9]+x[0-9]+)\b", st, re.I))
-    c_dims = set(re.findall(r"\b(?:a[0-9]|[0-9]+(?:\.[0-9]+)?(?:cm|mm)|[0-9]+x[0-9]+)\b", ct, re.I))
-    u_dims = set(re.findall(r"\b(?:a[0-9]|[0-9]+(?:\.[0-9]+)?(?:cm|mm)|[0-9]+x[0-9]+)\b", cu, re.I))
-    all_comp_dims = c_dims | u_dims
-
+    dim_pat = r"\b(?:a[0-9]|[0-9]+(?:\.[0-9]+)?(?:cm|mm)|[0-9]+x[0-9]+(?:mm)?)\b"
+    s_dims  = set(re.findall(dim_pat, st, re.I))
+    c_dims  = set(re.findall(dim_pat, ct, re.I)) | set(re.findall(dim_pat, cu, re.I))
     if s_dims:
-        if s_dims == all_comp_dims:
-            score += 30
-        elif s_dims & all_comp_dims:
-            score += 15
-        else:
-            score -= 15   # dimension mismatch is a strong negative signal
+        if s_dims == c_dims:          score += 30
+        elif s_dims & c_dims:         score += 15
+        elif c_dims:                  score -= 15  # different size — wrong product
 
     # Pack quantity
     if sku.get("unit_qty"):
-        qty_str = str(sku["unit_qty"])
-        if re.search(r"\b" + qty_str + r"\b", ct) or re.search(r"\b" + qty_str + r"\b", cu):
+        qty = str(sku["unit_qty"])
+        if re.search(r"\b" + qty + r"\b", ct) or re.search(r"\b" + qty + r"\b", cu):
             score += 20
         else:
-            score -= 5    # pack qty mismatch also penalised
+            other = re.search(r"\b(x?\s*\d{2,4})\b", ct)
+            if other and other.group(0).strip("x ") != qty:
+                score -= 10
 
-    # URL keyword bonus
-    key_words = [w for w in re.findall(r"\b[a-z]{4,}\b", st) if w not in STOP_WORDS][:4]
-    url_hits  = sum(1 for w in key_words if w in cu)
-    score    += min(10, url_hits * 3)
+    # URL keyword hits
+    key_words = [w for w in re.findall(r"\b[a-z]{4,}\b", st) if w not in STOP_WORDS][:5]
+    score += min(10, sum(1 for w in key_words if w in cu) * 2)
 
     return max(0, min(100, score))
 
+
+# ── Detection helpers ─────────────────────────────────────────────────────────
+
+def detect_vat(text: str) -> str:
+    t = text.lower()
+    if any(re.search(p, t) for p in VAT_INC_PATTERNS): return "inc"
+    if any(re.search(p, t) for p in VAT_EX_PATTERNS):  return "ex"
+    return "unknown"
+
+def detect_oos(text: str) -> bool:
+    return any(re.search(p, text.lower()) for p in OOS_PATTERNS)
+
+def parse_price(text: str) -> Optional[float]:
+    t = text.replace(",", "").replace("£", "").strip()
+    m = re.search(r"\b(\d{1,5}\.\d{2})\b", t)
+    if m:
+        val = float(m.group(1))
+        if 0.01 < val < 99999:
+            return val
+    return None
+
+def diff_pct(our: float, their: float) -> float:
+    return round(((their - our) / our) * 100, 2) if our else 0.0
+
+def normalise_price(price: float, vat: str) -> float:
+    return round(price / 1.2, 2) if vat == "inc" else price
+
+
+# ── Scraper class ──────────────────────────────────────────────────────────────
 
 class PriceScraper:
     def __init__(self, sb: Client, run_id: uuid.UUID):
@@ -240,55 +229,184 @@ class PriceScraper:
             extra_http_headers={"Accept-Language": "en-GB,en;q=0.9"},
         )
 
-    # ── Step 1: Find the competitor product URL via search ─────────────────────
+    # ── Strategy 1: Google Shopping ───────────────────────────────────────────
 
-    async def find_competitor_url(
+    async def search_google_shopping(
         self, context: BrowserContext, sku: dict, competitor_domain: str
-    ) -> Optional[str]:
+    ) -> Optional[dict]:
         """
-        Search DuckDuckGo for the SKU on the competitor domain.
-        Returns the best matching product URL or None.
+        Search Google Shopping for the product and find the competitor's listing.
+        Returns dict with url, price, title, vat_hint if found — or None.
+
+        Google Shopping URL format:
+          https://www.google.com/search?tbm=shop&q=QUERY&gl=gb&hl=en-GB
         """
         query      = build_search_query(sku)
-        search_url = f"https://html.duckduckgo.com/html/?q=site:{competitor_domain}+{quote_plus(query)}"
+        search_url = (
+            f"https://www.google.com/search?tbm=shop"
+            f"&q={quote_plus(query)}"
+            f"&gl=gb&hl=en-GB"
+            f"&num=20"
+        )
+        clean_dom  = competitor_domain.lstrip("www.")
         page       = await context.new_page()
-        found_url  = None
 
         try:
+            log.debug(f"  GShop: '{query}' looking for {clean_dom}")
             await page.goto(search_url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
-            await page.wait_for_timeout(1000)
+            await page.wait_for_timeout(2000)
 
-            # Extract result links from DuckDuckGo HTML results
-            links = await page.locator("a.result__url, a.result__a, h2.result__title a").all()
+            body_text = await page.inner_text("body")
 
-            for link in links[:5]:
-                href = await link.get_attribute("href")
-                if not href:
-                    continue
-                # DuckDuckGo wraps URLs — unwrap if needed
-                if "duckduckgo.com" in href:
-                    m = re.search(r"[?&]uddg=([^&]+)", href)
-                    if m:
-                        from urllib.parse import unquote
-                        href = unquote(m.group(1))
-                # Only accept URLs from the target domain
-                clean_domain = competitor_domain.replace("www.", "")
-                if clean_domain in href and href.startswith("http"):
-                    # Prefer product pages over category/search pages
-                    if any(x in href for x in ["/product", "/p/", "/item", "/buy", "/shop"]):
-                        found_url = href
-                        break
-                    elif found_url is None:
-                        found_url = href
+            # Check for CAPTCHA
+            if any(x in body_text.lower() for x in ["captcha", "unusual traffic", "i'm not a robot"]):
+                log.warning(f"  Google Shopping CAPTCHA hit for '{query}'")
+                await page.close()
+                return None
+
+            # Extract all shopping result blocks
+            # Each result is typically in a div with class containing 'sh-dgr__content'
+            # or similar — use JS to extract structured data
+            results = await page.evaluate("""
+                () => {
+                    const items = [];
+                    // Try multiple Google Shopping result selectors (layout changes frequently)
+                    const selectors = [
+                        '.sh-dgr__content',
+                        '.sh-pr__product-results .g',
+                        '[data-docid]',
+                        '.KZmu8e',
+                        '.Lq5OHe',
+                    ];
+                    let cards = [];
+                    for (const sel of selectors) {
+                        cards = document.querySelectorAll(sel);
+                        if (cards.length > 0) break;
+                    }
+                    cards.forEach(card => {
+                        const text  = card.innerText || '';
+                        const links = Array.from(card.querySelectorAll('a[href]'))
+                                          .map(a => a.href);
+                        const title = card.querySelector('h3, h4, [role=heading]')?.innerText || '';
+                        // Price: look for £ patterns
+                        const priceMatch = text.match(/£\\s?([\\d,]+\\.?\\d*)/);
+                        const price = priceMatch ? parseFloat(priceMatch[1].replace(',','')) : null;
+                        items.push({ text, links, title, price });
+                    });
+                    return items;
+                }
+            """)
+
+            # Find the result that belongs to our target competitor
+            for result in results:
+                links = result.get("links", [])
+                title = result.get("title", "")
+                price = result.get("price")
+
+                # Check if any link belongs to our competitor
+                comp_link = next(
+                    (l for l in links if clean_dom in l and "google" not in l),
+                    None
+                )
+
+                if not comp_link:
+                    # Also check the text for the domain name
+                    if clean_dom not in result.get("text", "").lower():
+                        continue
+
+                # Score this result
+                conf = fuzzy_confidence(sku, title, comp_link or "")
+
+                if conf >= 40:   # minimum threshold to consider a Shopping result valid
+                    log.debug(
+                        f"  GShop match: '{title[:50]}' "
+                        f"£{price} conf={conf}% url={comp_link}"
+                    )
+                    return {
+                        "url":       comp_link,
+                        "price":     price,
+                        "title":     title,
+                        "confidence": conf,
+                        "vat_hint":  detect_vat(result.get("text", "")),
+                    }
+
+            log.debug(f"  GShop: no result for {clean_dom} in Shopping results")
+            return None
 
         except Exception as e:
-            log.debug(f"Search failed for {sku['sku_id']} on {competitor_domain}: {e}")
+            log.debug(f"  GShop error for {clean_dom}: {e}")
+            return None
         finally:
             await page.close()
 
-        return found_url
+    # ── Strategy 2: Google/Bing site search ───────────────────────────────────
 
-    # ── Step 2: Scrape the competitor product page ─────────────────────────────
+    async def search_web(
+        self, context: BrowserContext, sku: dict, competitor_domain: str
+    ) -> Optional[str]:
+        """
+        Fall back to a site: web search if Google Shopping didn't find the competitor.
+        Tries Google then Bing.
+        """
+        query      = build_search_query(sku)
+        clean_dom  = competitor_domain.lstrip("www.")
+
+        search_engines = [
+            f"https://www.google.com/search?q=site:{competitor_domain}+{quote_plus(query)}&num=10",
+            f"https://www.bing.com/search?q=site:{competitor_domain}+{quote_plus(query)}&count=10",
+        ]
+
+        for search_url in search_engines:
+            engine = "Google" if "google" in search_url else "Bing"
+            page   = await context.new_page()
+            try:
+                await page.goto(search_url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
+                await page.wait_for_timeout(2000)
+
+                body = (await page.inner_text("body")).lower()
+                if any(x in body for x in ["captcha", "unusual traffic", "blocked", "robot"]):
+                    log.debug(f"  {engine} blocked for {competitor_domain}")
+                    await page.close()
+                    continue
+
+                all_links = await page.evaluate("""
+                    () => Array.from(document.querySelectorAll('a[href]'))
+                        .map(a => a.href)
+                        .filter(h => h.startsWith('http'))
+                """)
+
+                domain_links = [
+                    u for u in all_links
+                    if clean_dom in u
+                    and "google" not in u
+                    and "bing.com" not in u
+                    and "cache" not in u
+                ]
+
+                # Prefer product-looking URLs
+                product_urls = [
+                    u for u in domain_links
+                    if any(x in u.lower() for x in [
+                        "/product", "/p/", "/item", "/buy", "/shop",
+                        ".html", "/signs", "/display", "/frame", "/holder",
+                        "/pavement", "/snap", "/poster", "/board", "/sign",
+                    ])
+                ]
+
+                best = product_urls[0] if product_urls else (domain_links[0] if domain_links else None)
+                await page.close()
+                if best:
+                    log.debug(f"  {engine} site search found: {best}")
+                    return best
+
+            except Exception as e:
+                log.debug(f"  {engine} error: {e}")
+                try: await page.close()
+                except Exception: pass
+
+        return None
+
+    # ── Strategy 3: Scrape a known product page ───────────────────────────────
 
     async def scrape_product_page(self, context: BrowserContext, url: str) -> dict:
         page   = await context.new_page()
@@ -298,21 +416,15 @@ class PriceScraper:
         }
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
-            await page.wait_for_timeout(2000)   # give JS time to render prices
+            await page.wait_for_timeout(2000)
 
-            full_text          = await page.inner_text("body")
-            result["vat"]      = detect_vat(full_text)
+            full_text              = await page.inner_text("body")
+            result["vat"]          = detect_vat(full_text)
             result["availability"] = "out_of_stock" if detect_oos(full_text) else "in_stock"
-            result["title"]    = (await page.title()).strip()
+            result["title"]        = (await page.title()).strip()
 
-            # JSON-LD structured data — most reliable
             price = await self._extract_jsonld_price(page)
-
-            # Meta tags — second most reliable
-            if not price:
-                price = await self._extract_meta_price(page)
-
-            # CSS selector fallback
+            if not price: price = await self._extract_meta_price(page)
             if not price:
                 for sel in PRICE_SELECTORS:
                     try:
@@ -320,8 +432,7 @@ class PriceScraper:
                         if await el.count() > 0:
                             raw   = await el.get_attribute("content") or await el.inner_text()
                             price = parse_price(raw)
-                            if price:
-                                break
+                            if price: break
                     except Exception:
                         continue
 
@@ -335,30 +446,22 @@ class PriceScraper:
         return result
 
     async def _extract_jsonld_price(self, page: Page) -> Optional[float]:
-        scripts = await page.locator('script[type="application/ld+json"]').all()
-        for script in scripts:
+        for script in await page.locator('script[type="application/ld+json"]').all():
             try:
                 data  = json.loads(await script.inner_text())
                 items = data if isinstance(data, list) else [data]
-                # Flatten @graph
                 flat  = []
                 for item in items:
-                    if "@graph" in item:
-                        flat.extend(item["@graph"])
-                    else:
-                        flat.append(item)
+                    flat.extend(item.get("@graph", [item]))
                 for item in flat:
-                    if item.get("@type") in ("Product",):
+                    if item.get("@type") == "Product":
                         offers = item.get("offers", {})
-                        if isinstance(offers, list):
-                            offers = offers[0]
+                        if isinstance(offers, list): offers = offers[0]
                         price = offers.get("price") or offers.get("lowPrice")
-                        if price:
-                            return float(str(price).replace(",", ""))
-                    if item.get("@type") in ("Offer",):
+                        if price: return float(str(price).replace(",", ""))
+                    if item.get("@type") == "Offer":
                         price = item.get("price")
-                        if price:
-                            return float(str(price).replace(",", ""))
+                        if price: return float(str(price).replace(",", ""))
             except Exception:
                 pass
         return None
@@ -369,13 +472,12 @@ class PriceScraper:
                 el = page.locator(f'meta[property="{attr}"]').first
                 if await el.count() > 0:
                     val = await el.get_attribute("content")
-                    if val:
-                        return parse_price(val)
+                    if val: return parse_price(val)
             except Exception:
                 pass
         return None
 
-    # ── Main per-SKU×competitor logic ──────────────────────────────────────────
+    # ── Main per-SKU × competitor logic ───────────────────────────────────────
 
     async def process_sku_competitor(
         self,
@@ -384,9 +486,6 @@ class PriceScraper:
         competitor: dict,
         existing_match: Optional[dict],
     ) -> dict:
-        """
-        Returns a snapshot dict. Also discovers the product URL if not already known.
-        """
         snapshot = {
             "sku_id":              sku["sku_id"],
             "competitor_id":       competitor["id"],
@@ -400,61 +499,99 @@ class PriceScraper:
             "diff_pct_normalised": None,
             "confidence":          None,
             "error_message":       None,
-            "_comp_title":         None,   # internal, stripped before DB insert
+            "_comp_title":         None,
         }
 
-        # Skip if previously manually rejected
         if existing_match and existing_match["match_status"] == "rejected":
             log.debug(f"Skipping {sku['sku_id']} × {competitor['domain']} — rejected")
             return snapshot
 
         ctx = await self.new_context(browser)
         try:
-            # ── Resolve URL ────────────────────────────────────────────────────
-            url = existing_match["competitor_url"] if existing_match else None
+            url        = existing_match.get("competitor_url") if existing_match else None
+            price      = None
+            comp_title = None
+            vat_hint   = "unknown"
+            confidence = 0
 
-            if not url:
-                log.debug(f"Searching for {sku['sku_id']} on {competitor['domain']}")
-                url = await self.find_competitor_url(ctx, sku, competitor["domain"])
+            # ── Path A: existing confirmed URL — scrape directly ───────────────
+            if url:
+                log.debug(f"  Using existing URL: {url}")
+                result     = await self.scrape_product_page(ctx, url)
+                price      = result["price"]
+                comp_title = result["title"]
+                vat_hint   = result["vat"]
+                confidence = fuzzy_confidence(sku, comp_title, url)
+                snapshot["availability"] = result["availability"]
+                snapshot["error_message"] = result["error"]
 
-                if not url:
-                    log.info(f"No URL found: {sku['sku_id']} × {competitor['domain']}")
-                    snapshot["error_message"] = "No URL found via search"
-                    return snapshot
+            else:
+                # ── Path B: Google Shopping ────────────────────────────────────
+                shopping = await self.search_google_shopping(ctx, sku, competitor["domain"])
 
+                if shopping and shopping.get("url"):
+                    url        = shopping["url"]
+                    comp_title = shopping.get("title", "")
+                    confidence = shopping.get("confidence", 0)
+
+                    if shopping.get("price"):
+                        # Price found directly from Shopping SERP — no page visit needed
+                        price    = shopping["price"]
+                        vat_hint = shopping.get("vat_hint", "unknown")
+                        snapshot["availability"] = "in_stock"
+                        log.debug(f"  GShop price extracted directly: £{price}")
+                    else:
+                        # Found URL but no price in SERP — visit the page
+                        result     = await self.scrape_product_page(ctx, url)
+                        price      = result["price"]
+                        vat_hint   = result["vat"]
+                        comp_title = result["title"] or comp_title
+                        confidence = max(confidence, fuzzy_confidence(sku, comp_title, url))
+                        snapshot["availability"]  = result["availability"]
+                        snapshot["error_message"] = result["error"]
+
+                else:
+                    # ── Path C: Site web search fallback ──────────────────────
+                    url = await self.search_web(ctx, sku, competitor["domain"])
+
+                    if url:
+                        result     = await self.scrape_product_page(ctx, url)
+                        price      = result["price"]
+                        comp_title = result["title"]
+                        vat_hint   = result["vat"]
+                        confidence = fuzzy_confidence(sku, comp_title, url)
+                        snapshot["availability"]  = result["availability"]
+                        snapshot["error_message"] = result["error"]
+                    else:
+                        snapshot["error_message"] = "No URL found via any method"
+                        return snapshot
+
+            # ── Populate snapshot ──────────────────────────────────────────────
             snapshot["competitor_url"] = url
+            snapshot["confidence"]     = confidence
+            snapshot["_comp_title"]    = comp_title
 
-            # ── Scrape ─────────────────────────────────────────────────────────
-            result = await self.scrape_product_page(ctx, url)
-            snapshot["availability"]   = result["availability"]
-            snapshot["error_message"]  = result["error"]
-            snapshot["_comp_title"]    = result["title"]
+            if vat_hint != "unknown":
+                snapshot["competitor_vat"] = vat_hint
 
-            if result["vat"] != "unknown":
-                snapshot["competitor_vat"] = result["vat"]
-
-            # ── Score confidence ───────────────────────────────────────────────
-            conf = fuzzy_confidence(sku, result["title"], url)
-            snapshot["confidence"] = conf
-
-            # ── Price & diff ───────────────────────────────────────────────────
-            if result["price"]:
+            if price:
                 our_price                       = float(sku["price_ex_vat"])
-                their_price_ex                  = normalise_price(result["price"], snapshot["competitor_vat"])
-                snapshot["competitor_price"]    = result["price"]
-                snapshot["diff_pct"]            = diff_pct(our_price, result["price"])
-                snapshot["diff_pct_normalised"] = diff_pct(our_price, their_price_ex)
+                their_ex                        = normalise_price(price, snapshot["competitor_vat"])
+                snapshot["competitor_price"]    = price
+                snapshot["diff_pct"]            = diff_pct(our_price, price)
+                snapshot["diff_pct_normalised"] = diff_pct(our_price, their_ex)
 
                 log.info(
-                    f"  {competitor['domain']:35s} £{result['price']:>7.2f} "
-                    f"({snapshot['competitor_vat']:7s}) "
+                    f"  ✓ {competitor['domain']:35s} "
+                    f"£{price:>7.2f} ({snapshot['competitor_vat']:7s}) "
                     f"diff {snapshot['diff_pct_normalised']:+.1f}%  "
-                    f"conf {conf}%  {result['title'][:50]}"
+                    f"conf {confidence}%"
                 )
             else:
                 log.info(
-                    f"  {competitor['domain']:35s} no price found  "
-                    f"conf {conf}%  {result['title'][:50]}"
+                    f"  ✗ {competitor['domain']:35s} "
+                    f"no price  conf {confidence}%  "
+                    f"'{(comp_title or '')[:50]}'"
                 )
 
         except Exception as e:
@@ -472,23 +609,23 @@ class PriceScraper:
         self.sb.table("price_snapshots").insert(row).execute()
 
     async def flush_matches_for_sku(
-        self, sku: dict, snapshots: list[dict], competitors: list[dict]
+        self, sku: dict, snapshots: list, competitors: list
     ):
         """
-        Batch-upsert competitor_matches after all 23 competitors processed for one SKU.
-        Only inserts rows where we found a URL (regardless of whether a price was found).
-        Confidence determines matched vs review status.
+        Batch-upsert competitor_matches after all competitors processed for one SKU.
+        Writes a row for every snapshot that has a URL.
+        confidence >= 80 → matched (auto-approved)
+        confidence < 80  → review (human review queue)
         """
         comp_map = {c["id"]: c for c in competitors}
         rows     = []
 
         for snap in snapshots:
             if not snap.get("competitor_url"):
-                continue   # no URL found — nothing to record
+                continue
 
             conf         = snap.get("confidence") or 0
             match_status = "matched" if conf >= 80 else "review"
-            comp         = comp_map.get(snap["competitor_id"], {})
 
             rows.append({
                 "sku_id":           sku["sku_id"],
@@ -497,7 +634,7 @@ class PriceScraper:
                 "competitor_title": snap.get("_comp_title"),
                 "match_status":     match_status,
                 "confidence":       conf,
-                "match_method":     "scrape",
+                "match_method":     "google_shopping" if snap.get("_source") == "shopping" else "scrape",
                 "updated_at":       datetime.now(timezone.utc).isoformat(),
             })
 
@@ -508,12 +645,12 @@ class PriceScraper:
             matched = sum(1 for r in rows if r["match_status"] == "matched")
             review  = sum(1 for r in rows if r["match_status"] == "review")
             log.info(
-                f"Flushed {len(rows)} matches for {sku['sku_id']} "
-                f"— {matched} matched, {review} review, "
-                f"{len(snapshots) - len(rows)} no URL"
+                f"  → Flushed {len(rows)} matches for {sku['sku_id']}: "
+                f"{matched} matched, {review} review, "
+                f"{len(snapshots)-len(rows)} no URL found"
             )
         else:
-            log.info(f"No matches to flush for {sku['sku_id']}")
+            log.info(f"  → No matches flushed for {sku['sku_id']}")
 
     async def create_alerts(self, snapshot: dict, sku: dict, competitor: dict):
         our_price = float(sku["price_ex_vat"])
@@ -522,38 +659,27 @@ class PriceScraper:
 
         if snapshot["availability"] == "out_of_stock":
             alerts.append({
-                "run_id":        self.run_id,
-                "sku_id":        sku["sku_id"],
-                "competitor_id": competitor["id"],
-                "alert_type":    "oos_competitor",
-                "message":       f"{competitor['name']} is out of stock for {sku['short_title']} — last known £{snapshot.get('competitor_price', '?')}",
-                "diff_pct":      diff,
-                "our_price":     our_price,
+                "run_id":        self.run_id, "sku_id": sku["sku_id"],
+                "competitor_id": competitor["id"], "alert_type": "oos_competitor",
+                "message":       f"{competitor['name']} is out of stock for {sku['short_title']} — last known £{snapshot.get('competitor_price','?')}",
+                "diff_pct":      diff, "our_price": our_price,
                 "their_price":   snapshot.get("competitor_price"),
             })
-        elif snapshot["availability"] == "unavailable":
-            pass   # no alert for simply not found
         elif diff is not None:
             if diff <= -10:
                 alerts.append({
-                    "run_id":        self.run_id,
-                    "sku_id":        sku["sku_id"],
-                    "competitor_id": competitor["id"],
-                    "alert_type":    "critical",
+                    "run_id":        self.run_id, "sku_id": sku["sku_id"],
+                    "competitor_id": competitor["id"], "alert_type": "critical",
                     "message":       f"{competitor['name']} is {abs(diff):.1f}% cheaper — £{snapshot['competitor_price']:.2f} vs your £{our_price:.2f}",
-                    "diff_pct":      diff,
-                    "our_price":     our_price,
+                    "diff_pct":      diff, "our_price": our_price,
                     "their_price":   snapshot.get("competitor_price"),
                 })
             elif diff <= -5:
                 alerts.append({
-                    "run_id":        self.run_id,
-                    "sku_id":        sku["sku_id"],
-                    "competitor_id": competitor["id"],
-                    "alert_type":    "warning",
+                    "run_id":        self.run_id, "sku_id": sku["sku_id"],
+                    "competitor_id": competitor["id"], "alert_type": "warning",
                     "message":       f"{competitor['name']} is {abs(diff):.1f}% cheaper — £{snapshot['competitor_price']:.2f} vs your £{our_price:.2f}",
-                    "diff_pct":      diff,
-                    "our_price":     our_price,
+                    "diff_pct":      diff, "our_price": our_price,
                     "their_price":   snapshot.get("competitor_price"),
                 })
 
@@ -581,17 +707,16 @@ async def run_scraper(trigger: str = "scheduled"):
     )
 
     skus  = (
-        sb.table("skus").select("*").eq("active", True)
-        .limit(SKU_LIMIT).execute().data
+        sb.table("skus").select("*")
+        .eq("active", True).limit(SKU_LIMIT).execute().data
     )
     comps = (
-        sb.table("competitors").select("*").eq("active", True)
-        .order("id").limit(COMPETITOR_LIMIT).execute().data
+        sb.table("competitors").select("*")
+        .eq("active", True).order("id").limit(COMPETITOR_LIMIT).execute().data
     )
 
     log.info(f"Loaded {len(skus)} SKUs, {len(comps)} competitors")
 
-    # Build match lookup: (sku_id, competitor_id) → match row
     match_map = {
         (m["sku_id"], m["competitor_id"]): m
         for m in sb.table("competitor_matches").select("*").execute().data
@@ -603,7 +728,12 @@ async def run_scraper(trigger: str = "scheduled"):
 
     async def process_sku(sku: dict):
         async with sem:
-            log.info(f"\n{'='*60}\nSKU {sku['sku_id']} — {sku['short_title']}\n{'='*60}")
+            log.info(
+                f"\n{'='*60}\n"
+                f"{sku['sku_id']} — {sku['short_title']}\n"
+                f"Search query: '{build_search_query(sku)}'\n"
+                f"{'='*60}"
+            )
             sku_snapshots = []
 
             for comp in comps:
@@ -628,10 +758,8 @@ async def run_scraper(trigger: str = "scheduled"):
                     log.error(f"Unhandled: {sku['sku_id']} × {comp['domain']}: {e}")
 
                 finally:
-                    delay = random.uniform(DELAY_MIN, DELAY_MAX)
-                    await asyncio.sleep(delay)
+                    await asyncio.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
 
-            # Flush all matches for this SKU in one DB write
             await scraper.flush_matches_for_sku(sku, sku_snapshots, comps)
 
     async with async_playwright() as pw:
