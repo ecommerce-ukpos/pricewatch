@@ -741,10 +741,17 @@ async def run_scraper(trigger: str = "scheduled"):
         f"SKUs={SKU_LIMIT} competitors={COMPETITOR_LIMIT}"
     )
 
-    skus  = (
-        sb.table("skus").select("*")
-        .eq("active", True).limit(SKU_LIMIT).execute().data
-    )
+    # If SCRAPER_SKUS is set (comma-separated IDs), run only those SKUs.
+    # Example: SCRAPER_SKUS="WPG7A1,WPG7A2,ABC4A1" python scraper.py manual
+    specific_skus = [s.strip() for s in os.getenv("SCRAPER_SKUS", "").split(",") if s.strip()]
+    if specific_skus:
+        log.info(f"Running targeted scrape for: {specific_skus}")
+        skus = sb.table("skus").select("*").in_("sku_id", specific_skus).execute().data
+    else:
+        skus = (
+            sb.table("skus").select("*")
+            .eq("active", True).limit(SKU_LIMIT).execute().data
+        )
     comps = (
         sb.table("competitors").select("*")
         .eq("active", True).order("id").limit(COMPETITOR_LIMIT).execute().data
