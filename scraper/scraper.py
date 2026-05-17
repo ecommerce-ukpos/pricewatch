@@ -443,22 +443,96 @@ class PriceScraper:
 
     # ── Strategy 3: Scrape a known product page ───────────────────────────────
 
+    # ── Category page detection ───────────────────────────────────────────────
+    # URLs that look like category/collection pages rather than single products.
+    # These will never yield a single reliable price so we skip them early.
+    CATEGORY_URL_SIGNALS = [
+        "/collections/", "/categories/", "/category/", "/c/",
+        "/search", "/shop/", "/products?", "/catalogue",
+        ".htm?", ".aspx?", "/a-boards", "/pavement-signs/",
+        "/wall-sign-holders", "/acrylic-sign-holder-acrylic-frame/",
+        "/a-frame-chalkboard",
+    ]
+
+    def _is_category_url(self, url: str) -> bool:
+        """Return True if the URL looks like a category/listing page."""
+        u = url.lower().split("?")[0]
+        # A URL ending in a bare category slug (no product slug depth)
+        for signal in self.CATEGORY_URL_SIGNALS:
+            if signal in u:
+                return True
+        # If URL ends with just a domain + one path segment it's likely a category
+        parts = [p for p in u.rstrip("/").split("/") if p]
+        if len(parts) <= 2:   # e.g. domain.com/a-boards
+            return True
+        return False
+
+    async def _extract_shopify_json_price(self, url: str, context: BrowserContext) -> Optional[float]:
+        """
+        Shopify stores expose /products/[slug].js with full price data.
+        Harrison Products and many others run on Shopify.
+        Tries the .js endpoint before falling back to page scrape.
+        """
+        try:
+            # Convert product URL to Shopify JSON endpoint
+            base = url.split("?")[0].rstrip("/")
+            if "/products/" not in base:
+                return None
+            json_url = base + ".js"
+            page = await context.new_page()
+            try:
+                await page.goto(json_url, wait_until="domcontentloaded", timeout=10000)
+                text = await page.inner_text("body")
+                await page.close()
+                data = json.loads(text)
+                # Shopify prices are in pence (integers)
+                variants = data.get("variants", [])
+                if variants:
+                    price_pence = variants[0].get("price")
+                    if price_pence:
+                        return round(float(price_pence) / 100, 2)
+                price = data.get("price")
+                if price:
+                    return round(float(price) / 100, 2)
+            except Exception:
+                try: await page.close()
+                except Exception: pass
+        except Exception:
+            pass
+        return None
+
     async def scrape_product_page(self, context: BrowserContext, url: str) -> dict:
-        page   = await context.new_page()
         result = {
             "price": None, "vat": "unknown", "availability": "in_stock",
             "title": "", "url": url, "error": None,
         }
+
+        # ── Skip category/listing pages early ─────────────────────────────────
+        if self._is_category_url(url):
+            result["error"] = "Category page — no single product price"
+            result["availability"] = "unavailable"
+            log.debug(f"  Skipping category page: {url}")
+            return result
+
+        # ── Try Shopify JSON endpoint first (fast, no JS needed) ──────────────
+        shopify_price = await self._extract_shopify_json_price(url, context)
+
+        page = await context.new_page()
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
-            await page.wait_for_timeout(2000)
+            # Extra wait for JS-rendered prices (e.g. Alplas variant selectors)
+            await page.wait_for_timeout(10000)
 
             full_text              = await page.inner_text("body")
             result["vat"]          = detect_vat(full_text)
             result["availability"] = "out_of_stock" if detect_oos(full_text) else "in_stock"
             result["title"]        = (await page.title()).strip()
 
-            price = await self._extract_jsonld_price(page)
+            # Use Shopify price if already found
+            price = shopify_price
+
+            # Otherwise try JSON-LD → meta → CSS selectors
+            if not price: price = await self._extract_jsonld_price(page)
             if not price: price = await self._extract_meta_price(page)
             if not price:
                 for sel in PRICE_SELECTORS:
