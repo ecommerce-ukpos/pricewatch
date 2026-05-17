@@ -443,6 +443,125 @@ class PriceScraper:
 
     # ── Strategy 3: Scrape a known product page ───────────────────────────────
 
+    async def _extract_main_price(self, page: Page) -> Optional[float]:
+        """
+        Smart main-price extraction. Finds all prices on the page, filters out
+        those inside related/recommended product sections, and returns the price
+        most likely to be the main product price.
+
+        Strategy:
+          1. Find all candidate price elements
+          2. Discard any inside containers flagged as related/recommended/upsell
+          3. Prefer prices inside containers that also have an add-to-cart button
+          4. Among remaining, pick the one with the largest font size (most prominent)
+          5. Fall back to first valid price if scoring fails
+        """
+        try:
+            result = await page.evaluate(r"""
+                () => {
+                    // Class/id fragments that indicate related product sections
+                    const EXCLUDE_SIGNALS = [
+                        'related', 'similar', 'recommend', 'upsell', 'cross-sell',
+                        'crosssell', 'cross_sell', 'recently', 'also-bought',
+                        'also_bought', 'alsoBought', 'you-may', 'youmay',
+                        'footer', 'nav', 'sidebar', 'widget', 'carousel',
+                        'slick', 'swiper', 'featured-products', 'other-products',
+                        'more-products', 'trending', 'popular',
+                    ];
+
+                    // Add-to-cart signals indicate we are near the main product
+                    const CART_SIGNALS = [
+                        'add-to-cart', 'addtocart', 'add_to_cart', 'basket',
+                        'buy-now', 'buynow', 'purchase', 'checkout',
+                    ];
+
+                    function isExcluded(el) {
+                        let node = el;
+                        // Walk up 8 levels looking for exclude signals
+                        for (let i = 0; i < 8; i++) {
+                            if (!node || node === document.body) break;
+                            const cls = (node.className || '').toLowerCase();
+                            const id  = (node.id || '').toLowerCase();
+                            if (EXCLUDE_SIGNALS.some(s => cls.includes(s) || id.includes(s))) {
+                                return true;
+                            }
+                            node = node.parentElement;
+                        }
+                        return false;
+                    }
+
+                    function hasCartButton(el) {
+                        // Check if a container ancestor also contains an add-to-cart button
+                        let node = el;
+                        for (let i = 0; i < 10; i++) {
+                            if (!node || node === document.body) break;
+                            const text = (node.innerText || '').toLowerCase();
+                            const html = (node.innerHTML || '').toLowerCase();
+                            if (CART_SIGNALS.some(s => html.includes(s) || text.includes(s))) {
+                                return true;
+                            }
+                            node = node.parentElement;
+                        }
+                        return false;
+                    }
+
+                    function getFontSize(el) {
+                        try {
+                            return parseFloat(window.getComputedStyle(el).fontSize) || 0;
+                        } catch { return 0; }
+                    }
+
+                    // Selectors to find price candidates
+                    const SELECTORS = [
+                        "[itemprop='price']",
+                        ".price", ".product-price", ".our-price", ".sale-price",
+                        "#product-price", "[class*='price']", "[data-price]",
+                        ".offer-price", "span.amount", ".woocommerce-Price-amount",
+                        "p.price", ".product__price", ".pdp-price", ".main-price",
+                        "[class*='product'][class*='price']",
+                    ];
+
+                    const seen   = new Set();
+                    const candidates = [];
+
+                    for (const sel of SELECTORS) {
+                        for (const el of document.querySelectorAll(sel)) {
+                            if (seen.has(el)) continue;
+                            seen.add(el);
+
+                            // Skip excluded sections
+                            if (isExcluded(el)) continue;
+
+                            // Extract price text
+                            const raw = (el.getAttribute('content') || el.innerText || '').trim();
+                            const m   = raw.replace(/,/g, '').match(/[\d]+\.?\d*/);
+                            if (!m) continue;
+                            const val = parseFloat(m[0]);
+                            if (val < 0.01 || val > 99999) continue;
+
+                            candidates.push({
+                                price:    val,
+                                hasCart:  hasCartButton(el),
+                                fontSize: getFontSize(el),
+                            });
+                        }
+                    }
+
+                    if (!candidates.length) return null;
+
+                    // Sort: cart-adjacent first, then by font size descending
+                    candidates.sort((a, b) => {
+                        if (a.hasCart !== b.hasCart) return a.hasCart ? -1 : 1;
+                        return b.fontSize - a.fontSize;
+                    });
+
+                    return candidates[0].price;
+                }
+            """)
+            return float(result) if result else None
+        except Exception:
+            return None
+
     # ── Category page detection ───────────────────────────────────────────────
     # URLs that look like category/collection pages rather than single products.
     # These will never yield a single reliable price so we skip them early.
@@ -535,15 +654,7 @@ class PriceScraper:
             if not price: price = await self._extract_jsonld_price(page)
             if not price: price = await self._extract_meta_price(page)
             if not price:
-                for sel in PRICE_SELECTORS:
-                    try:
-                        el = page.locator(sel).first
-                        if await el.count() > 0:
-                            raw   = await el.get_attribute("content") or await el.inner_text()
-                            price = parse_price(raw)
-                            if price: break
-                    except Exception:
-                        continue
+                price = await self._extract_main_price(page)
 
             result["price"] = price
 
