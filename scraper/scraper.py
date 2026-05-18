@@ -532,6 +532,83 @@ class PriceScraper:
         except Exception:
             return None
 
+    async def _extract_alplas_price(self, page: Page) -> Optional[float]:
+        """
+        Alplas WooCommerce price structure:
+        .price_inner_container > .total_price_container > .price > span.amount
+        The first .price div contains the ex-VAT price, confirmed by adjacent
+        span.vat_span containing "ex VAT".
+        """
+        try:
+            result = await page.evaluate(r"""
+                () => {
+                    function parsePrice(raw) {
+                        const m = (raw || '').replace(/,/g,'').match(/[\d]+\.[\d]{2}/);
+                        if (!m) return null;
+                        const val = parseFloat(m[0]);
+                        return (val > 0.01 && val < 99999) ? val : null;
+                    }
+
+                    // Primary: .price_inner_container total price, ex-VAT div
+                    const container = document.querySelector(
+                        '.price_inner_container .total_price_container'
+                    );
+                    if (container) {
+                        // Find the .price div that has a sibling span.vat_span "ex VAT"
+                        for (const priceDiv of container.querySelectorAll('.price')) {
+                            const vatSpan = priceDiv.querySelector('.vat_span');
+                            if (vatSpan && vatSpan.innerText.toLowerCase().includes('ex')) {
+                                const amount = priceDiv.querySelector('.amount bdi, .amount');
+                                if (amount) {
+                                    const val = parsePrice(amount.innerText || amount.textContent);
+                                    if (val) return val;
+                                }
+                            }
+                        }
+                        // Fallback: first .amount inside total_price_container
+                        const first = container.querySelector('.price .amount bdi, .price .amount');
+                        if (first) {
+                            const val = parsePrice(first.innerText || first.textContent);
+                            if (val) return val;
+                        }
+                    }
+
+                    // Secondary: unit_container price (also ex-VAT)
+                    const unit = document.querySelector('.unit_container .price .amount');
+                    if (unit) {
+                        const val = parsePrice(unit.innerText || unit.textContent);
+                        if (val) return val;
+                    }
+
+                    return null;
+                }
+            """)
+            return float(result) if result else None
+        except Exception:
+            return None
+
+    async def _extract_pavement_signs_price(self, page: Page) -> Optional[float]:
+        """
+        PavementSigns.com ex-VAT price:
+        <span id="ContentPlaceHolder1_lblexVAT">£89</span>
+        Unique ID makes this trivial — no ambiguity possible.
+        """
+        try:
+            result = await page.evaluate(r"""
+                () => {
+                    const el = document.querySelector('#ContentPlaceHolder1_lblexVAT');
+                    if (!el) return null;
+                    const raw = (el.innerText || el.textContent || '').replace(/,/g,'').trim();
+                    const m = raw.match(/[\d]+\.?[\d]*/);
+                    if (!m) return null;
+                    const val = parseFloat(m[0]);
+                    return (val > 0.01 && val < 99999) ? val : null;
+                }
+            """)
+            return float(result) if result else None
+        except Exception:
+            return None
+
     async def _extract_discount_displays_price(self, page: Page) -> Optional[float]:
         """
         Discount Displays main product price uses these specific classes:
@@ -724,6 +801,10 @@ class PriceScraper:
             # ── Discount Displays specific selector ────────────────────────────
             if not price and DISCOUNT_DISPLAYS_DOMAIN in competitor_domain:
                 price = await self._extract_discount_displays_price(page)
+            if not price and 'alplas.com' in competitor_domain:
+                price = await self._extract_alplas_price(page)
+            if not price and 'pavementsigns.com' in competitor_domain:
+                price = await self._extract_pavement_signs_price(page)
 
             # ── Generic smart extraction for everyone else ─────────────────────
             if not price:
