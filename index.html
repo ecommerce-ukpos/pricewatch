@@ -406,12 +406,20 @@ function ourLink(row) {
 function compLink(row) {
   const url   = row.competitor_url;
   const name  = row.competitor_name || row.competitor_domain || '';
-  const price = row.competitor_price ? `£${parseFloat(row.competitor_price).toFixed(2)}` : '—';
   const title = row.competitor_title || '';
+  const vat   = row.competitor_vat || row.competitor_vat_default || 'unknown';
+  const raw   = row.competitor_price ? parseFloat(row.competitor_price) : null;
+  let priceHtml = '—';
+  if (raw) {
+    const ex  = vat === 'inc' ? raw / 1.2 : raw;
+    const inc = vat === 'ex'  ? raw * 1.2 : (vat === 'inc' ? raw : null);
+    const incPart = inc ? ` <span style="color:var(--text3);font-weight:400;font-size:9px">(£${inc.toFixed(2)} inc)</span>` : '';
+    priceHtml = `£${ex.toFixed(2)} ex${incPart}`;
+  }
   if (!url) return `<span style="font-size:10px;color:var(--text2)">${name} — no URL</span>`;
   return `<a class="comp-link" href="${url}" target="_blank" rel="noopener">
     <span class="cl-comp">${name}</span>
-    <span class="cl-price">${price} <i class="ti ti-external-link" style="font-size:9px"></i></span>
+    <span class="cl-price">${priceHtml} <i class="ti ti-external-link" style="font-size:9px"></i></span>
     <span class="cl-title">${title}</span>
   </a>`;
 }
@@ -536,7 +544,7 @@ function renderWorstTable(rows) {
     <td>${ourLink(r)}</td>
     <td>${compLink(r)}</td>
     <td style="font-weight:600">£${parseFloat(r.our_price).toFixed(2)}</td>
-    <td style="font-weight:600">£${r.competitor_price ? parseFloat(r.competitor_price).toFixed(2) : '—'}</td>
+    <td style="font-weight:600">${(()=>{const raw=r.competitor_price?parseFloat(r.competitor_price):null;if(!raw)return'—';const vat=r.competitor_vat||'unknown';const ex=vat==='inc'?raw/1.2:raw;const inc=vat==='ex'?raw*1.2:(vat==='inc'?raw:null);return`£${ex.toFixed(2)} ex${inc?` <span style="color:var(--text3);font-weight:400;font-size:9px">(£${inc.toFixed(2)} inc)</span>`:''}`})()}</td>
     <td>${vatPill('ex')} ${vatPill(r.competitor_vat || r.competitor_vat_default || 'unknown')}</td>
     <td>${diffCell(r.diff_pct, r.diff_pct_normalised, r.availability)}</td>
     <td>${stockBadge(r.availability)}</td>
@@ -596,7 +604,7 @@ async function loadSKUs() {
       <td>${compLink(r)}</td>
       <td style="font-weight:600">£${parseFloat(r.our_price).toFixed(2)}</td>
       <td>${vatPill('ex')}</td>
-      <td style="font-weight:600">£${r.competitor_price ? parseFloat(r.competitor_price).toFixed(2) : '—'}</td>
+      <td style="font-weight:600">${(()=>{const raw=r.competitor_price?parseFloat(r.competitor_price):null;if(!raw)return'—';const vat=r.competitor_vat||'unknown';const ex=vat==='inc'?raw/1.2:raw;const inc=vat==='ex'?raw*1.2:(vat==='inc'?raw:null);return`£${ex.toFixed(2)} ex${inc?` <span style="color:var(--text3);font-weight:400;font-size:9px">(£${inc.toFixed(2)} inc)</span>`:''}`})()}</td>
       <td>${vatPill(r.competitor_vat || r.competitor_vat_default || 'unknown')}</td>
       <td>${diffCell(r.diff_pct, r.diff_pct_normalised, r.availability)}</td>
       <td>${stockBadge(r.availability)}</td>
