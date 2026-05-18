@@ -534,72 +534,67 @@ class PriceScraper:
 
     async def _extract_discount_displays_price(self, page: Page) -> Optional[float]:
         """
-        Discount Displays uses Alpine.js x-html="getFormattedBasePrice()" for the
-        main product price. The key problem: related product prices are static HTML
-        and appear in the DOM immediately, while the main product price is rendered
-        by Alpine.js asynchronously. Naive selectors always pick up the related prices.
+        Discount Displays main product price uses these specific classes:
+          font-regular text-gray-900 price label
+        with x-html="getFormattedBasePrice()" rendered by Alpine.js.
 
-        Solution: explicitly wait for the Alpine-rendered span to contain a non-zero
-        price, then read it. The Alpine span is always a direct child of the main
-        product price wrapper, NOT inside any related/recommended container.
+        Related product prices are static HTML and appear immediately in the DOM.
+        The main price is Alpine-rendered — we must wait for it to be non-empty.
+
+        Priority:
+          1. span/element with class containing all of: price, label, text-gray-900
+          2. [x-html*="getFormattedBasePrice"] after waiting for Alpine
+          3. .price inside [x-data] scope, excluding related sections
         """
         try:
-            # Wait specifically for the Alpine x-html span to be populated
-            # This targets the exact attribute Discount Displays uses
+            # Wait for Alpine to render the main price span
             try:
-                await page.wait_for_selector(
-                    '[x-html*="getFormattedBasePrice"]',
+                await page.wait_for_function(
+                    """() => {
+                        const el = document.querySelector('.price.label, [class*="text-gray-900"][class*="price"]');
+                        if (!el) return false;
+                        const raw = (el.innerText || '').trim();
+                        return raw.length > 0 && raw !== '£0.00' && /[1-9]/.test(raw);
+                    }""",
                     timeout=8000
                 )
             except Exception:
-                pass  # Continue anyway — Alpine may have already rendered
+                pass  # Continue anyway
 
             result = await page.evaluate(r"""
                 () => {
-                    // Find ALL elements with the getFormattedBasePrice x-html binding
-                    const els = document.querySelectorAll('[x-html*="getFormattedBasePrice"]');
-                    for (const el of els) {
-                        const raw = (el.innerText || el.textContent || '').replace(/,/g,'').trim();
-                        // Must contain a £ or just digits — and NOT be £0.00
-                        const m = raw.match(/[\d]+\.[\d]{2}/);
-                        if (m) {
-                            const val = parseFloat(m[0]);
-                            if (val > 0.50 && val < 99999) return val;
-                        }
+                    function parsePrice(raw) {
+                        const m = (raw || '').replace(/,/g,'').match(/[\d]+\.[\d]{2}/);
+                        if (!m) return null;
+                        const val = parseFloat(m[0]);
+                        return (val > 0.50 && val < 99999) ? val : null;
                     }
 
-                    // If Alpine hasn't rendered yet, the span may be empty.
-                    // Fall back: find the FIRST .price span that:
-                    //   a) is inside an element with x-data (Alpine scope = main product)
-                    //   b) is NOT inside a related/upsell/recommended section
-                    const EXCLUDE = [
-                        'related','recommend','upsell','similar',
-                        'recently','also','footer','nav','sidebar',
-                    ];
-
-                    function isExcluded(el) {
-                        let node = el;
-                        for (let i = 0; i < 8; i++) {
-                            if (!node || node === document.body) break;
-                            const cls = (node.className || '').toLowerCase();
-                            const id  = (node.id || '').toLowerCase();
-                            if (EXCLUDE.some(s => cls.includes(s) || id.includes(s))) return true;
-                            node = node.parentElement;
-                        }
-                        return false;
+                    // Strategy 1: Discount Displays ex-VAT selling price class
+                    // Confirmed class: final-price-excl-tax price-excluding-tax active
+                    const exclTax = document.querySelector(
+                        '.final-price-excl-tax.price-excluding-tax.active, ' +
+                        '.price-excluding-tax.active, ' +
+                        '[class*="final-price-excl-tax"]'
+                    );
+                    if (exclTax) {
+                        const val = parsePrice(exclTax.innerText || exclTax.textContent);
+                        if (val) return val;
                     }
 
-                    // Prefer prices inside an Alpine x-data scope
-                    const xDataScope = document.querySelector('[x-data]');
-                    if (xDataScope) {
-                        for (const el of xDataScope.querySelectorAll('.price, [class*="price"]')) {
-                            if (isExcluded(el)) continue;
-                            const raw = (el.innerText || '').replace(/,/g,'').trim();
-                            const m = raw.match(/[\d]+\.[\d]{2}/);
-                            if (m) {
-                                const val = parseFloat(m[0]);
-                                if (val > 0.50 && val < 99999) return val;
-                            }
+                    // Strategy 2: x-html getFormattedBasePrice — Alpine-rendered value
+                    for (const el of document.querySelectorAll('[x-html*="getFormattedBasePrice"]')) {
+                        const val = parsePrice(el.innerText || el.textContent);
+                        if (val) return val;
+                    }
+
+                    // Strategy 3: .price inside [x-data] Alpine scope only
+                    // x-data wraps the main product — related products are outside it
+                    const xData = document.querySelector('[x-data]');
+                    if (xData) {
+                        for (const el of xData.querySelectorAll('.price-excluding-tax, .price.label, span.price')) {
+                            const val = parsePrice(el.innerText);
+                            if (val) return val;
                         }
                     }
 
