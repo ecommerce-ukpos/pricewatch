@@ -534,39 +534,63 @@ class PriceScraper:
 
     async def _extract_discount_displays_price(self, page: Page) -> Optional[float]:
         """
-        Discount Displays uses Alpine.js with x-html="getFormattedBasePrice()"
-        on a <span class="price"> element. The actual rendered price value is
-        already in the span's innerHTML after Alpine initialises.
-        We target that specific span to avoid picking up related product prices.
+        Discount Displays uses Alpine.js: x-html="getFormattedBasePrice()"
+        After Alpine executes, the span still carries the x-html attribute in the DOM
+        but its innerHTML has been replaced with the rendered price string.
+
+        Strategy:
+        1. Wait for Alpine to finish (already handled by 10s page wait)
+        2. Find ALL spans with x-html attribute containing getFormattedBasePrice
+           — check both the attribute value AND any span whose x-html references it
+        3. Read the rendered innerText (not the attribute) for the actual price
+        4. Fall back to any .price element not inside a related/upsell section
         """
         try:
+            # First ensure Alpine has had time to render
+            await page.wait_for_timeout(2000)
+
             result = await page.evaluate(r"""
                 () => {
-                    // Target the specific Alpine.js price span
-                    const el = document.querySelector('span.price[x-html="getFormattedBasePrice()"]');
-                    if (el) {
-                        const raw = (el.innerText || el.textContent || '').trim();
+                    // Strategy 1: find the span by its x-html attribute — read rendered text
+                    const byAttr = document.querySelector(
+                        '[x-html*="getFormattedBasePrice"], [x-html*="FormattedBasePrice"]'
+                    );
+                    if (byAttr) {
+                        const raw = (byAttr.innerText || byAttr.textContent || '').trim();
                         const m = raw.replace(/,/g, '').match(/[\d]+\.?\d*/);
                         if (m) {
                             const val = parseFloat(m[0]);
                             if (val > 0.01 && val < 99999) return val;
                         }
                     }
-                    // Fallback: any span.price that is NOT in a related/recommended section
+
+                    // Strategy 2: look for an Alpine x-data scope and find .price inside it
+                    // Discount Displays wraps product data in x-data="productData()" or similar
+                    const xDataEl = document.querySelector('[x-data]');
+                    if (xDataEl) {
+                        for (const el of xDataEl.querySelectorAll('.price, [class*="price"]')) {
+                            const raw = (el.innerText || '').trim();
+                            const m = raw.replace(/,/g, '').match(/[\d]+\.[\d]{2}/);
+                            if (m) {
+                                const val = parseFloat(m[0]);
+                                if (val > 0.01 && val < 99999) return val;
+                            }
+                        }
+                    }
+
+                    // Strategy 3: any .price NOT inside related/upsell sections
+                    const EXCLUDE = ['related','recommend','upsell','similar','recently','footer','nav'];
                     for (const el of document.querySelectorAll('span.price, .price')) {
-                        let node = el;
-                        let excluded = false;
+                        let node = el, excluded = false;
                         for (let i = 0; i < 6; i++) {
                             if (!node || node === document.body) break;
                             const cls = (node.className || '').toLowerCase();
-                            if (['related','recommend','upsell','similar','recently'].some(s => cls.includes(s))) {
-                                excluded = true; break;
-                            }
+                            if (EXCLUDE.some(s => cls.includes(s))) { excluded = true; break; }
                             node = node.parentElement;
                         }
                         if (excluded) continue;
                         const raw = (el.innerText || '').trim();
-                        const m = raw.replace(/,/g, '').match(/[\d]+\.?\d*/);
+                        const m = raw.replace(/,/g, '').match(/[\d]+\.[\d]{2}/);
                         if (m) {
                             const val = parseFloat(m[0]);
                             if (val > 0.01 && val < 99999) return val;
