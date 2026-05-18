@@ -458,7 +458,7 @@ async function loadDashboard() {
     $('m-oos').textContent    = m.oos;
     $('m-review').textContent = m.review;
 
-    $('nav-sub').textContent = `UKPOS · 500 SKUs · 23 competitors`;
+    $('nav-sub').textContent = `UKPOS · ${(d.sku_count || 0).toLocaleString()} SKUs · ${d.competitor_count || 23} competitors`;
 
     if (m.review > 0) {
       $('review-badge').textContent = m.review;
@@ -561,7 +561,7 @@ function buildDistChart(m) {
     data: {
       labels: ["We're cheapest","±2% parity","Up to 5%\nmore exp.","5–10%\nmore exp.",">10%\nmore exp.","OOS flagged"],
       datasets: [{
-        data: [m.cheapest || 0, 180, 146, m.warning || 0, m.critical || 0, m.oos || 0],
+        data: [m.cheapest || 0, m.parity || 0, m.slight || 0, m.warning || 0, m.critical || 0, m.oos || 0],
         backgroundColor: ['#639922','#888780','#BA7517','#E24B4A','#A32D2D','#B4B2A9'],
         borderRadius: 3, borderSkipped: false
       }]
@@ -682,14 +682,65 @@ async function loadReview() {
           </div>
         </div>
         ${r.notes ? `<div class="rev-reason"><i class="ti ti-alert-circle" style="font-size:11px;margin-right:4px"></i>${r.notes}</div>` : ''}
-        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <div id="rev-actions-${r.id}" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
           <button class="btn sm prim" onclick="reviewDecision(${r.id},'approve',this)"><i class="ti ti-check"></i> Approve match</button>
-          <button class="btn sm danger" onclick="reviewDecision(${r.id},'reject',this)"><i class="ti ti-x"></i> Reject</button>
+          <button class="btn sm danger" onclick="showCorrectUrl(${r.id})"><i class="ti ti-x"></i> Reject</button>
+        </div>
+        <div id="rev-correct-${r.id}" style="display:none;margin-top:8px">
+          <div style="font-size:11px;color:var(--text2);margin-bottom:5px">Paste the correct URL for this product:</div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input id="rev-url-${r.id}" type="text" placeholder="https://competitor.com/correct-product-page"
+              style="flex:1;padding:5px 8px;font-size:11px;border:1px solid var(--border);border-radius:var(--radius);font-family:inherit">
+            <button class="btn sm prim" onclick="saveCorrectUrl(${r.id},this)"><i class="ti ti-device-floppy"></i> Save URL</button>
+            <button class="btn sm" onclick="reviewDecision(${r.id},'reject',this)">Reject without URL</button>
+          </div>
         </div>
       </div>`;
     }).join('');
   } catch (e) {
     $('review-list').innerHTML = `<div style="color:var(--red);padding:8px">${e.message}</div>`;
+  }
+}
+
+function showCorrectUrl(matchId) {
+  const actions = $(`rev-actions-${matchId}`);
+  const correct = $(`rev-correct-${matchId}`);
+  if (actions) actions.style.display = 'none';
+  if (correct) correct.style.display = 'block';
+  const input = $(`rev-url-${matchId}`);
+  if (input) input.focus();
+}
+
+async function saveCorrectUrl(matchId, btn) {
+  const input = $(`rev-url-${matchId}`);
+  const newUrl = (input?.value || '').trim();
+  if (!newUrl || !newUrl.startsWith('http')) {
+    input.style.borderColor = 'var(--red)';
+    input.placeholder = 'Must be a valid URL starting with http…';
+    return;
+  }
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Saving…';
+  try {
+    const res = await fetch(API + `/review/${matchId}/correct`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ url: newUrl }),
+    });
+    if (!res.ok) throw new Error('Save failed');
+    const row = $(`rev-${matchId}`);
+    if (row) {
+      row.style.opacity = '.5';
+      $(`rev-correct-${matchId}`).innerHTML =
+        `<div style="color:var(--green);font-size:11px;padding:4px 0">
+          <i class="ti ti-check"></i> Saved — will be scraped on next run
+        </div>`;
+    }
+    loadDashboard();
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save URL';
+    alert(e.message);
   }
 }
 
@@ -736,7 +787,7 @@ function editCompetitor(id, name, currentVat) {
   if (!['ex','inc','unknown'].includes(newVat.trim().toLowerCase())) {
     alert('Invalid value. Enter: ex, inc, or unknown'); return;
   }
-  fetch(API + `/competitors/${id}`, {
+  fetch(API + `/api/competitors/${id}`, {
     method: 'PATCH',
     headers: {'Content-Type':'application/json'},
     body: JSON.stringify({vat_status: newVat.trim().toLowerCase()}),
