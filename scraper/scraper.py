@@ -570,32 +570,37 @@ class PriceScraper:
                         return (val > 0.50 && val < 99999) ? val : null;
                     }
 
-                    // Strategy 1: Discount Displays ex-VAT selling price class
-                    // Confirmed class: final-price-excl-tax price-excluding-tax active
-                    const exclTax = document.querySelector(
-                        '.final-price-excl-tax.price-excluding-tax.active, ' +
-                        '.price-excluding-tax.active, ' +
-                        '[class*="final-price-excl-tax"]'
+                    // Strategy 1: main product price container
+                    // Class is "price-excl-taxinline-block" (deliberate typo in their HTML)
+                    // Contains span.price with x-html="getFormattedBasePrice()"
+                    // Related product prices are inside .js_slides carousel — excluded here
+                    const mainContainer = document.querySelector(
+                        '[class*="price-excl-taxinline-block"]'
                     );
-                    if (exclTax) {
-                        const val = parsePrice(exclTax.innerText || exclTax.textContent);
-                        if (val) return val;
+                    if (mainContainer) {
+                        // Make sure it's NOT inside the related products carousel
+                        const inCarousel = mainContainer.closest('.js_slides, [class*="js_slide"]');
+                        if (!inCarousel) {
+                            const priceSpan = mainContainer.querySelector('[x-html*="getFormattedBasePrice"], span.price');
+                            if (priceSpan) {
+                                const val = parsePrice(priceSpan.innerText || priceSpan.textContent);
+                                if (val) return val;
+                            }
+                        }
                     }
 
-                    // Strategy 2: x-html getFormattedBasePrice — Alpine-rendered value
+                    // Strategy 2: x-html getFormattedBasePrice NOT inside carousel
                     for (const el of document.querySelectorAll('[x-html*="getFormattedBasePrice"]')) {
+                        if (el.closest('.js_slides, [class*="js_slide"]')) continue;
                         const val = parsePrice(el.innerText || el.textContent);
                         if (val) return val;
                     }
 
-                    // Strategy 3: .price inside [x-data] Alpine scope only
-                    // x-data wraps the main product — related products are outside it
-                    const xData = document.querySelector('[x-data]');
-                    if (xData) {
-                        for (const el of xData.querySelectorAll('.price-excluding-tax, .price.label, span.price')) {
-                            const val = parsePrice(el.innerText);
-                            if (val) return val;
-                        }
+                    // Strategy 3: price-excluding-tax active NOT inside carousel
+                    for (const el of document.querySelectorAll('.price-excluding-tax.active')) {
+                        if (el.closest('.js_slides, [class*="js_slide"]')) continue;
+                        const val = parsePrice(el.innerText || el.textContent);
+                        if (val) return val;
                     }
 
                     return null;
