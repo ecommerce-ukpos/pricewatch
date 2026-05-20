@@ -37,47 +37,41 @@
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg-app);color:var(--text);font-size:13px;line-height:1.5}
 a{color:var(--blue);text-decoration:underline;text-decoration-color:rgba(24,95,165,.3);text-underline-offset:2px}
 a:hover{text-decoration-color:var(--blue)}
-
-/* ── App shell — top nav layout ── */
 .app{display:flex;flex-direction:column;height:100vh;overflow:hidden}
-
-/* ── Brand header ── */
-.topbar-brand{background:var(--dark);padding:0 20px;display:flex;align-items:stretch;justify-content:space-between;flex-shrink:0;border-bottom:3px solid var(--orange)}
-.logo-area{display:flex;align-items:center;gap:8px;padding:10px 0}
+.topbar-brand{background:var(--dark);padding:0 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;border-bottom:3px solid var(--orange);min-height:46px}
+.logo-area{display:flex;align-items:center;gap:8px}
 .logo-box{display:flex;align-items:center;background:var(--orange);padding:3px 8px;border-radius:3px}
 .logo-box .uk{color:#fff;font-weight:800;font-size:13px;border-right:1.5px solid rgba(255,255,255,.4);padding-right:5px;margin-right:4px}
 .logo-box .pos{color:#fff;font-weight:800;font-size:13px}
 .brand-product{color:rgba(255,255,255,.4);font-size:10px;letter-spacing:.1em;text-transform:uppercase}
-.topbar-right{display:flex;align-items:center;gap:10px;padding:10px 0}
+.topbar-right{display:flex;align-items:center;gap:8px}
 .status-dot{width:6px;height:6px;border-radius:50%;background:#4ade80;animation:blink 2.4s infinite;flex-shrink:0}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
 .topbar-pill{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.65);font-size:10px;padding:2px 9px;border-radius:99px;white-space:nowrap}
-
-/* ── Tab nav ── */
-.tab-nav{background:var(--bg-card);border-bottom:1px solid var(--border);padding:0 20px;display:flex;align-items:stretch;gap:0;flex-shrink:0}
+.hero{background:var(--dark2);padding:18px 20px 0;flex-shrink:0}
+.hero-label{color:var(--orange);font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;margin-bottom:5px}
+.hero-title{color:#fff;font-size:24px;font-weight:700;line-height:1.2;margin-bottom:6px}
+.hero-sub{color:rgba(255,255,255,.5);font-size:11px;max-width:560px;line-height:1.6;margin-bottom:14px}
+.hero-stats{display:flex;gap:24px;padding-bottom:14px;flex-wrap:wrap}
+.hero-stat{font-size:11px;color:rgba(255,255,255,.4)}
+.hero-stat strong{color:rgba(255,255,255,.85);font-weight:600}
+.hero-stat .accent{color:var(--orange);font-weight:700}
+.tab-nav{background:var(--bg-card);border-bottom:1px solid var(--border);padding:0 20px;display:flex;align-items:stretch;flex-shrink:0}
 .tab{display:flex;align-items:center;gap:6px;padding:11px 16px;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text2);cursor:pointer;border-bottom:2px solid transparent;transition:all .12s;white-space:nowrap;user-select:none}
 .tab:hover{color:var(--text)}
 .tab.active{color:var(--orange);border-bottom-color:var(--orange)}
 .tab i{font-size:14px}
 .tab-badge{background:rgba(232,72,28,.2);color:var(--orange);font-size:9px;font-weight:700;padding:1px 5px;border-radius:99px}
 .tab-right{margin-left:auto;display:flex;align-items:center;gap:8px;padding:8px 0}
-
-/* ── Content area ── */
 .main{flex:1;overflow:hidden;display:flex;flex-direction:column}
 .content{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:14px}
-
-/* ── Panels ── */
 .panel{display:none;flex-direction:column;gap:14px}
 .panel.active{display:flex}
-
-/* ── Cards ── */
 .card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px}
 .card-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
 .card-hd h3{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text2)}
-.view-all{font-size:10px;color:var(--orange);font-weight:600;cursor:pointer;text-decoration:none;border:none;background:none;font-family:inherit}
+.view-all{font-size:10px;color:var(--orange);font-weight:600;cursor:pointer;background:none;border:none;font-family:inherit}
 .view-all:hover{text-decoration:underline}
-
-/* ── Metrics ── */
 .metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
 .metric{border-radius:var(--radius);padding:12px 14px;border:1px solid transparent}
 .metric label{font-size:16px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:4px}
@@ -88,14 +82,10 @@ a:hover{text-decoration-color:var(--blue)}
 .m-green{background:var(--green-bg);border-color:var(--green-border)}.m-green label,.m-green .sub{color:var(--green)}.m-green .val{color:var(--green)}
 .m-blue{background:var(--blue-bg);border-color:#b5d4f4}.m-blue .val{color:var(--blue)}
 .m-gray{background:var(--bg-sec)}.m-gray label{color:var(--text2)}.m-gray .val{color:var(--text2)}.m-gray .sub{color:var(--text3)}
-
-/* ── Pills ── */
 .vat{display:inline-flex;align-items:center;gap:2px;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;white-space:nowrap}
 .vat-ex{background:var(--green-bg);color:var(--green)}
 .vat-inc{background:var(--blue-bg);color:var(--blue)}
 .vat-unk{background:var(--amber-bg);color:var(--amber)}
-
-/* ── Badges ── */
 .badge{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:99px;font-size:10px;font-weight:600;white-space:nowrap}
 .b-green{background:var(--green-bg);color:var(--green)}
 .b-red{background:var(--red-bg);color:var(--red)}
@@ -103,8 +93,6 @@ a:hover{text-decoration-color:var(--blue)}
 .b-gray{background:var(--bg-sec);color:var(--text2)}
 .b-blue{background:var(--blue-bg);color:var(--blue)}
 .b-oos{background:var(--bg-sec);color:var(--text2);border:1px dashed var(--text3)}
-
-/* ── Table ── */
 .tw{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:11px}
 th{text-align:left;padding:6px 8px;color:var(--text3);font-weight:700;font-size:9px;letter-spacing:.07em;text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap;background:var(--bg-card);position:sticky;top:0;z-index:1}
@@ -116,8 +104,6 @@ td{padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:middle}
 tr:last-child td{border-bottom:none}
 tr:hover td{background:var(--bg-sec)}
 tr.oos-row td{opacity:.65}
-
-/* ── Product links ── */
 .prod-link{display:inline-flex;flex-direction:column;gap:1px;text-decoration:none;color:inherit}
 .pl-id{font-family:'SF Mono',monospace;font-size:10px;color:var(--blue);text-decoration:underline;text-decoration-color:rgba(24,95,165,.3);text-underline-offset:2px}
 .pl-id:hover{text-decoration-color:var(--blue)}
@@ -127,20 +113,14 @@ tr.oos-row td{opacity:.65}
 .cl-price{font-weight:600;color:var(--blue);text-decoration:underline;text-decoration-color:rgba(24,95,165,.3);text-underline-offset:2px;white-space:nowrap}
 .cl-price:hover{text-decoration-color:var(--blue)}
 .cl-title{font-size:10px;color:var(--text3);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-
-/* ── Diff ── */
 .d-crit{font-weight:600;color:var(--red)}
 .d-warn{font-weight:600;color:var(--amber)}
 .d-cheap{font-weight:600;color:var(--green)}
 .d-par{color:var(--text2)}
-
-/* ── Confidence bar ── */
 .cbar{display:flex;align-items:center;gap:5px}
 .ctrack{width:44px;height:4px;border-radius:2px;background:var(--border);overflow:hidden;flex-shrink:0}
 .cfill{height:100%;border-radius:2px}
 .cf-hi{background:var(--green)}.cf-mid{background:#BA7517}.cf-lo{background:var(--red)}
-
-/* ── Alerts ── */
 .alert-list{display:flex;flex-direction:column;gap:6px}
 .alert-row{padding:8px 10px 8px 13px;border-radius:var(--radius);font-size:11px;border:1px solid transparent;border-left-width:3px}
 .ar-crit{background:var(--red-bg);border-color:var(--red-border);border-left-color:var(--red);color:#501313}
@@ -156,61 +136,42 @@ tr.oos-row td{opacity:.65}
 .ap-side{background:rgba(0,0,0,.04);border-radius:6px;padding:6px 8px;font-size:10px}
 .ap-side label{font-size:9px;opacity:.7;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:2px}
 .ap-side a{color:inherit;text-decoration:underline;text-decoration-color:rgba(0,0,0,.2);text-underline-offset:2px;font-weight:600}
-
-/* ── Buttons ── */
 .btn{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;font-size:11px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;background:var(--bg-card);color:var(--text);font-family:inherit;transition:background .12s}
 .btn:hover{background:var(--bg-sec)}
 .btn.prim{background:var(--orange);color:#fff;border-color:var(--orange)}
 .btn.prim:hover{background:#c73d16}
 .btn.sm{padding:3px 8px;font-size:10px}
 .btn.danger{background:var(--red-bg);color:var(--red);border-color:var(--red-border)}
-
-/* ── Filters ── */
 .filter-row{display:flex;gap:7px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
 .filter-row input,.filter-row select{padding:5px 8px;font-size:11px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);color:var(--text);font-family:inherit}
 .filter-row input{min-width:220px;flex:1}
-
-/* ── Review queue ── */
 .rev-row{border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:8px}
 .rev-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}
 .rev-side{background:var(--bg-sec);border-radius:var(--radius);padding:8px;font-size:10px}
 .rev-side label{color:var(--text2);display:block;margin-bottom:2px;text-transform:uppercase;letter-spacing:.04em;font-size:9px}
 .rev-side .rv{font-size:12px;font-weight:600}
 .rev-reason{font-size:10px;color:var(--text2);background:var(--bg-sec);border-radius:var(--radius);padding:6px 8px;margin-bottom:8px}
-
-/* ── Competitor grid ── */
 .comp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .comp-card{padding:9px 11px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:border-color .12s}
 .comp-card:hover{border-color:var(--orange)}
 .comp-card .cn{font-weight:600;font-size:12px;margin-bottom:1px}
 .comp-card .cu{font-size:10px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:5px}
-
-/* ── Info / warn notes ── */
 .info-note{background:var(--blue-bg);border:1px solid #b5d4f4;border-radius:var(--radius);padding:8px 11px;font-size:11px;color:#042c53;display:flex;gap:7px}
 .warn-note{background:var(--amber-bg);border:1px solid var(--amber-border);border-radius:var(--radius);padding:8px 11px;font-size:11px;color:#412402;display:flex;gap:7px}
-
-/* ── Chart ── */
 .chart-wrap{position:relative;height:190px}
-
-/* ── Two-col ── */
 .two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-
-/* ── Loading ── */
 .loading{display:flex;align-items:center;justify-content:center;padding:40px;color:var(--text2);gap:8px;font-size:12px}
 .spinner{width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--orange);border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-
-/* ── Sched rows ── */
 .sched-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px}
 .sched-row:last-child{border-bottom:none}
 .sched-ico{width:26px;height:26px;border-radius:var(--radius);background:var(--bg-sec);display:flex;align-items:center;justify-content:center;flex-shrink:0}
 </style>
 </head>
 <body>
-
 <div class="app">
 
-  <!-- ── Brand header ── -->
+  <!-- Brand header -->
   <div class="topbar-brand">
     <div class="logo-area">
       <div class="logo-box"><span class="uk">UK</span><span class="pos">POS</span></div>
@@ -218,23 +179,38 @@ tr.oos-row td{opacity:.65}
     </div>
     <div class="topbar-right">
       <span class="status-dot"></span>
-      <span id="sync-status" style="font-size:11px;color:rgba(255,255,255,.45)">Loading sync status…</span>
-      <span class="topbar-pill" id="nav-sub">loading…</span>
-      <span class="vat vat-ex" style="border:1px solid rgba(255,255,255,.15)"><i class="ti ti-receipt" style="font-size:11px"></i> ex-VAT</span>
+      <span id="sync-status" style="font-size:11px;color:rgba(255,255,255,.45)">Loading…</span>
       <button class="btn sm prim" id="manual-btn" onclick="manualLookupAll()"><i class="ti ti-refresh"></i> Refresh</button>
     </div>
   </div>
 
-  <!-- ── Tab navigation ── -->
+  <!-- Hero band -->
+  <div class="hero">
+    <div class="hero-label">Competitive Price Intelligence</div>
+    <div class="hero-title">Price Comparison Dashboard</div>
+    <div class="hero-sub">Real-time monitoring of competitor prices across <span id="hero-comp-count">23</span> suppliers — normalised to ex-VAT for like-for-like comparison.</div>
+    <div class="hero-stats">
+      <div class="hero-stat"><strong id="hero-prices-tracked">—</strong> prices tracked</div>
+      <div class="hero-stat"><strong id="hero-matches">—</strong> competitor matches</div>
+      <div class="hero-stat"><span class="accent" id="hero-critical">—</span> critical gaps</div>
+      <div class="hero-stat"><strong id="hero-skus">—</strong> SKUs monitored</div>
+      <div class="hero-stat"><strong id="hero-review">—</strong> in review queue</div>
+    </div>
+  </div>
+
+  <!-- Tab navigation -->
   <div class="tab-nav">
     <div class="tab active" onclick="go('dashboard',this)"><i class="ti ti-layout-dashboard"></i> Dashboard</div>
     <div class="tab" onclick="go('skus',this)"><i class="ti ti-tag"></i> SKU Comparisons</div>
     <div class="tab" onclick="go('review',this)"><i class="ti ti-eye"></i> Review Queue <span id="review-badge" class="tab-badge" style="display:none">0</span></div>
     <div class="tab" onclick="go('competitors',this)"><i class="ti ti-building-store"></i> Competitors</div>
     <div class="tab" onclick="go('schedule',this)"><i class="ti ti-clock"></i> Schedule</div>
+    <div class="tab-right">
+      <span class="vat vat-ex" style="font-size:10px"><i class="ti ti-receipt" style="font-size:10px"></i> Your prices: ex-VAT</span>
+    </div>
   </div>
 
-  <!-- ── Main content ── -->
+  <!-- Main content -->
   <div class="main">
     <div class="content">
 
@@ -351,8 +327,7 @@ tr.oos-row td{opacity:.65}
   </div><!-- /content -->
   </div>
 
-</div><!-- /app -->
-
+</div>
 <script>
 // ── Config — set this to your Vercel deployment URL ──────────────────────────
 const API = 'https://uaqakssusydpjzrcznhb.supabase.co/functions/v1/api';
@@ -474,7 +449,20 @@ async function loadDashboard() {
     $('m-oos').textContent    = m.oos;
     $('m-review').textContent = m.review;
 
-    $('nav-sub').textContent = `${(d.sku_count || 0).toLocaleString()} SKUs · ${d.competitor_count || 23} competitors`;
+    // Hero band stats
+    const tc = d.metrics.total_comparisons || 0;
+    const mc = d.sku_count || 0;
+    if ($('hero-prices-tracked')) $('hero-prices-tracked').textContent = tc.toLocaleString();
+    if ($('hero-matches'))        $('hero-matches').textContent = (d.competitor_count && mc ? (mc * d.competitor_count) : '1,205').toLocaleString();
+    if ($('hero-critical'))       $('hero-critical').textContent = (d.metrics.critical || 0) + ' critical';
+    if ($('hero-skus'))           $('hero-skus').textContent = mc.toLocaleString();
+    if ($('hero-review'))         $('hero-review').textContent = (d.metrics.review || 0).toLocaleString();
+    if ($('hero-comp-count'))     $('hero-comp-count').textContent = d.competitor_count || 23;
+    // Sync status
+    if ($('sync-status') && d.last_run) {
+      const r = d.last_run;
+      $('sync-status').innerHTML = `Last sync <strong style="color:rgba(255,255,255,.7)">${ts(r.completed_at || r.started_at)}</strong> · ${r.skus_succeeded || 0} SKUs`;
+    }
 
     if (m.review > 0) {
       $('review-badge').textContent = m.review;
