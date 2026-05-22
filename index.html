@@ -638,14 +638,25 @@ async function handleRequestAccess(e) {
   btn.disabled = true;
   const email = $('reg-email').value.trim().toLowerCase();
   const full_name = $('reg-name').value.trim();
-  const r = await fetch(API + '/auth/request-access', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, full_name })
-  });
+
+  // Domain check
+  const domain = email.split('@')[1] || '';
+  if (domain !== 'ukpos.com') {
+    showMsg('reg-msg', 'Only @ukpos.com email addresses are permitted.', 'error');
+    btn.disabled = false;
+    return;
+  }
+
+  // Insert directly into access_requests via Supabase
+  const { error } = await sbClient
+    .from('access_requests')
+    .upsert({ email, full_name }, { onConflict: 'email' });
+
   btn.disabled = false;
-  const body = await r.json().catch(() => ({}));
-  if (!r.ok) { showMsg('reg-msg', body.detail || 'Request failed.', 'error'); return; }
+  if (error) {
+    showMsg('reg-msg', error.message || 'Request failed.', 'error');
+    return;
+  }
   showMsg('reg-msg', 'Request submitted. You will be notified by email once approved.', 'success');
   $('form-register').reset();
 }
