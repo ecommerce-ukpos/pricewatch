@@ -33,7 +33,7 @@ from typing import Optional, Literal
 import httpx
 from fastapi import FastAPI, Depends, HTTPException, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 
 # ============================================================================
 # Configuration
@@ -193,7 +193,7 @@ async def auth_me(authorization: Optional[str] = Header(default=None)):
     return profile
 
 class RequestAccessBody(BaseModel):
-    email: EmailStr
+    email: str
     full_name: Optional[str] = Field(default=None, max_length=120)
 
 @app.post("/api/auth/request-access")
