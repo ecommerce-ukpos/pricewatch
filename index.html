@@ -1,16 +1,1201 @@
 <!DOCTYPE html>
-<html>
-<head><title>PriceWatch Pro</title></head>
-<body>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PriceWatch Pro — UKPOS</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><text y='20' font-size='20'>📊</text></svg>">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.0.0/dist/tabler-icons.min.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<!-- Supabase JS client for auth -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --orange:#E8481C;
+  --dark:#1a1a18;
+  --dark2:#232320;
+  --bg-app:#f5f4f0;
+  --bg-card:#ffffff;
+  --bg-sec:#f1efe8;
+  --border:#e5e3dc;
+  --text:#1a1a18;
+  --text2:#6b6a64;
+  --text3:#9e9c96;
+  --blue:#185FA5;
+  --blue-bg:#e6f1fb;
+  --green:#3B6D11;
+  --green-bg:#eaf3de;
+  --green-border:#c0dd97;
+  --amber:#854F0B;
+  --amber-bg:#faeeda;
+  --amber-border:#fac775;
+  --red:#A32D2D;
+  --red-bg:#fcebeb;
+  --red-border:#f7c1c1;
+  --radius:6px;
+  --radius-lg:10px;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg-app);color:var(--text);font-size:13px;line-height:1.5}
+a{color:var(--blue);text-decoration:underline;text-decoration-color:rgba(24,95,165,.3);text-underline-offset:2px}
+a:hover{text-decoration-color:var(--blue)}
+.app{display:flex;flex-direction:column;height:100vh;overflow:hidden}
+.topbar-brand{background:var(--dark);padding:0 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;border-bottom:3px solid var(--orange);min-height:46px}
+.logo-area{display:flex;align-items:center;gap:8px}
+.logo-box{display:flex;align-items:center;background:var(--orange);padding:3px 8px;border-radius:3px}
+.logo-box .uk{color:#fff;font-weight:800;font-size:13px;border-right:1.5px solid rgba(255,255,255,.4);padding-right:5px;margin-right:4px}
+.logo-box .pos{color:#fff;font-weight:800;font-size:13px}
+.brand-product{color:rgba(255,255,255,.4);font-size:10px;letter-spacing:.1em;text-transform:uppercase}
+.topbar-right{display:flex;align-items:center;gap:8px}
+.status-dot{width:6px;height:6px;border-radius:50%;background:#4ade80;animation:blink 2.4s infinite;flex-shrink:0}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.topbar-pill{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.65);font-size:10px;padding:2px 9px;border-radius:99px;white-space:nowrap}
+.topbar-user{color:rgba(255,255,255,.55);font-size:11px}
+.topbar-user strong{color:rgba(255,255,255,.85);font-weight:600}
+.topbar-link{background:none;border:none;color:rgba(255,255,255,.55);font-size:11px;cursor:pointer;padding:4px 8px;border-radius:4px;font-family:inherit}
+.topbar-link:hover{color:#fff;background:rgba(255,255,255,.08)}
+.hero{background:var(--dark2);padding:18px 20px 0;flex-shrink:0}
+.hero-label{color:var(--orange);font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;margin-bottom:5px}
+.hero-title{color:#fff;font-size:24px;font-weight:700;line-height:1.2;margin-bottom:6px}
+.hero-sub{color:rgba(255,255,255,.5);font-size:11px;max-width:560px;line-height:1.6;margin-bottom:14px}
+.hero-stats{display:flex;gap:24px;padding-bottom:14px;flex-wrap:wrap}
+.hero-stat{font-size:11px;color:rgba(255,255,255,.4)}
+.hero-stat strong{color:rgba(255,255,255,.85);font-weight:600}
+.hero-stat .accent{color:var(--orange);font-weight:700}
+.tab-nav{background:var(--bg-card);border-bottom:1px solid var(--border);padding:0 20px;display:flex;align-items:stretch;flex-shrink:0}
+.tab{display:flex;align-items:center;gap:6px;padding:11px 16px;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text2);cursor:pointer;border-bottom:2px solid transparent;transition:all .12s;white-space:nowrap;user-select:none}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--orange);border-bottom-color:var(--orange)}
+.tab i{font-size:14px}
+.tab-badge{background:rgba(232,72,28,.2);color:var(--orange);font-size:9px;font-weight:700;padding:1px 5px;border-radius:99px}
+.tab-right{margin-left:auto;display:flex;align-items:center;gap:8px;padding:8px 0}
+.main{flex:1;overflow:hidden;display:flex;flex-direction:column}
+.content{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:14px}
+.panel{display:none;flex-direction:column;gap:14px}
+.panel.active{display:flex}
+.card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px}
+.card-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.card-hd h3{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text2)}
+.view-all{font-size:10px;color:var(--orange);font-weight:600;cursor:pointer;background:none;border:none;font-family:inherit}
+.view-all:hover{text-decoration:underline}
+.metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.metric{border-radius:var(--radius);padding:12px 14px;border:1px solid transparent}
+.metric label{font-size:16px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:4px}
+.metric .val{font-size:24px;font-weight:700;line-height:1}
+.metric .sub{font-size:10px;margin-top:3px}
+.m-red{background:var(--red-bg);border-color:var(--red-border)}.m-red label,.m-red .sub{color:var(--red)}.m-red .val{color:var(--red)}
+.m-amber{background:var(--amber-bg);border-color:var(--amber-border)}.m-amber label,.m-amber .sub{color:var(--amber)}.m-amber .val{color:var(--amber)}
+.m-green{background:var(--green-bg);border-color:var(--green-border)}.m-green label,.m-green .sub{color:var(--green)}.m-green .val{color:var(--green)}
+.m-blue{background:var(--blue-bg);border-color:#b5d4f4}.m-blue .val{color:var(--blue)}
+.m-gray{background:var(--bg-sec)}.m-gray label{color:var(--text2)}.m-gray .val{color:var(--text2)}.m-gray .sub{color:var(--text3)}
+.vat{display:inline-flex;align-items:center;gap:2px;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;white-space:nowrap}
+.vat-ex{background:var(--green-bg);color:var(--green)}
+.vat-inc{background:var(--blue-bg);color:var(--blue)}
+.vat-unk{background:var(--amber-bg);color:var(--amber)}
+.badge{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:99px;font-size:10px;font-weight:600;white-space:nowrap}
+.b-green{background:var(--green-bg);color:var(--green)}
+.b-red{background:var(--red-bg);color:var(--red)}
+.b-amber{background:var(--amber-bg);color:var(--amber)}
+.b-gray{background:var(--bg-sec);color:var(--text2)}
+.b-blue{background:var(--blue-bg);color:var(--blue)}
+.b-oos{background:var(--bg-sec);color:var(--text2);border:1px dashed var(--text3)}
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:11px}
+th{text-align:left;padding:6px 8px;color:var(--text3);font-weight:700;font-size:9px;letter-spacing:.07em;text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap;background:var(--bg-card);position:sticky;top:0;z-index:1}
+th.sortable{cursor:pointer;user-select:none}
+th.sortable:hover{color:var(--text)}
+th.sort-asc::after{content:' ↑';color:var(--orange)}
+th.sort-desc::after{content:' ↓';color:var(--orange)}
+td{padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--bg-sec)}
+tr.oos-row td{opacity:.65}
+.prod-link{display:inline-flex;flex-direction:column;gap:1px;text-decoration:none;color:inherit}
+.pl-id{font-family:'SF Mono',monospace;font-size:10px;color:var(--blue);text-decoration:underline;text-decoration-color:rgba(24,95,165,.3);text-underline-offset:2px}
+.pl-id:hover{text-decoration-color:var(--blue)}
+.pl-name{font-size:10px;color:var(--text2);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.comp-link{display:inline-flex;flex-direction:column;gap:1px;text-decoration:none;color:inherit}
+.cl-comp{font-size:10px;color:var(--text2);white-space:nowrap}
+.cl-price{font-weight:600;color:var(--blue);text-decoration:underline;text-decoration-color:rgba(24,95,165,.3);text-underline-offset:2px;white-space:nowrap}
+.cl-price:hover{text-decoration-color:var(--blue)}
+.cl-title{font-size:10px;color:var(--text3);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.d-crit{font-weight:600;color:var(--red)}
+.d-warn{font-weight:600;color:var(--amber)}
+.d-cheap{font-weight:600;color:var(--green)}
+.d-par{color:var(--text2)}
+.cbar{display:flex;align-items:center;gap:5px}
+.ctrack{width:44px;height:4px;border-radius:2px;background:var(--border);overflow:hidden;flex-shrink:0}
+.cfill{height:100%;border-radius:2px}
+.cf-hi{background:var(--green)}.cf-mid{background:#BA7517}.cf-lo{background:var(--red)}
+.alert-list{display:flex;flex-direction:column;gap:6px}
+.alert-row{padding:8px 10px 8px 13px;border-radius:var(--radius);font-size:11px;border:1px solid transparent;border-left-width:3px}
+.ar-crit{background:var(--red-bg);border-color:var(--red-border);border-left-color:var(--red);color:#501313}
+.ar-warn{background:var(--amber-bg);border-color:var(--amber-border);border-left-color:var(--orange);color:#412402}
+.ar-info{background:var(--blue-bg);border-color:#b5d4f4;border-left-color:var(--blue);color:#042c53}
+.ar-oos{background:var(--bg-sec);border-color:var(--border);border-left-color:var(--text3);color:var(--text)}
+.ar-good{background:var(--green-bg);border-color:var(--green-border);border-left-color:var(--green);color:#173404}
+.alert-top{display:flex;align-items:flex-start;gap:7px;margin-bottom:6px}
+.alert-top i{font-size:14px;flex-shrink:0;margin-top:1px}
+.alert-msg{flex:1;line-height:1.4;font-weight:500}
+.alert-time{font-size:10px;opacity:.6;white-space:nowrap;flex-shrink:0}
+.alert-pair{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.ap-side{background:rgba(0,0,0,.04);border-radius:6px;padding:6px 8px;font-size:10px}
+.ap-side label{font-size:9px;opacity:.7;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:2px}
+.ap-side a{color:inherit;text-decoration:underline;text-decoration-color:rgba(0,0,0,.2);text-underline-offset:2px;font-weight:600}
+.btn{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;font-size:11px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;background:var(--bg-card);color:var(--text);font-family:inherit;transition:background .12s}
+.btn:hover{background:var(--bg-sec)}
+.btn.prim{background:var(--orange);color:#fff;border-color:var(--orange)}
+.btn.prim:hover{background:#c73d16}
+.btn.sm{padding:3px 8px;font-size:10px}
+.btn.danger{background:var(--red-bg);color:var(--red);border-color:var(--red-border)}
+.filter-row{display:flex;gap:7px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+.filter-row input,.filter-row select{padding:5px 8px;font-size:11px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);color:var(--text);font-family:inherit}
+.filter-row input{min-width:220px;flex:1}
+.rev-row{border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:8px}
+.rev-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}
+.rev-side{background:var(--bg-sec);border-radius:var(--radius);padding:8px;font-size:10px}
+.rev-side label{color:var(--text2);display:block;margin-bottom:2px;text-transform:uppercase;letter-spacing:.04em;font-size:9px}
+.rev-side .rv{font-size:12px;font-weight:600}
+.rev-reason{font-size:10px;color:var(--text2);background:var(--bg-sec);border-radius:var(--radius);padding:6px 8px;margin-bottom:8px}
+.comp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.comp-card{padding:9px 11px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:border-color .12s}
+.comp-card:hover{border-color:var(--orange)}
+.comp-card .cn{font-weight:600;font-size:12px;margin-bottom:1px}
+.comp-card .cu{font-size:10px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:5px}
+.info-note{background:var(--blue-bg);border:1px solid #b5d4f4;border-radius:var(--radius);padding:8px 11px;font-size:11px;color:#042c53;display:flex;gap:7px}
+.warn-note{background:var(--amber-bg);border:1px solid var(--amber-border);border-radius:var(--radius);padding:8px 11px;font-size:11px;color:#412402;display:flex;gap:7px}
+.chart-wrap{position:relative;height:190px}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.loading{display:flex;align-items:center;justify-content:center;padding:40px;color:var(--text2);gap:8px;font-size:12px}
+.spinner{width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--orange);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.sched-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px}
+.sched-row:last-child{border-bottom:none}
+.sched-ico{width:26px;height:26px;border-radius:var(--radius);background:var(--bg-sec);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+
+/* ── Auth screens ──────────────────────────────────────────────────────── */
+.auth-shell{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--bg-app)}
+.auth-card{width:100%;max-width:420px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px 32px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.auth-brand{text-align:center;margin-bottom:20px}
+.auth-brand .logo-box{display:inline-flex;margin-bottom:8px}
+.auth-brand h1{font-size:18px;font-weight:700;color:var(--text);margin-bottom:2px}
+.auth-brand .sub{font-size:11px;color:var(--text2);letter-spacing:.05em;text-transform:uppercase}
+.auth-tabs{display:flex;gap:2px;background:var(--bg-sec);padding:3px;border-radius:var(--radius);margin-bottom:18px}
+.auth-tab-btn{flex:1;padding:7px 10px;border:none;background:transparent;color:var(--text2);cursor:pointer;border-radius:4px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;font-family:inherit}
+.auth-tab-btn.active{background:var(--bg-card);color:var(--text);box-shadow:0 1px 2px rgba(0,0,0,.05)}
+.auth-field{margin-bottom:12px}
+.auth-field label{display:block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text2);margin-bottom:5px}
+.auth-field input{width:100%;padding:9px 11px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:13px;font-family:inherit}
+.auth-field input:focus{outline:none;border-color:var(--orange)}
+.auth-btn{width:100%;padding:10px;background:var(--orange);color:#fff;border:none;border-radius:var(--radius);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;cursor:pointer;font-family:inherit;margin-top:4px}
+.auth-btn:hover{background:#c73d16}
+.auth-btn:disabled{opacity:.5;cursor:not-allowed}
+.auth-link{background:none;border:none;color:var(--blue);cursor:pointer;font-size:11px;padding:0;margin-top:10px;font-family:inherit;text-decoration:underline;text-decoration-color:rgba(24,95,165,.3)}
+.auth-msg{padding:8px 11px;border-radius:var(--radius);font-size:11px;margin-top:10px;line-height:1.4}
+.auth-msg.error{background:var(--red-bg);color:var(--red);border:1px solid var(--red-border)}
+.auth-msg.success{background:var(--green-bg);color:var(--green);border:1px solid var(--green-border)}
+.auth-msg.info{background:var(--blue-bg);color:#042c53;border:1px solid #b5d4f4}
+.auth-help{font-size:11px;color:var(--text2);line-height:1.5;margin-top:6px;margin-bottom:14px}
+
+/* ── Admin user management ─────────────────────────────────────────────── */
+.admin-tabs{display:flex;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--border)}
+.admin-tab{padding:8px 14px;background:none;border:none;color:var(--text2);cursor:pointer;border-bottom:2px solid transparent;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;font-family:inherit;margin-bottom:-1px}
+.admin-tab.active{color:var(--orange);border-bottom-color:var(--orange)}
+.pill{display:inline-block;padding:1px 7px;border-radius:99px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.pill-pending{background:var(--amber-bg);color:var(--amber)}
+.pill-approved{background:var(--green-bg);color:var(--green)}
+.pill-rejected{background:var(--red-bg);color:var(--red)}
+.pill-admin{background:#ede9fe;color:#5b21b6}
+.empty{padding:30px;text-align:center;color:var(--text2);font-size:11px}
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     AUTH SHELL — view-loading / view-login / view-pending / view-rejected
+     ════════════════════════════════════════════════════════════════════════ -->
+
+<div id="view-loading" class="auth-shell">
+  <div class="auth-card" style="text-align:center">
+    <div class="auth-brand">
+      <div class="logo-box"><span class="uk">UK</span><span class="pos">POS</span></div>
+      <h1>PriceWatch Pro</h1>
+      <div class="sub">Competitive price intelligence</div>
+    </div>
+    <div class="loading"><span class="spinner"></span> Loading…</div>
+  </div>
+</div>
+
+<div id="view-login" class="auth-shell" style="display:none">
+  <div class="auth-card">
+    <div class="auth-brand">
+      <div class="logo-box"><span class="uk">UK</span><span class="pos">POS</span></div>
+      <h1>PriceWatch Pro</h1>
+      <div class="sub">Competitive price intelligence</div>
+    </div>
+
+    <div class="auth-tabs" role="tablist">
+      <button id="tab-login"    class="auth-tab-btn active" onclick="showAuthTab('login')">Sign in</button>
+      <button id="tab-register" class="auth-tab-btn"        onclick="showAuthTab('register')">Request access</button>
+    </div>
+
+    <form id="form-login" onsubmit="handleLogin(event)">
+      <div class="auth-field">
+        <label for="login-email">Email</label>
+        <input id="login-email" type="email" required autocomplete="email" placeholder="you@ukpos.com">
+      </div>
+      <div class="auth-field">
+        <label for="login-password">Password</label>
+        <input id="login-password" type="password" required autocomplete="current-password">
+      </div>
+      <button type="submit" class="auth-btn" id="login-submit">Sign in</button>
+      <button type="button" class="auth-link" onclick="handleForgotPassword()">Forgot password?</button>
+      <div id="login-msg"></div>
+    </form>
+
+    <form id="form-register" style="display:none" onsubmit="handleRequestAccess(event)">
+      <div class="auth-help">
+        Submit your work email and the administrator will review your request.
+        You'll receive an email with a link to set your password once approved.
+      </div>
+      <div class="auth-field">
+        <label for="reg-email">Work email</label>
+        <input id="reg-email" type="email" required placeholder="you@ukpos.com">
+      </div>
+      <div class="auth-field">
+        <label for="reg-name">Full name (optional)</label>
+        <input id="reg-name" type="text" placeholder="Jane Smith">
+      </div>
+      <button type="submit" class="auth-btn" id="reg-submit">Submit request</button>
+      <div id="reg-msg"></div>
+    </form>
+  </div>
+</div>
+
+<div id="view-pending" class="auth-shell" style="display:none">
+  <div class="auth-card" style="text-align:center">
+    <div class="auth-brand">
+      <div class="logo-box"><span class="uk">UK</span><span class="pos">POS</span></div>
+      <h1>PriceWatch Pro</h1>
+    </div>
+    <h1 style="font-size:14px;font-weight:600;margin-bottom:6px">Awaiting approval</h1>
+    <div class="auth-help" style="text-align:left">
+      Your request is in the queue. You'll receive an email once the administrator approves your account.
+    </div>
+    <button class="auth-btn" onclick="signOut()">Sign out</button>
+  </div>
+</div>
+
+<div id="view-rejected" class="auth-shell" style="display:none">
+  <div class="auth-card" style="text-align:center">
+    <div class="auth-brand">
+      <div class="logo-box"><span class="uk">UK</span><span class="pos">POS</span></div>
+      <h1>PriceWatch Pro</h1>
+    </div>
+    <h1 style="font-size:14px;font-weight:600;margin-bottom:6px">Request declined</h1>
+    <div class="auth-help" style="text-align:left">
+      Your access request was not approved. If you believe this is an error, contact the administrator.
+    </div>
+    <button class="auth-btn" onclick="signOut()">Sign out</button>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     DASHBOARD (hidden until signed in + approved)
+     ════════════════════════════════════════════════════════════════════════ -->
+
+<div id="view-dashboard" class="app" style="display:none">
+
+  <!-- Brand header -->
+  <div class="topbar-brand">
+    <div class="logo-area">
+      <div class="logo-box"><span class="uk">UK</span><span class="pos">POS</span></div>
+      <span class="brand-product">PriceWatch Pro</span>
+    </div>
+    <div class="topbar-right">
+      <span class="status-dot"></span>
+      <span id="sync-status" style="font-size:11px;color:rgba(255,255,255,.45)">Loading…</span>
+      <button class="btn sm prim" id="manual-btn" onclick="manualLookupAll()"><i class="ti ti-refresh"></i> Refresh</button>
+      <span style="width:1px;height:18px;background:rgba(255,255,255,.15);margin:0 4px"></span>
+      <span class="topbar-user">Signed in as <strong id="header-email">—</strong></span>
+      <button class="topbar-link" onclick="signOut()"><i class="ti ti-logout" style="font-size:11px"></i> Sign out</button>
+    </div>
+  </div>
+
+  <!-- Hero band -->
+  <div class="hero">
+    <div class="hero-label">Competitive Price Intelligence</div>
+    <div class="hero-title">Price Comparison Dashboard</div>
+    <div class="hero-sub">Real-time monitoring of competitor prices across <span id="hero-comp-count">23</span> suppliers — normalised to ex-VAT for like-for-like comparison.</div>
+    <div class="hero-stats">
+      <div class="hero-stat"><strong id="hero-prices-tracked">—</strong> prices tracked</div>
+      <div class="hero-stat"><strong id="hero-matches">—</strong> competitor matches</div>
+      <div class="hero-stat"><span class="accent" id="hero-critical">—</span> critical gaps</div>
+      <div class="hero-stat"><strong id="hero-skus">—</strong> SKUs monitored</div>
+      <div class="hero-stat"><strong id="hero-review">—</strong> in review queue</div>
+    </div>
+  </div>
+
+  <!-- Tab navigation -->
+  <div class="tab-nav">
+    <div class="tab active" onclick="go('dashboard',this)"><i class="ti ti-layout-dashboard"></i> Dashboard</div>
+    <div class="tab" onclick="go('skus',this)"><i class="ti ti-tag"></i> SKU Comparisons</div>
+    <div class="tab" onclick="go('review',this)"><i class="ti ti-eye"></i> Review Queue <span id="review-badge" class="tab-badge" style="display:none">0</span></div>
+    <div class="tab" onclick="go('competitors',this)"><i class="ti ti-building-store"></i> Competitors</div>
+    <div class="tab" onclick="go('schedule',this)"><i class="ti ti-clock"></i> Schedule</div>
+    <div id="tab-users" class="tab" style="display:none" onclick="go('users',this)"><i class="ti ti-users"></i> User Management <span id="pending-badge" class="tab-badge" style="display:none">0</span></div>
+    <div class="tab-right">
+      <span class="vat vat-ex" style="font-size:10px"><i class="ti ti-receipt" style="font-size:10px"></i> Your prices: ex-VAT</span>
+    </div>
+  </div>
+
+  <!-- Main content -->
+  <div class="main">
+    <div class="content">
+
+    <!-- DASHBOARD -->
+    <div id="p-dashboard" class="panel active">
+      <div class="metrics">
+        <div class="metric m-red"><label>Critical (&gt;10% pricier)</label><div class="val" id="m-crit">—</div><div class="sub">action recommended</div></div>
+        <div class="metric m-amber"><label>Warning (5–10% pricier)</label><div class="val" id="m-warn">—</div><div class="sub">monitor closely</div></div>
+        <div class="metric m-green"><label>We're cheapest</label><div class="val" id="m-cheap">—</div><div class="sub">competitive advantage</div></div>
+        <div class="metric m-gray"><label>Out of stock flagged</label><div class="val" id="m-oos">—</div><div class="sub">included, flagged</div></div>
+        <div class="metric m-amber"><label>Review queue</label><div class="val" id="m-review">—</div><div class="sub">awaiting human review</div></div>
+      </div>
+
+      <div class="warn-note">
+        <i class="ti ti-alert-triangle" style="font-size:14px;flex-shrink:0;margin-top:1px"></i>
+        <div><strong>VAT clarity needed on competitors flagged <span class="vat vat-unk" style="display:inline-flex">VAT?</span></strong> — a 20% differential may simply be the VAT difference. Set VAT status per competitor in the Competitors panel.</div>
+      </div>
+
+      <div class="two-col">
+        <div class="card">
+          <div class="card-hd"><h3>Price position distribution</h3><span style="font-size:10px;color:var(--text2)">vs cheapest competitor</span></div>
+          <div class="chart-wrap"><canvas id="distChart" role="img" aria-label="Bar chart of price position distribution across 500 SKUs"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-hd"><h3>Alerts <span id="alert-ts" style="font-size:11px;font-weight:400;color:var(--text2)"></span></h3></div>
+          <div class="alert-list" id="dash-alerts"><div class="loading"><span class="spinner"></span> Loading alerts…</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-hd">
+          <h3>Biggest price gaps — where we're most expensive</h3>
+          <button class="btn sm" onclick="go('skus',document.querySelector('[onclick*=skus]'))">All SKUs</button>
+        </div>
+        <div class="tw"><table><thead><tr>
+          <th>Your SKU</th><th>Competitor · product</th><th>Your price</th><th>Their price</th><th>VAT</th><th>Diff</th><th>Stock</th><th>Confidence</th><th>Updated</th>
+        </tr></thead><tbody id="dash-tbody"><tr><td colspan="9"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- SKU COMPARISONS -->
+    <div id="p-skus" class="panel">
+      <div class="card">
+        <div class="filter-row">
+          <input type="text" id="skuQ" placeholder="Search SKU, product, competitor… e.g. A2 pavement sign" oninput="debounce(filterSKUs,400)()">
+          <select id="fDiff" onchange="filterSKUs()">
+            <option value="">All differentials</option>
+            <option value="crit">We're &gt;10% more expensive</option>
+            <option value="warn">We're 5–10% more expensive</option>
+            <option value="par">At parity</option>
+            <option value="cheap">We're cheaper</option>
+          </select>
+          <select id="fVat" onchange="filterSKUs()">
+            <option value="">All VAT statuses</option>
+            <option value="ex">Ex-VAT confirmed</option>
+            <option value="inc">Inc-VAT confirmed</option>
+            <option value="unknown">VAT unknown</option>
+          </select>
+          <select id="fStock" onchange="filterSKUs()">
+            <option value="">All stock</option>
+            <option value="in">In stock</option>
+            <option value="oos">Out of stock</option>
+            <option value="unavail">Unavailable at comp.</option>
+          </select>
+        </div>
+        <div class="tw"><table><thead><tr>
+          <th>Your SKU</th><th>Competitor · product</th><th>Your price</th><th>Your VAT</th><th>Their price</th><th>Their VAT</th><th>Diff</th><th>Stock</th><th>Match</th><th>Conf.</th><th>Updated</th><th></th>
+        </tr></thead><tbody id="sku-tbody"><tr><td colspan="12"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table></div>
+        <div id="sku-pagination" style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:11px;color:var(--text2)"></div>
+      </div>
+    </div>
+
+    <!-- REVIEW QUEUE -->
+    <div id="p-review" class="panel">
+      <div class="info-note">
+        <i class="ti ti-info-circle" style="font-size:14px;flex-shrink:0;margin-top:1px"></i>
+        <div>Matches below 80% confidence need human review. Both product pages are linked — open both to visually confirm before approving.</div>
+      </div>
+      <div id="review-list"><div class="loading"><span class="spinner"></span> Loading review queue…</div></div>
+    </div>
+
+    <!-- COMPETITORS -->
+    <div id="p-competitors" class="panel">
+      <div class="card">
+        <div class="card-hd">
+          <h3>Monitored competitors</h3>
+          <div style="display:flex;gap:7px" id="vat-summary"></div>
+        </div>
+        <div class="warn-note" style="margin-bottom:12px">
+          <i class="ti ti-alert-triangle" style="font-size:13px;flex-shrink:0;margin-top:1px"></i>
+          <div>Click any competitor to update their VAT status. This is required before price differentials are reliable.</div>
+        </div>
+        <div class="comp-grid" id="comp-grid"><div class="loading"><span class="spinner"></span></div></div>
+      </div>
+    </div>
+
+    <!-- SCHEDULE -->
+    <div id="p-schedule" class="panel">
+      <div class="card">
+        <div class="card-hd"><h3>Nightly sync</h3></div>
+        <div>
+          <div class="sched-row"><div class="sched-ico"><i class="ti ti-clock" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">Start time</div><div style="font-size:10px;color:var(--text2)">Runs nightly via cron (Vercel cron job)</div></div><strong>01:00am</strong></div>
+          <div class="sched-row"><div class="sched-ico"><i class="ti ti-device-mobile" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">User-agent rotation</div><div style="font-size:10px;color:var(--text2)">Chrome desktop, mobile Safari, tablet, Firefox — per request</div></div><span class="badge b-green">Enabled</span></div>
+          <div class="sched-row"><div class="sched-ico"><i class="ti ti-hourglass" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">Page timeout</div><div style="font-size:10px;color:var(--text2)">Max wait for JS-heavy pages</div></div><strong>30 seconds</strong></div>
+          <div class="sched-row"><div class="sched-ico"><i class="ti ti-package-off" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">Out-of-stock handling</div><div style="font-size:10px;color:var(--text2)">Included in comparisons, flagged with last-known price</div></div><span class="badge b-amber">Flagged &amp; included</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-hd"><h3>Run history</h3></div>
+        <div id="run-history"><div class="loading"><span class="spinner"></span></div></div>
+      </div>
+    </div>
+
+    <!-- USER MANAGEMENT (super-admin only) -->
+    <div id="p-users" class="panel">
+      <div class="card">
+        <div class="card-hd">
+          <h3>Access requests &amp; users</h3>
+          <span style="font-size:10px;color:var(--text2)">Approve or reject requests · invite emails are sent on approval</span>
+        </div>
+        <div class="admin-tabs">
+          <button class="admin-tab active" data-status="pending"  onclick="loadUsers('pending')">Pending</button>
+          <button class="admin-tab"        data-status="approved" onclick="loadUsers('approved')">Approved</button>
+          <button class="admin-tab"        data-status="rejected" onclick="loadUsers('rejected')">Rejected</button>
+          <button class="admin-tab"        data-status="all"      onclick="loadUsers('all')">All</button>
+        </div>
+        <div class="tw"><table><thead><tr>
+          <th>Email</th><th>Name</th><th>Status</th><th>Role</th><th>Requested</th><th>Actions</th>
+        </tr></thead><tbody id="users-tbody">
+          <tr><td colspan="6" class="empty">Loading…</td></tr>
+        </tbody></table></div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+  </div>
+
+</div>
+
 <script>
-const sbClient = window.supabase.createClient('https://uaqakssusydpjzrcznhb.supabase.co', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...');
-// Your Supabase anon key here
-sbClient.auth.onAuthStateChange((event, session) => {
-  if (session) {
-    document.body.innerHTML = '<h1>Welcome! You are logged in.</h1>';
+/* ════════════════════════════════════════════════════════════════════════
+   AUTH LAYER — gates the dashboard, exposes window.api() with bearer token
+   ════════════════════════════════════════════════════════════════════════ */
+
+// API path is now relative — Vercel rewrites /api/* to api/index.py
+const API = '/api';
+
+let sbClient = null;
+let currentUser = null;
+let currentProfile = null;
+
+const $ = id => document.getElementById(id);
+
+function showView(viewId) {
+  ['view-loading','view-login','view-pending','view-rejected','view-dashboard']
+    .forEach(v => $(v).style.display = (v === viewId ? '' : 'none'));
+}
+
+function showAuthTab(which) {
+  $('tab-login').classList.toggle('active', which === 'login');
+  $('tab-register').classList.toggle('active', which === 'register');
+  $('form-login').style.display    = (which === 'login'    ? '' : 'none');
+  $('form-register').style.display = (which === 'register' ? '' : 'none');
+  $('login-msg').innerHTML = '';
+  $('reg-msg').innerHTML = '';
+}
+
+function showMsg(elId, text, kind) {
+  $(elId).innerHTML = `<div class="auth-msg ${kind}">${text}</div>`;
+}
+
+async function bootstrap() {
+  // Load Supabase URL + anon key from backend (so they're not hardcoded
+  // and can differ across preview/prod environments)
+  let cfg;
+  try {
+    const r = await fetch(API + '/config');
+    if (!r.ok) throw new Error('config ' + r.status);
+    cfg = await r.json();
+  } catch (e) {
+    showView('view-login');
+    showMsg('login-msg', 'Could not contact server. Please try again in a moment.', 'error');
+    return;
   }
-});
+  sbClient = window.supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key);
+
+  const { data: { session } } = await sbClient.auth.getSession();
+  if (!session) {
+    showView('view-login');
+  } else {
+    await onSignedIn(session);
+  }
+
+  sbClient.auth.onAuthStateChange(async (event, session) => {
+    if (event === 'SIGNED_OUT' || !session) {
+      currentUser = null; currentProfile = null;
+      showView('view-login');
+      return;
+    }
+    if (['SIGNED_IN','TOKEN_REFRESHED','USER_UPDATED','INITIAL_SESSION'].includes(event)) {
+      await onSignedIn(session);
+    }
+  });
+}
+
+async function onSignedIn(session) {
+  currentUser = session.user;
+  // We need to handle 401/403 specially (pending/rejected aren't errors,
+  // they're routing signals), so a direct fetch is clearer than api().
+  let r2;
+  try {
+    r2 = await fetch(API + '/auth/me', {
+      headers: { 'Authorization': 'Bearer ' + session.access_token }
+    });
+  } catch {
+    await sbClient.auth.signOut(); return;
+  }
+  if (r2.status === 401) { await sbClient.auth.signOut(); return; }
+  if (r2.status === 403) {
+    // No profile row exists yet — treat as pending
+    showView('view-pending');
+    return;
+  }
+  if (!r2.ok) { await sbClient.auth.signOut(); return; }
+
+  currentProfile = await r2.json();
+  $('header-email').textContent = currentProfile.email;
+
+  if (currentProfile.status === 'pending')  return showView('view-pending');
+  if (currentProfile.status === 'rejected') return showView('view-rejected');
+
+  // Approved
+  showView('view-dashboard');
+
+  if (currentProfile.role === 'super_admin') {
+    $('tab-users').style.display = '';
+    refreshPendingBadge();
+  }
+
+  // Now kick off the dashboard data load
+  loadDashboard();
+}
+
+// Override of api() — uses bearer token from current session
+async function api(path, opts) {
+  opts = opts || {};
+  opts.headers = opts.headers || {};
+  if (sbClient) {
+    const { data: { session } } = await sbClient.auth.getSession();
+    if (session) opts.headers['Authorization'] = 'Bearer ' + session.access_token;
+  }
+  const res = await fetch(API + path, opts);
+  if (!res.ok) throw new Error(`API ${path} → ${res.status}`);
+  return res.json();
+}
+
+// authPost helper used by lookupSKU, reviewDecision, dismissAlert, editCompetitor
+async function authPost(path, body, method) {
+  const opts = {
+    method: method || 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  if (sbClient) {
+    const { data: { session } } = await sbClient.auth.getSession();
+    if (session) opts.headers['Authorization'] = 'Bearer ' + session.access_token;
+  }
+  return fetch(API + path, opts);
+}
+window.api = api;
+window.authPost = authPost;
+
+async function handleLogin(e) {
+  e.preventDefault();
+  const btn = $('login-submit');
+  btn.disabled = true;
+  const email = $('login-email').value.trim();
+  const password = $('login-password').value;
+  const { error } = await sbClient.auth.signInWithPassword({ email, password });
+  btn.disabled = false;
+  if (error) showMsg('login-msg', error.message, 'error');
+}
+
+async function handleForgotPassword() {
+  const email = $('login-email').value.trim();
+  if (!email) {
+    showMsg('login-msg', 'Enter your email above first, then click Forgot password.', 'info');
+    return;
+  }
+  const { error } = await sbClient.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin + '/'
+  });
+  if (error) showMsg('login-msg', error.message, 'error');
+  else showMsg('login-msg', 'Check your inbox for a reset link.', 'success');
+}
+
+async function handleRequestAccess(e) {
+  e.preventDefault();
+  const btn = $('reg-submit');
+  btn.disabled = true;
+  const email = $('reg-email').value.trim().toLowerCase();
+  const full_name = $('reg-name').value.trim();
+  const r = await fetch(API + '/auth/request-access', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, full_name })
+  });
+  btn.disabled = false;
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) { showMsg('reg-msg', body.detail || 'Request failed.', 'error'); return; }
+  showMsg('reg-msg', 'Request submitted. You will be notified by email once approved.', 'success');
+  $('form-register').reset();
+}
+
+async function signOut() {
+  if (sbClient) await sbClient.auth.signOut();
+}
+
+/* ── Admin: User management ────────────────────────────────────────────── */
+
+async function loadUsers(status) {
+  document.querySelectorAll('.admin-tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.status === status));
+  const tbody = $('users-tbody');
+  tbody.innerHTML = '<tr><td colspan="6" class="empty">Loading…</td></tr>';
+  try {
+    const data = await api('/admin/users?status=' + encodeURIComponent(status));
+    if (!data.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">No users.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.map(u => {
+      const requested = u.requested_at ? ts(u.requested_at) : '—';
+      // u.kind is 'request' (pending only) or 'profile' (approved/rejected)
+      // u.id is the email for requests, the uuid for profiles
+      const idEnc = encodeURIComponent(u.id);
+      const actions = [];
+      if (u.kind === 'request') {
+        // Pending access request — needs invite + creation
+        actions.push(`<button class="btn sm prim" onclick="approveRow('request','${idEnc}',this)"><i class="ti ti-check"></i> Approve</button>`);
+        actions.push(`<button class="btn sm danger" onclick="rejectRow('request','${idEnc}',this)"><i class="ti ti-x"></i> Reject</button>`);
+      } else if (u.status === 'approved' && u.id !== currentProfile.id) {
+        // Existing approved user — can be revoked
+        actions.push(`<button class="btn sm danger" onclick="rejectRow('profile','${idEnc}',this)">Revoke</button>`);
+      } else if (u.status === 'rejected') {
+        // Existing rejected user — can be reinstated
+        actions.push(`<button class="btn sm prim" onclick="approveRow('profile','${idEnc}',this)">Reinstate</button>`);
+      }
+      return `<tr>
+        <td style="font-weight:600">${escapeHtml(u.email)}</td>
+        <td>${escapeHtml(u.full_name || '')}</td>
+        <td><span class="pill pill-${u.status}">${u.status}</span></td>
+        <td>${u.role === 'super_admin' ? '<span class="pill pill-admin">admin</span>' : ''}</td>
+        <td style="font-size:10px;color:var(--text2)">${requested}</td>
+        <td>${actions.join(' ')}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="6" class="empty" style="color:var(--red)">${e.message}</td></tr>`;
+  }
+}
+
+async function approveRow(kind, idEnc, btnEl) {
+  btnEl.disabled = true;
+  const path = (kind === 'request')
+    ? `/admin/requests/${idEnc}/approve`
+    : `/admin/users/${idEnc}/reinstate`;
+  const r = await authPost(path);
+  if (!r.ok) {
+    const b = await r.json().catch(() => ({}));
+    alert('Approve failed: ' + (b.detail || r.status));
+    btnEl.disabled = false;
+    return;
+  }
+  await loadUsers(activeAdminTab());
+  refreshPendingBadge();
+}
+
+async function rejectRow(kind, idEnc, btnEl) {
+  if (!confirm(kind === 'request' ? 'Reject this access request?' : 'Revoke this user\'s access?')) return;
+  btnEl.disabled = true;
+  const path = (kind === 'request')
+    ? `/admin/requests/${idEnc}/reject`
+    : `/admin/users/${idEnc}/revoke`;
+  const r = await authPost(path);
+  if (!r.ok) {
+    const b = await r.json().catch(() => ({}));
+    alert('Action failed: ' + (b.detail || r.status));
+    btnEl.disabled = false;
+    return;
+  }
+  await loadUsers(activeAdminTab());
+  refreshPendingBadge();
+}
+
+function activeAdminTab() {
+  const t = document.querySelector('.admin-tab.active');
+  return t ? t.dataset.status : 'pending';
+}
+
+async function refreshPendingBadge() {
+  if (!currentProfile || currentProfile.role !== 'super_admin') return;
+  try {
+    const data = await api('/admin/pending-count');
+    const badge = $('pending-badge');
+    if (data.count > 0) {
+      badge.textContent = data.count;
+      badge.style.display = 'inline-flex';
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch {}
+}
+setInterval(refreshPendingBadge, 60_000);
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   DASHBOARD CODE (originally from index.html — preserved verbatim except
+   for: (a) hardcoded API URL removed in favour of api() above, and
+   (b) raw fetch() calls changed to authPost() for write endpoints)
+   ════════════════════════════════════════════════════════════════════════ */
+
+let skuPage = 1;
+const skuLimit = 50;
+
+function debounce(fn, ms) {
+  let t;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+
+function vatPill(v) {
+  if (v === 'ex')  return '<span class="vat vat-ex">ex-VAT</span>';
+  if (v === 'inc') return '<span class="vat vat-inc">inc-VAT</span>';
+  return '<span class="vat vat-unk">VAT?</span>';
+}
+
+function diffCell(diff, normDiff, availability) {
+  const d = normDiff ?? diff;
+  if (availability === 'unavailable') return '<span style="color:var(--text3)">—</span>';
+  if (d === null || d === undefined)  return '<span style="color:var(--text3)">—</span>';
+  if (d >= 0)   return `<span class="d-cheap">+${d.toFixed(1)}%</span>`;
+  if (d <= -10) return `<span class="d-crit">${d.toFixed(1)}%</span>`;
+  if (d <= -5)  return `<span class="d-warn">${d.toFixed(1)}%</span>`;
+  return `<span class="d-par">${d.toFixed(1)}%</span>`;
+}
+
+function confWidget(c) {
+  if (!c) return '—';
+  const cls = c >= 85 ? 'cf-hi' : c >= 70 ? 'cf-mid' : 'cf-lo';
+  return `<div class="cbar"><div class="ctrack"><div class="cfill ${cls}" style="width:${c}%"></div></div><span style="font-size:10px">${c}%</span></div>`;
+}
+
+function stockBadge(avail) {
+  if (avail === 'out_of_stock') return '<span class="badge b-oos"><i class="ti ti-package-off" style="font-size:9px"></i> OOS</span>';
+  if (avail === 'unavailable')  return '<span class="badge b-gray">Unavailable</span>';
+  return '';
+}
+
+function ts(dt) {
+  if (!dt) return '—';
+  const d = new Date(dt);
+  return d.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'}) + ' ' +
+         d.toLocaleDateString('en-GB', {day:'numeric',month:'short'});
+}
+
+function ourLink(row) {
+  const url = row.our_url || row.product_url || `https://www.ukpos.com/${row.slug}?vat=0`;
+  const id  = row.sku_id;
+  const title = row.short_title || '';
+  return `<a class="prod-link" href="${url}" target="_blank" rel="noopener">
+    <span class="pl-id">${id} <i class="ti ti-external-link" style="font-size:9px"></i></span>
+    <span class="pl-name">${title}</span>
+  </a>`;
+}
+
+function compLink(row) {
+  const url   = row.competitor_url;
+  const name  = row.competitor_name || row.competitor_domain || '';
+  const title = row.competitor_title || '';
+  const vat   = row.competitor_vat || row.competitor_vat_default || 'unknown';
+  const raw   = row.competitor_price ? parseFloat(row.competitor_price) : null;
+  let priceHtml = '—';
+  if (raw) {
+    const ex  = vat === 'inc' ? raw / 1.2 : raw;
+    const inc = vat === 'ex'  ? raw * 1.2 : (vat === 'inc' ? raw : null);
+    const incPart = inc ? ` <span style="color:var(--text3);font-weight:400;font-size:9px">(£${inc.toFixed(2)} inc)</span>` : '';
+    priceHtml = `£${ex.toFixed(2)} ex${incPart}`;
+  }
+  if (!url) return `<span style="font-size:10px;color:var(--text2)">${name} — no URL</span>`;
+  return `<a class="comp-link" href="${url}" target="_blank" rel="noopener">
+    <span class="cl-comp">${name}</span>
+    <span class="cl-price">${priceHtml} <i class="ti ti-external-link" style="font-size:9px"></i></span>
+    <span class="cl-title">${title}</span>
+  </a>`;
+}
+
+function matchTag(s) {
+  const map = {
+    matched:'<span class="badge b-green">matched</span>',
+    review:'<span class="badge b-amber">review</span>',
+    rejected:'<span class="badge b-gray">rejected</span>',
+    unavailable:'<span class="badge b-gray">unavailable</span>',
+    pending:'<span class="badge b-blue">pending</span>',
+  };
+  return map[s] || `<span class="badge b-gray">${s}</span>`;
+}
+
+function go(name, el) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  $(`p-${name}`).classList.add('active');
+  if (el) el.classList.add('active');
+  if (name === 'review')      loadReview();
+  if (name === 'skus')        { if (!$('sku-tbody').querySelector('tr td:not([colspan])')) loadSKUs(); }
+  if (name === 'competitors') loadCompetitors();
+  if (name === 'schedule')    loadRuns();
+  if (name === 'users')       loadUsers('pending');
+}
+
+async function loadDashboard() {
+  try {
+    const d = await api('/dashboard');
+    const m = d.metrics;
+
+    $('m-crit').textContent   = m.critical;
+    $('m-warn').textContent   = m.warning;
+    $('m-cheap').textContent  = m.cheapest;
+    $('m-oos').textContent    = m.oos;
+    $('m-review').textContent = m.review;
+
+    const tc = d.metrics.total_comparisons || 0;
+    const mc = d.sku_count || 0;
+    if ($('hero-prices-tracked')) $('hero-prices-tracked').textContent = tc.toLocaleString();
+    if ($('hero-matches'))        $('hero-matches').textContent = (d.competitor_count && mc ? (mc * d.competitor_count) : '1,205').toLocaleString();
+    if ($('hero-critical'))       $('hero-critical').textContent = (d.metrics.critical || 0) + ' critical';
+    if ($('hero-skus'))           $('hero-skus').textContent = mc.toLocaleString();
+    if ($('hero-review'))         $('hero-review').textContent = (d.metrics.review || 0).toLocaleString();
+    if ($('hero-comp-count'))     $('hero-comp-count').textContent = d.competitor_count || 23;
+
+    if ($('sync-status') && d.last_run) {
+      const r = d.last_run;
+      $('sync-status').innerHTML = `Last sync <strong style="color:rgba(255,255,255,.7)">${ts(r.completed_at || r.started_at)}</strong> · ${r.skus_succeeded || 0} SKUs`;
+    }
+
+    if (m.review > 0) {
+      $('review-badge').textContent = m.review;
+      $('review-badge').style.display = 'inline-flex';
+    }
+
+    if (d.last_run) {
+      const r = d.last_run;
+      $('sync-status').innerHTML = `Last sync <strong>${ts(r.completed_at || r.started_at)}</strong> · ${r.skus_succeeded}/${r.skus_attempted} SKUs · Next run <strong>01:00am</strong>`;
+    }
+
+    renderAlerts(d.alerts);
+    if (d.alerts?.length) {
+      $('alert-ts').textContent = `— ${d.alerts.length} active`;
+    }
+
+    renderWorstTable(d.worst || []);
+    buildDistChart(m);
+  } catch (e) {
+    console.error('Dashboard load failed:', e);
+    $('dash-alerts').innerHTML = `<div style="color:var(--red);font-size:11px;padding:8px">Failed to load: ${e.message}</div>`;
+  }
+}
+
+function renderAlerts(alerts) {
+  if (!alerts || !alerts.length) {
+    $('dash-alerts').innerHTML = '<div style="color:var(--text2);font-size:11px;padding:8px;text-align:center">No active alerts</div>';
+    return;
+  }
+  const typeMap = {
+    critical:      {cls:'ar-crit', icon:'ti-trending-up'},
+    warning:       {cls:'ar-warn', icon:'ti-trending-up'},
+    oos_us:        {cls:'ar-oos',  icon:'ti-package-off'},
+    oos_competitor:{cls:'ar-oos',  icon:'ti-package-off'},
+    unavailable:   {cls:'ar-oos',  icon:'ti-x'},
+    price_rise_them:{cls:'ar-good',icon:'ti-trending-down'},
+  };
+
+  $('dash-alerts').innerHTML = alerts.slice(0, 8).map(a => {
+    const {cls, icon} = typeMap[a.alert_type] || {cls:'ar-info', icon:'ti-bell'};
+    const sku = a.skus;
+    const comp = a.competitors;
+    const ourUrl = sku ? (sku.product_url || `https://www.ukpos.com/${sku.slug}?vat=0`) : '#';
+    const ourLabel = sku ? sku.short_title : a.sku_id;
+
+    return `<div class="alert-row ${cls}">
+      <div class="alert-top">
+        <i class="ti ${icon}"></i>
+        <span class="alert-msg">${a.message}</span>
+        <span class="alert-time">${ts(a.created_at)}</span>
+      </div>
+      <div class="alert-pair">
+        <div class="ap-side">
+          <label>Your product</label>
+          <div><a href="${ourUrl}" target="_blank" rel="noopener">${a.sku_id} <i class="ti ti-external-link" style="font-size:9px"></i></a></div>
+          <div style="font-size:9px;opacity:.7;margin-top:1px">${ourLabel}</div>
+          ${a.our_price ? `<div style="font-weight:600;margin-top:2px">£${parseFloat(a.our_price).toFixed(2)} <span class="vat vat-ex" style="font-size:9px">ex-VAT</span></div>` : ''}
+        </div>
+        <div class="ap-side">
+          <label>${comp ? comp.name : 'Competitor'}</label>
+          ${a.their_price
+            ? `<div style="font-weight:600">£${parseFloat(a.their_price).toFixed(2)}</div>`
+            : '<div style="opacity:.6">Price unknown</div>'}
+          ${a.diff_pct ? `<div style="margin-top:2px">${diffCell(a.diff_pct, a.diff_pct, 'in_stock')} vs your price</div>` : ''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderWorstTable(rows) {
+  if (!rows.length) {
+    $('dash-tbody').innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text2);padding:20px">No data yet — run a sync first</td></tr>';
+    return;
+  }
+  $('dash-tbody').innerHTML = rows.map(r => `<tr>
+    <td>${ourLink(r)}</td>
+    <td>${compLink(r)}</td>
+    <td style="font-weight:600">£${parseFloat(r.our_price).toFixed(2)}</td>
+    <td style="font-weight:600">${(()=>{const raw=r.competitor_price?parseFloat(r.competitor_price):null;if(!raw)return'—';const vat=r.competitor_vat||'unknown';const ex=vat==='inc'?raw/1.2:raw;const inc=vat==='ex'?raw*1.2:(vat==='inc'?raw:null);return`£${ex.toFixed(2)} ex${inc?` <span style="color:var(--text3);font-weight:400;font-size:9px">(£${inc.toFixed(2)} inc)</span>`:''}`})()}</td>
+    <td>${vatPill('ex')} ${vatPill(r.competitor_vat || r.competitor_vat_default || 'unknown')}</td>
+    <td>${diffCell(r.diff_pct, r.diff_pct_normalised, r.availability)}</td>
+    <td>${stockBadge(r.availability)}</td>
+    <td>${confWidget(null)}</td>
+    <td><span class="badge b-gray" style="font-size:9px">${ts(r.scraped_at)}</span></td>
+  </tr>`).join('');
+}
+
+function buildDistChart(m) {
+  const ctx = $('distChart');
+  if (!ctx) return;
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: ["We're cheapest","±2% parity","Up to 5%\nmore exp.","5–10%\nmore exp.",">10%\nmore exp.","OOS flagged"],
+      datasets: [{
+        data: [m.cheapest || 0, m.parity || 0, m.slight || 0, m.warning || 0, m.critical || 0, m.oos || 0],
+        backgroundColor: ['#639922','#888780','#BA7517','#E24B4A','#A32D2D','#B4B2A9'],
+        borderRadius: 3, borderSkipped: false
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.parsed.y} SKUs` } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#6b6a64', font: { size: 9 }, maxRotation: 0 } },
+        y: { grid: { color: 'rgba(0,0,0,.05)' }, ticks: { color: '#6b6a64', font: { size: 9 } } }
+      }
+    }
+  });
+}
+
+async function loadSKUs() {
+  const q     = $('skuQ')?.value || '';
+  const diff  = $('fDiff')?.value || '';
+  const vat   = $('fVat')?.value || '';
+  const stock = $('fStock')?.value || '';
+
+  let url = `/skus?page=${skuPage}&limit=${skuLimit}`;
+  if (q)     url += `&q=${encodeURIComponent(q)}`;
+  if (diff)  url += `&diff=${diff}`;
+  if (vat)   url += `&vat=${vat}`;
+  if (stock) url += `&stock=${stock}`;
+
+  try {
+    const d = await api(url);
+    const rows = d.data || [];
+    if (!rows.length) {
+      $('sku-tbody').innerHTML = '<tr><td colspan="12" style="text-align:center;color:var(--text2);padding:20px">No matches found</td></tr>';
+      return;
+    }
+    $('sku-tbody').innerHTML = rows.map(r => `<tr class="${r.availability === 'out_of_stock' ? 'oos-row' : ''}">
+      <td>${ourLink(r)}</td>
+      <td>${compLink(r)}</td>
+      <td style="font-weight:600">£${parseFloat(r.our_price).toFixed(2)}</td>
+      <td>${vatPill('ex')}</td>
+      <td style="font-weight:600">${(()=>{const raw=r.competitor_price?parseFloat(r.competitor_price):null;if(!raw)return'—';const vat=r.competitor_vat||'unknown';const ex=vat==='inc'?raw/1.2:raw;const inc=vat==='ex'?raw*1.2:(vat==='inc'?raw:null);return`£${ex.toFixed(2)} ex${inc?` <span style="color:var(--text3);font-weight:400;font-size:9px">(£${inc.toFixed(2)} inc)</span>`:''}`})()}</td>
+      <td>${vatPill(r.competitor_vat || r.competitor_vat_default || 'unknown')}</td>
+      <td>${diffCell(r.diff_pct, r.diff_pct_normalised, r.availability)}</td>
+      <td>${stockBadge(r.availability)}</td>
+      <td>${matchTag(r.match_status || 'pending')}</td>
+      <td>${confWidget(r.confidence)}</td>
+      <td><span class="badge b-gray" style="font-size:9px">${ts(r.scraped_at)}</span></td>
+      <td><button class="btn sm" onclick="lookupSKU('${r.sku_id}',this)" title="Manual real-time lookup"><i class="ti ti-refresh"></i></button></td>
+    </tr>`).join('');
+
+    $('sku-pagination').innerHTML = `
+      <span>Page ${skuPage}</span>
+      <div style="display:flex;gap:6px">
+        ${skuPage > 1 ? `<button class="btn sm" onclick="skuPage--;loadSKUs()">← Prev</button>` : ''}
+        ${rows.length === skuLimit ? `<button class="btn sm" onclick="skuPage++;loadSKUs()">Next →</button>` : ''}
+      </div>`;
+  } catch (e) {
+    $('sku-tbody').innerHTML = `<tr><td colspan="12" style="color:var(--red);padding:8px">${e.message}</td></tr>`;
+  }
+}
+
+function filterSKUs() { skuPage = 1; loadSKUs(); }
+
+async function lookupSKU(skuId, btn) {
+  const orig = btn.innerHTML;
+  btn.innerHTML = '<i class="ti ti-loader"></i>';
+  btn.disabled = true;
+  try {
+    await authPost('/lookup', { sku_id: skuId });
+    setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; loadSKUs(); }, 3000);
+  } catch { btn.innerHTML = orig; btn.disabled = false; }
+}
+
+async function manualLookupAll() {
+  const btn = $('manual-btn');
+  const orig = btn.innerHTML;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Running…';
+  btn.disabled = true;
+  setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; loadDashboard(); }, 3000);
+}
+
+async function loadReview() {
+  try {
+    const d = await api('/review');
+    const rows = d.data || [];
+    if (!rows.length) {
+      $('review-list').innerHTML = '<div style="text-align:center;color:var(--text2);padding:40px;font-size:12px">No items in review queue</div>';
+      return;
+    }
+    $('review-list').innerHTML = rows.map(r => {
+      const sku  = r.skus || {};
+      const comp = r.competitors || {};
+      const ourUrl  = sku.product_url || `https://www.ukpos.com/${sku.slug}?vat=0`;
+      return `<div class="rev-row" id="rev-${r.id}">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="font-size:12px;font-weight:600">${sku.short_title || r.sku_id} <span style="font-family:monospace;font-size:10px;color:var(--text2)">${r.sku_id}</span></div>
+          ${confWidget(r.confidence)}
+        </div>
+        <div class="rev-grid">
+          <div class="rev-side">
+            <label>Your product</label>
+            <div class="rv"><a href="${ourUrl}" target="_blank" rel="noopener">${r.sku_id} <i class="ti ti-external-link" style="font-size:9px"></i></a></div>
+            <div style="font-size:10px;color:var(--text2);margin:2px 0">${sku.short_title || ''}</div>
+            <div style="font-weight:600">£${sku.price_ex_vat ? parseFloat(sku.price_ex_vat).toFixed(2) : '—'} ${vatPill('ex')}</div>
+          </div>
+          <div class="rev-side">
+            <label>${comp.name || 'Competitor'} — matched product</label>
+            <div class="rv">${r.competitor_url ? `<a href="${r.competitor_url}" target="_blank" rel="noopener">${comp.name} listing <i class="ti ti-external-link" style="font-size:9px"></i></a>` : 'No URL'}</div>
+            <div style="font-size:10px;color:var(--text2);margin:2px 0">${r.competitor_title || ''}</div>
+            ${vatPill(comp.vat_status || 'unknown')}
+          </div>
+        </div>
+        ${r.notes ? `<div class="rev-reason"><i class="ti ti-alert-circle" style="font-size:11px;margin-right:4px"></i>${r.notes}</div>` : ''}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <button class="btn sm prim" onclick="reviewDecision(${r.id},'approve',this)"><i class="ti ti-check"></i> Approve match</button>
+          <button class="btn sm danger" onclick="reviewDecision(${r.id},'reject',this)"><i class="ti ti-x"></i> Reject</button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    $('review-list').innerHTML = `<div style="color:var(--red);padding:8px">${e.message}</div>`;
+  }
+}
+
+async function reviewDecision(matchId, decision, btn) {
+  btn.disabled = true;
+  try {
+    await authPost(`/review/${matchId}`, { decision });
+    const row = $(`rev-${matchId}`);
+    if (row) { row.style.opacity = '.4'; btn.textContent = decision === 'approve' ? '✓ Approved' : 'Rejected'; }
+    loadDashboard();
+  } catch (e) { btn.disabled = false; alert(e.message); }
+}
+
+async function loadCompetitors() {
+  try {
+    const d = await api('/competitors');
+    const comps = d.data || [];
+    const ex  = comps.filter(c => c.vat_status === 'ex').length;
+    const inc = comps.filter(c => c.vat_status === 'inc').length;
+    const unk = comps.filter(c => c.vat_status === 'unknown').length;
+    $('vat-summary').innerHTML = `<span class="vat vat-ex">Ex-VAT: ${ex}</span><span class="vat vat-inc">Inc-VAT: ${inc}</span><span class="vat vat-unk">Unknown: ${unk}</span>`;
+
+    $('comp-grid').innerHTML = comps.map(c => `<div class="comp-card" onclick="editCompetitor(${c.id},'${c.name}','${c.vat_status}')">
+      <div class="cn">${c.name}</div>
+      <div class="cu">${c.domain}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <span style="font-size:10px;color:var(--text2)">${c.feed_url ? '✓ Feed' : 'Scrape'}</span>
+        ${vatPill(c.vat_status)}
+      </div>
+    </div>`).join('');
+  } catch (e) {
+    $('comp-grid').innerHTML = `<div style="color:var(--red)">${e.message}</div>`;
+  }
+}
+
+function editCompetitor(id, name, currentVat) {
+  const newVat = prompt(`Set VAT status for ${name}:\n\n  ex  — prices exclude VAT\n  inc — prices include VAT\n  unknown — not yet determined\n\nCurrent: ${currentVat}`, currentVat);
+  if (!newVat || newVat === currentVat) return;
+  if (!['ex','inc','unknown'].includes(newVat.trim().toLowerCase())) {
+    alert('Invalid value. Enter: ex, inc, or unknown'); return;
+  }
+  authPost(`/competitors/${id}`, { vat_status: newVat.trim().toLowerCase() }, 'PATCH')
+    .then(() => loadCompetitors());
+}
+
+async function loadRuns() {
+  try {
+    const d = await api('/runs');
+    const rows = d.data || [];
+    if (!rows.length) { $('run-history').innerHTML = '<div style="color:var(--text2);padding:8px">No runs yet.</div>'; return; }
+    $('run-history').innerHTML = `<table style="width:100%;font-size:11px;border-collapse:collapse">
+      <thead><tr>
+        <th style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text2)">Date</th>
+        <th style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text2)">Trigger</th>
+        <th style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text2)">SKUs checked</th>
+        <th style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text2)">Succeeded</th>
+        <th style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text2)">OOS flagged</th>
+        <th style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text2)">Duration</th>
+        <th style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text2)">Status</th>
+      </tr></thead>
+      <tbody>${rows.map(r => {
+        const dur = r.completed_at ? Math.round((new Date(r.completed_at)-new Date(r.started_at))/60000) + 'm' : 'running';
+        const badge = r.status === 'complete' ? 'b-green' : r.status === 'running' ? 'b-blue' : 'b-amber';
+        return `<tr>
+          <td style="padding:5px 8px;border-bottom:1px solid var(--border)">${ts(r.started_at)}</td>
+          <td style="padding:5px 8px;border-bottom:1px solid var(--border)">${r.trigger}</td>
+          <td style="padding:5px 8px;border-bottom:1px solid var(--border)">${r.skus_attempted}</td>
+          <td style="padding:5px 8px;border-bottom:1px solid var(--border)">${r.skus_succeeded}</td>
+          <td style="padding:5px 8px;border-bottom:1px solid var(--border)">${r.oos_flagged}</td>
+          <td style="padding:5px 8px;border-bottom:1px solid var(--border)">${dur}</td>
+          <td style="padding:5px 8px;border-bottom:1px solid var(--border)"><span class="badge ${badge}">${r.status}</span></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+  } catch (e) { $('run-history').innerHTML = `<div style="color:var(--red)">${e.message}</div>`; }
+}
+
+// Auto-refresh dashboard every 5 minutes — only when logged in
+setInterval(() => { if (currentProfile && currentProfile.status === 'approved') loadDashboard(); }, 5 * 60 * 1000);
+
+// Boot
+bootstrap();
 </script>
 </body>
 </html>
