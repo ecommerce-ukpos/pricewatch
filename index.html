@@ -518,6 +518,8 @@ tr.oos-row td{opacity:.65}
         <input id="bysku-search" type="text" placeholder="Search SKU ID or title…" oninput="bySkuSearch()" style="flex:1;min-width:200px;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px">
         <span style="font-size:12px;color:var(--text2)" id="bysku-result-count"></span>
       </div>
+      <!-- Alphabet filter -->
+      <div id="bysku-alpha" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:4px"></div>
       <div id="bysku-list" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px"></div>
     </div>
     <!-- SKU detail view -->
@@ -803,21 +805,57 @@ async function initBySkuTab() {
     .eq('active', true)
     .order('sku_id');
   if (!error) allSkus = data || [];
+  renderAlphaBar();
   bySkuSearch();
+}
+
+let activeAlphaFilter = '';
+
+function renderAlphaBar() {
+  const letters = [...new Set(allSkus.map(s => s.sku_id[0]?.toUpperCase()).filter(Boolean))].sort();
+  $('bysku-alpha').innerHTML = [
+    `<button onclick="setAlpha('')" id="alpha-btn-all"
+      style="padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;cursor:pointer;font-weight:600">All</button>`
+  ].concat(letters.map(l =>
+    `<button onclick="setAlpha('${l}')" id="alpha-btn-${l}"
+      style="padding:4px 8px;border-radius:5px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;cursor:pointer;font-weight:600;min-width:28px">${l}</button>`
+  )).join('');
+  highlightAlphaBtn();
+}
+
+function setAlpha(letter) {
+  activeAlphaFilter = letter;
+  $('bysku-search').value = '';
+  highlightAlphaBtn();
+  bySkuSearch();
+}
+
+function highlightAlphaBtn() {
+  document.querySelectorAll('[id^="alpha-btn-"]').forEach(b => {
+    b.style.background = 'var(--bg-card)';
+    b.style.color = 'var(--text)';
+    b.style.borderColor = 'var(--border)';
+  });
+  const active = $('alpha-btn-' + (activeAlphaFilter || 'all'));
+  if (active) {
+    active.style.background = 'var(--orange)';
+    active.style.color = '#fff';
+    active.style.borderColor = 'var(--orange)';
+  }
 }
 
 function bySkuSearch() {
   const q = ($('bysku-search')?.value || '').toLowerCase();
-  const filtered = q
-    ? allSkus.filter(s => s.sku_id.toLowerCase().includes(q) || (s.short_title||'').toLowerCase().includes(q))
-    : allSkus;
+  let filtered = allSkus;
+  if (activeAlphaFilter) filtered = filtered.filter(s => s.sku_id[0]?.toUpperCase() === activeAlphaFilter);
+  if (q) filtered = filtered.filter(s => s.sku_id.toLowerCase().includes(q) || (s.short_title||'').toLowerCase().includes(q));
   $('bysku-result-count').textContent = filtered.length + ' SKUs';
-  $('bysku-list').innerHTML = filtered.slice(0, 100).map(s => `
+  $('bysku-list').innerHTML = filtered.slice(0, 200).map(s => `
     <button onclick="loadSkuDetail('${s.sku_id}')" style="padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;cursor:pointer;white-space:nowrap">
       <span style="font-weight:600;color:var(--orange)">${s.sku_id}</span> ${s.short_title || ''}
     </button>`).join('');
-  if (filtered.length > 100) {
-    $('bysku-list').innerHTML += `<span style="font-size:11px;color:var(--text2);align-self:center">+ ${filtered.length - 100} more — refine your search</span>`;
+  if (filtered.length > 200) {
+    $('bysku-list').innerHTML += `<span style="font-size:11px;color:var(--text2);align-self:center">+ ${filtered.length - 200} more — refine your search</span>`;
   }
 }
 
