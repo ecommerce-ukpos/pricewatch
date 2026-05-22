@@ -318,7 +318,31 @@ tr.oos-row td{opacity:.65}
       <button class="btn sm prim" id="manual-btn" onclick="manualLookupAll()"><i class="ti ti-refresh"></i> Refresh</button>
       <span style="width:1px;height:18px;background:rgba(255,255,255,.15);margin:0 4px"></span>
       <span class="topbar-user">Signed in as <strong id="header-email">—</strong></span>
+      <button class="topbar-link" onclick="openMyAccount()"><i class="ti ti-user-circle" style="font-size:11px"></i> My Account</button>
       <button class="topbar-link" onclick="signOut()"><i class="ti ti-logout" style="font-size:11px"></i> Sign out</button>
+    </div>
+  </div>
+
+  <!-- My Account Modal -->
+  <div id="my-account-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:10px;padding:28px 32px;width:100%;max-width:420px;box-shadow:0 8px 32px rgba(0,0,0,.18);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+        <h3 style="margin:0;font-size:16px">My Account</h3>
+        <button onclick="closeMyAccount()" style="background:none;border:none;cursor:pointer;font-size:20px;color:#888">&times;</button>
+      </div>
+      <div id="my-account-msg" style="display:none;margin-bottom:12px"></div>
+
+      <label style="font-size:12px;font-weight:600;color:#666;display:block;margin-bottom:4px">Email (cannot be changed)</label>
+      <input id="ma-email" type="email" disabled style="width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:6px;background:#f5f5f5;margin-bottom:16px;box-sizing:border-box;color:#888">
+
+      <label style="font-size:12px;font-weight:600;color:#666;display:block;margin-bottom:4px">Full Name</label>
+      <input id="ma-name" type="text" maxlength="120" style="width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:6px;margin-bottom:16px;box-sizing:border-box">
+
+      <label style="font-size:12px;font-weight:600;color:#666;display:block;margin-bottom:4px">New Password</label>
+      <input id="ma-password" type="password" placeholder="Leave blank to keep current" style="width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:6px;margin-bottom:4px;box-sizing:border-box">
+      <p style="font-size:11px;color:#999;margin:0 0 20px">Minimum 8 characters</p>
+
+      <button onclick="saveMyAccount()" class="btn prim" style="width:100%">Save Changes</button>
     </div>
   </div>
 
@@ -661,8 +685,123 @@ async function handleRequestAccess(e) {
   $('form-register').reset();
 }
 
+
+function openMyAccount() {
+  const modal = document.getElementById('modal-account');
+  document.getElementById('account-email').value = currentProfile?.email || '';
+  document.getElementById('account-name').value = currentProfile?.full_name || '';
+  document.getElementById('account-password').value = '';
+  document.getElementById('account-password2').value = '';
+  document.getElementById('account-msg').style.display = 'none';
+  modal.style.display = 'flex';
+}
+
+function closeMyAccount() {
+  document.getElementById('modal-account').style.display = 'none';
+}
+
+async function saveMyAccount() {
+  const btn = document.getElementById('account-save-btn');
+  const msgEl = document.getElementById('account-msg');
+  const name = document.getElementById('account-name').value.trim();
+  const pw = document.getElementById('account-password').value;
+  const pw2 = document.getElementById('account-password2').value;
+
+  msgEl.style.display = 'none';
+
+  if (pw && pw !== pw2) {
+    msgEl.textContent = 'Passwords do not match.';
+    msgEl.style.cssText = 'display:block;padding:8px 12px;border-radius:6px;font-size:12px;background:#fef2f2;color:#dc2626;margin-bottom:12px;';
+    return;
+  }
+  if (pw && pw.length < 8) {
+    msgEl.textContent = 'Password must be at least 8 characters.';
+    msgEl.style.cssText = 'display:block;padding:8px 12px;border-radius:6px;font-size:12px;background:#fef2f2;color:#dc2626;margin-bottom:12px;';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
+  try {
+    // Update name in profiles table
+    if (name !== currentProfile?.full_name) {
+      const { error } = await sbClient.from('profiles').update({ full_name: name }).eq('id', currentProfile.id);
+      if (error) throw new Error(error.message);
+      currentProfile.full_name = name;
+    }
+
+    // Update password in Supabase Auth
+    if (pw) {
+      const { error } = await sbClient.auth.updateUser({ password: pw });
+      if (error) throw new Error(error.message);
+    }
+
+    msgEl.textContent = 'Changes saved successfully.';
+    msgEl.style.cssText = 'display:block;padding:8px 12px;border-radius:6px;font-size:12px;background:#f0fdf4;color:#16a34a;margin-bottom:12px;';
+    document.getElementById('account-password').value = '';
+    document.getElementById('account-password2').value = '';
+  } catch(e) {
+    msgEl.textContent = e.message || 'Save failed.';
+    msgEl.style.cssText = 'display:block;padding:8px 12px;border-radius:6px;font-size:12px;background:#fef2f2;color:#dc2626;margin-bottom:12px;';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save Changes';
+  }
+}
+
 async function signOut() {
   if (sbClient) await sbClient.auth.signOut();
+}
+
+function openMyAccount() {
+  $('ma-email').value = currentProfile.email || '';
+  $('ma-name').value = currentProfile.full_name || '';
+  $('ma-password').value = '';
+  const msg = $('my-account-msg');
+  msg.style.display = 'none';
+  const modal = $('my-account-modal');
+  modal.style.display = 'flex';
+}
+
+function closeMyAccount() {
+  $('my-account-modal').style.display = 'none';
+}
+
+async function saveMyAccount() {
+  const name = $('ma-name').value.trim();
+  const password = $('ma-password').value;
+  const msg = $('my-account-msg');
+
+  msg.style.display = 'none';
+
+  if (password && password.length < 8) {
+    msg.textContent = 'Password must be at least 8 characters.';
+    msg.style.cssText = 'display:block;padding:8px 12px;border-radius:6px;background:#fee;color:#c00;font-size:13px;margin-bottom:12px';
+    return;
+  }
+
+  try {
+    // Update profile name in DB
+    const { error: dbErr } = await sbClient
+      .from('profiles')
+      .update({ full_name: name })
+      .eq('id', currentProfile.id);
+    if (dbErr) throw new Error(dbErr.message);
+
+    // Update password if provided
+    if (password) {
+      const { error: pwErr } = await sbClient.auth.updateUser({ password });
+      if (pwErr) throw new Error(pwErr.message);
+    }
+
+    currentProfile.full_name = name;
+    msg.textContent = 'Changes saved successfully.';
+    msg.style.cssText = 'display:block;padding:8px 12px;border-radius:6px;background:#efd;color:#2a6;font-size:13px;margin-bottom:12px';
+  } catch (e) {
+    msg.textContent = e.message || 'Save failed.';
+    msg.style.cssText = 'display:block;padding:8px 12px;border-radius:6px;background:#fee;color:#c00;font-size:13px;margin-bottom:12px';
+  }
 }
 
 /* ── Admin: User management ────────────────────────────────────────────── */
@@ -1242,5 +1381,28 @@ setInterval(() => { if (currentProfile && currentProfile.status === 'approved') 
 // Boot
 bootstrap();
 </script>
+
+<!-- My Account Modal -->
+<div id="modal-account" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;align-items:center;justify-content:center;">
+  <div style="background:var(--surface);border-radius:10px;padding:28px 32px;width:100%;max-width:420px;box-shadow:0 8px 32px rgba(0,0,0,.18);">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+      <h2 style="margin:0;font-size:16px;font-weight:700;">My Account</h2>
+      <button onclick="closeMyAccount()" style="background:none;border:none;cursor:pointer;font-size:20px;color:var(--text2);">×</button>
+    </div>
+    <div id="account-msg" style="display:none;margin-bottom:12px;"></div>
+    <label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:4px;">Email (cannot be changed)</label>
+    <input id="account-email" type="email" disabled style="width:100%;box-sizing:border-box;padding:8px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text2);font-size:13px;margin-bottom:14px;">
+    <label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:4px;">Full Name</label>
+    <input id="account-name" type="text" placeholder="Your full name" style="width:100%;box-sizing:border-box;padding:8px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;margin-bottom:14px;">
+    <label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:4px;">New Password</label>
+    <input id="account-password" type="password" placeholder="Leave blank to keep current" style="width:100%;box-sizing:border-box;padding:8px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;margin-bottom:4px;">
+    <label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:4px;">Confirm New Password</label>
+    <input id="account-password2" type="password" placeholder="Confirm new password" style="width:100%;box-sizing:border-box;padding:8px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;margin-bottom:20px;">
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button onclick="closeMyAccount()" class="btn sm">Cancel</button>
+      <button onclick="saveMyAccount()" id="account-save-btn" class="btn sm prim">Save Changes</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
