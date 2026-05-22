@@ -497,7 +497,7 @@ tr.oos-row td{opacity:.65}
 // API path is now relative — Vercel rewrites /api/* to api/index.py
 const API = '/api';
 
-let supabase = null;
+let sbClient = null;
 let currentUser = null;
 let currentProfile = null;
 
@@ -534,16 +534,16 @@ async function bootstrap() {
     showMsg('login-msg', 'Could not contact server. Please try again in a moment.', 'error');
     return;
   }
-  supabase = window.supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key);
+  sbClient = window.supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key);
 
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { session } } = await sbClient.auth.getSession();
   if (!session) {
     showView('view-login');
   } else {
     await onSignedIn(session);
   }
 
-  supabase.auth.onAuthStateChange(async (event, session) => {
+  sbClient.auth.onAuthStateChange(async (event, session) => {
     if (event === 'SIGNED_OUT' || !session) {
       currentUser = null; currentProfile = null;
       showView('view-login');
@@ -565,15 +565,15 @@ async function onSignedIn(session) {
       headers: { 'Authorization': 'Bearer ' + session.access_token }
     });
   } catch {
-    await supabase.auth.signOut(); return;
+    await sbClient.auth.signOut(); return;
   }
-  if (r2.status === 401) { await supabase.auth.signOut(); return; }
+  if (r2.status === 401) { await sbClient.auth.signOut(); return; }
   if (r2.status === 403) {
     // No profile row exists yet — treat as pending
     showView('view-pending');
     return;
   }
-  if (!r2.ok) { await supabase.auth.signOut(); return; }
+  if (!r2.ok) { await sbClient.auth.signOut(); return; }
 
   currentProfile = await r2.json();
   $('header-email').textContent = currentProfile.email;
@@ -597,8 +597,8 @@ async function onSignedIn(session) {
 async function api(path, opts) {
   opts = opts || {};
   opts.headers = opts.headers || {};
-  if (supabase) {
-    const { data: { session } } = await supabase.auth.getSession();
+  if (sbClient) {
+    const { data: { session } } = await sbClient.auth.getSession();
     if (session) opts.headers['Authorization'] = 'Bearer ' + session.access_token;
   }
   const res = await fetch(API + path, opts);
@@ -613,8 +613,8 @@ async function authPost(path, body, method) {
     headers: { 'Content-Type': 'application/json' }
   };
   if (body !== undefined) opts.body = JSON.stringify(body);
-  if (supabase) {
-    const { data: { session } } = await supabase.auth.getSession();
+  if (sbClient) {
+    const { data: { session } } = await sbClient.auth.getSession();
     if (session) opts.headers['Authorization'] = 'Bearer ' + session.access_token;
   }
   return fetch(API + path, opts);
@@ -628,7 +628,7 @@ async function handleLogin(e) {
   btn.disabled = true;
   const email = $('login-email').value.trim();
   const password = $('login-password').value;
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const { error } = await sbClient.auth.signInWithPassword({ email, password });
   btn.disabled = false;
   if (error) showMsg('login-msg', error.message, 'error');
 }
@@ -639,7 +639,7 @@ async function handleForgotPassword() {
     showMsg('login-msg', 'Enter your email above first, then click Forgot password.', 'info');
     return;
   }
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+  const { error } = await sbClient.auth.resetPasswordForEmail(email, {
     redirectTo: window.location.origin + '/'
   });
   if (error) showMsg('login-msg', error.message, 'error');
@@ -665,7 +665,7 @@ async function handleRequestAccess(e) {
 }
 
 async function signOut() {
-  if (supabase) await supabase.auth.signOut();
+  if (sbClient) await sbClient.auth.signOut();
 }
 
 /* ── Admin: User management ────────────────────────────────────────────── */
