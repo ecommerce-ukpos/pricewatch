@@ -673,26 +673,47 @@ async function loadUsers(status) {
   const tbody = $('users-tbody');
   tbody.innerHTML = '<tr><td colspan="6" class="empty">Loading…</td></tr>';
   try {
-    const data = await api('/admin/users?status=' + encodeURIComponent(status));
-    if (!data.length) {
+    let rows = [];
+
+    // Pending access requests (from access_requests table)
+    if (status === 'pending' || status === 'all') {
+      const { data: reqs, error: reqErr } = await sbClient
+        .from('access_requests')
+        .select('email, full_name, requested_at')
+        .order('requested_at', { ascending: false });
+      if (!reqErr && reqs) {
+        reqs.forEach(r => rows.push({
+          kind: 'request', id: r.email, email: r.email,
+          full_name: r.full_name, status: 'pending', role: 'user',
+          requested_at: r.requested_at
+        }));
+      }
+    }
+
+    // Profiles (approved / rejected)
+    if (status !== 'pending') {
+      let q = sbClient.from('profiles').select('*').order('requested_at', { ascending: false });
+      if (status === 'approved') q = q.eq('status', 'approved');
+      else if (status === 'rejected') q = q.eq('status', 'rejected');
+      else if (status === 'all') q = q.in('status', ['approved', 'rejected']);
+      const { data: profs, error: profErr } = await q;
+      if (!profErr && profs) profs.forEach(p => rows.push({ ...p, kind: 'profile' }));
+    }
+
+    if (!rows.length) {
       tbody.innerHTML = '<tr><td colspan="6" class="empty">No users.</td></tr>';
       return;
     }
-    tbody.innerHTML = data.map(u => {
+    tbody.innerHTML = rows.map(u => {
       const requested = u.requested_at ? ts(u.requested_at) : '—';
-      // u.kind is 'request' (pending only) or 'profile' (approved/rejected)
-      // u.id is the email for requests, the uuid for profiles
       const idEnc = encodeURIComponent(u.id);
       const actions = [];
       if (u.kind === 'request') {
-        // Pending access request — needs invite + creation
         actions.push(`<button class="btn sm prim" onclick="approveRow('request','${idEnc}',this)"><i class="ti ti-check"></i> Approve</button>`);
         actions.push(`<button class="btn sm danger" onclick="rejectRow('request','${idEnc}',this)"><i class="ti ti-x"></i> Reject</button>`);
       } else if (u.status === 'approved' && u.id !== currentProfile.id) {
-        // Existing approved user — can be revoked
         actions.push(`<button class="btn sm danger" onclick="rejectRow('profile','${idEnc}',this)">Revoke</button>`);
       } else if (u.status === 'rejected') {
-        // Existing rejected user — can be reinstated
         actions.push(`<button class="btn sm prim" onclick="approveRow('profile','${idEnc}',this)">Reinstate</button>`);
       }
       return `<tr>
@@ -711,35 +732,61 @@ async function loadUsers(status) {
 
 async function approveRow(kind, idEnc, btnEl) {
   btnEl.disabled = true;
-  const path = (kind === 'request')
-    ? `/admin/requests/${idEnc}/approve`
-    : `/admin/users/${idEnc}/reinstate`;
-  const r = await authPost(path);
-  if (!r.ok) {
-    const b = await r.json().catch(() => ({}));
-    alert('Approve failed: ' + (b.detail || r.status));
+  const id = decodeURIComponent(idEnc);
+  try {
+    if (kind === 'request') {
+      // Create approved profile directly from access_requests row
+      const { data: reqs } = await sbClient.from('access_requests').select('*').eq('email', id).limit(1);
+      if (!reqs || !reqs.length) throw new Error('Request not found');
+      const req = reqs[0];
+      const { error: insErr } = await sbClient.from('profiles').upsert({
+        email: req.email,
+        full_name: req.full_name,
+        status: 'approved',
+        role: 'user',
+        requested_at: req.requested_at,
+        approved_at: new Date().toISOString(),
+        approved_by: currentProfile.id,
+      }, { onConflict: 'email' });
+      if (insErr) throw new Error(insErr.message);
+      // Delete from access_requests
+      await sbClient.from('access_requests').delete().eq('email', id);
+    } else {
+      // Reinstate profile directly
+      const { error } = await sbClient.from('profiles').update({
+        status: 'approved', approved_at: new Date().toISOString(),
+        approved_by: currentProfile.id, rejected_at: null, rejection_reason: null
+      }).eq('id', id);
+      if (error) throw new Error(error.message);
+    }
+    await loadUsers(activeAdminTab());
+    refreshPendingBadge();
+  } catch(e) {
+    alert('Approve failed: ' + e.message);
     btnEl.disabled = false;
-    return;
   }
-  await loadUsers(activeAdminTab());
-  refreshPendingBadge();
 }
 
 async function rejectRow(kind, idEnc, btnEl) {
-  if (!confirm(kind === 'request' ? 'Reject this access request?' : 'Revoke this user\'s access?')) return;
+  if (!confirm(kind === 'request' ? 'Reject this access request?' : "Revoke this user's access?")) return;
   btnEl.disabled = true;
-  const path = (kind === 'request')
-    ? `/admin/requests/${idEnc}/reject`
-    : `/admin/users/${idEnc}/revoke`;
-  const r = await authPost(path);
-  if (!r.ok) {
-    const b = await r.json().catch(() => ({}));
-    alert('Action failed: ' + (b.detail || r.status));
+  const id = decodeURIComponent(idEnc);
+  try {
+    if (kind === 'request') {
+      const { error } = await sbClient.from('access_requests').delete().eq('email', id);
+      if (error) throw new Error(error.message);
+    } else {
+      const { error } = await sbClient.from('profiles').update({
+        status: 'rejected', rejected_at: new Date().toISOString()
+      }).eq('id', id);
+      if (error) throw new Error(error.message);
+    }
+    await loadUsers(activeAdminTab());
+    refreshPendingBadge();
+  } catch(e) {
+    alert('Action failed: ' + e.message);
     btnEl.disabled = false;
-    return;
   }
-  await loadUsers(activeAdminTab());
-  refreshPendingBadge();
 }
 
 function activeAdminTab() {
@@ -750,10 +797,11 @@ function activeAdminTab() {
 async function refreshPendingBadge() {
   if (!currentProfile || currentProfile.role !== 'super_admin') return;
   try {
-    const data = await api('/admin/pending-count');
+    const { data, error } = await sbClient.from('access_requests').select('email');
     const badge = $('pending-badge');
-    if (data.count > 0) {
-      badge.textContent = data.count;
+    const count = (!error && data) ? data.length : 0;
+    if (count > 0) {
+      badge.textContent = count;
       badge.style.display = 'inline-flex';
     } else {
       badge.style.display = 'none';
