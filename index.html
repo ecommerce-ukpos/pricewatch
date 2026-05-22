@@ -512,10 +512,21 @@ tr.oos-row td{opacity:.65}
     </div>
 
   <div id="p-bysku" class="panel">
-    <div class="card" style="text-align:center;padding:60px 20px">
-      <i class="ti ti-package" style="font-size:48px;color:var(--orange);display:block;margin-bottom:16px"></i>
-      <h2 style="margin-bottom:8px">By SKU</h2>
-      <p style="color:var(--text2);font-size:13px;max-width:400px;margin:0 auto">Drill into any SKU to see all competitor matches, price differentials and stock status in one view. Coming soon.</p>
+    <!-- SKU search bar -->
+    <div class="card" style="margin-bottom:12px">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <input id="bysku-search" type="text" placeholder="Search SKU ID or title…" oninput="bySkuSearch()" style="flex:1;min-width:200px;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px">
+        <span style="font-size:12px;color:var(--text2)" id="bysku-result-count"></span>
+      </div>
+      <div id="bysku-list" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px"></div>
+    </div>
+    <!-- SKU detail view -->
+    <div id="bysku-detail" style="display:none">
+      <div class="card" style="margin-bottom:12px">
+        <button onclick="clearSkuDetail()" style="background:none;border:none;cursor:pointer;color:var(--orange);font-size:12px;font-weight:600;padding:0;margin-bottom:14px"><i class="ti ti-arrow-left"></i> Back to search</button>
+        <div id="bysku-header" style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap"></div>
+      </div>
+      <div id="bysku-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px"></div>
     </div>
   </div>
 
@@ -767,6 +778,138 @@ async function saveMyAccount() {
     btn.disabled = false;
     btn.textContent = 'Save Changes';
   }
+}
+
+
+// ── By SKU ──────────────────────────────────────────────────────────────────
+let allSkus = [];
+
+async function initBySkuTab() {
+  if (allSkus.length) return; // already loaded
+  const { data, error } = await sbClient
+    .from('skus')
+    .select('sku_id, short_title, price_ex_vat, image_url, product_url, availability, category, mpn, color, material, unit_qty')
+    .eq('active', true)
+    .order('sku_id');
+  if (!error) allSkus = data || [];
+  bySkuSearch();
+}
+
+function bySkuSearch() {
+  const q = ($('bysku-search')?.value || '').toLowerCase();
+  const filtered = q
+    ? allSkus.filter(s => s.sku_id.toLowerCase().includes(q) || (s.short_title||'').toLowerCase().includes(q))
+    : allSkus;
+  $('bysku-result-count').textContent = filtered.length + ' SKUs';
+  $('bysku-list').innerHTML = filtered.slice(0, 100).map(s => `
+    <button onclick="loadSkuDetail('${s.sku_id}')" style="padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;cursor:pointer;white-space:nowrap">
+      <span style="font-weight:600;color:var(--orange)">${s.sku_id}</span> ${s.short_title || ''}
+    </button>`).join('');
+  if (filtered.length > 100) {
+    $('bysku-list').innerHTML += `<span style="font-size:11px;color:var(--text2);align-self:center">+ ${filtered.length - 100} more — refine your search</span>`;
+  }
+}
+
+async function loadSkuDetail(skuId) {
+  $('bysku-detail').style.display = 'block';
+  $('bysku-list').closest('.card').style.display = 'none';
+  $('bysku-header').innerHTML = '<div class="loading"><span class="spinner"></span> Loading…</div>';
+  $('bysku-cards').innerHTML = '';
+
+  const sku = allSkus.find(s => s.sku_id === skuId);
+  if (!sku) return;
+
+  const ourPrice = sku.price_ex_vat ? parseFloat(sku.price_ex_vat) : null;
+  const ourPriceInc = ourPrice ? ourPrice * 1.2 : null;
+  const availColor = sku.availability === 'in stock' ? 'var(--green)' : sku.availability === 'out_of_stock' ? 'var(--red)' : 'var(--text2)';
+
+  $('bysku-header').innerHTML = `
+    <img src="${sku.image_url || ''}" alt="${sku.short_title}" onerror="this.style.display='none'"
+      style="width:120px;height:120px;object-fit:contain;border-radius:8px;border:1px solid var(--border);background:#fff;padding:6px;flex-shrink:0">
+    <div style="flex:1;min-width:200px">
+      <div style="font-size:11px;color:var(--text2);margin-bottom:4px">${sku.category || ''}</div>
+      <h2 style="margin:0 0 4px;font-size:18px">${sku.short_title || skuId}</h2>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">
+        <span style="font-family:monospace;font-size:13px;color:var(--orange);font-weight:700">${sku.sku_id}</span>
+        ${sku.mpn ? `<span style="font-size:12px;color:var(--text2)">MPN: ${sku.mpn}</span>` : ''}
+        ${sku.color ? `<span style="font-size:12px;color:var(--text2)">Colour: ${sku.color}</span>` : ''}
+        ${sku.material ? `<span style="font-size:12px;color:var(--text2)">Material: ${sku.material}</span>` : ''}
+        ${sku.unit_qty ? `<span style="font-size:12px;color:var(--text2)">Unit qty: ${sku.unit_qty}</span>` : ''}
+      </div>
+      <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+        <div>
+          <div style="font-size:11px;color:var(--text2);margin-bottom:2px">Our price</div>
+          <div style="font-size:22px;font-weight:700">£${ourPrice ? ourPrice.toFixed(2) : '—'} <span style="font-size:12px;font-weight:400;color:var(--text2)">ex-VAT</span></div>
+          ${ourPriceInc ? `<div style="font-size:12px;color:var(--text2)">£${ourPriceInc.toFixed(2)} inc-VAT</div>` : ''}
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--text2);margin-bottom:2px">Availability</div>
+          <div style="font-size:13px;font-weight:600;color:${availColor}">${sku.availability || '—'}</div>
+        </div>
+        ${sku.product_url ? `<a href="${sku.product_url}" target="_blank" rel="noopener" class="btn sm" style="margin-top:4px"><i class="ti ti-external-link"></i> View on site</a>` : ''}
+      </div>
+    </div>`;
+
+  // Load competitor matches
+  const { data: matches, error } = await sbClient
+    .from('latest_snapshots')
+    .select('*')
+    .eq('sku_id', skuId)
+    .order('diff_pct_normalised', { ascending: true, nullsFirst: false });
+
+  if (error || !matches?.length) {
+    $('bysku-cards').innerHTML = '<div style="color:var(--text2);font-size:13px;padding:20px">No competitor matches found for this SKU.</div>';
+    return;
+  }
+
+  $('bysku-cards').innerHTML = matches.map(m => {
+    const diff = m.diff_pct_normalised ?? m.diff_pct;
+    const compPrice = m.competitor_price ? parseFloat(m.competitor_price) : null;
+    const vat = m.competitor_vat || m.competitor_vat_default || 'unknown';
+    const compEx  = compPrice ? (vat === 'inc' ? compPrice / 1.2 : compPrice) : null;
+    const compInc = compPrice ? (vat === 'ex'  ? compPrice * 1.2 : compPrice) : null;
+
+    let cardBorder, diffBg, diffColor;
+    if (diff === null || diff === undefined || m.availability === 'out_of_stock') {
+      cardBorder = 'var(--border)'; diffBg = 'rgba(150,150,150,.1)'; diffColor = 'var(--text2)';
+    } else if (diff <= -10) {
+      cardBorder = 'var(--red)'; diffBg = 'rgba(239,68,68,.12)'; diffColor = 'var(--red)';
+    } else if (diff <= -5) {
+      cardBorder = '#f59e0b'; diffBg = 'rgba(245,158,11,.12)'; diffColor = '#f59e0b';
+    } else if (diff < 0) {
+      cardBorder = '#f59e0b'; diffBg = 'rgba(245,158,11,.08)'; diffColor = '#f59e0b';
+    } else {
+      cardBorder = 'var(--green)'; diffBg = 'rgba(34,197,94,.1)'; diffColor = 'var(--green)';
+    }
+
+    return `<div style="border:1.5px solid ${cardBorder};border-radius:10px;background:var(--bg-card);padding:14px;display:flex;flex-direction:column;gap:8px">
+      <!-- Competitor image placeholder -->
+      <div style="width:100px;height:100px;border-radius:6px;background:var(--bg);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;margin-bottom:2px">
+        <i class="ti ti-photo" style="font-size:28px;color:var(--text3)"></i>
+      </div>
+      <div style="font-weight:700;font-size:14px">${m.competitor_name || '—'}</div>
+      <div style="font-size:11px;color:var(--text2)">${m.competitor_domain || ''}</div>
+      <div style="background:${diffBg};border-radius:6px;padding:8px 10px;text-align:center">
+        <div style="font-size:22px;font-weight:800;color:${diffColor}">${diff !== null && diff !== undefined ? (diff > 0 ? '+' : '') + diff.toFixed(1) + '%' : '—'}</div>
+        <div style="font-size:11px;color:var(--text2)">vs our price</div>
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--text2);margin-bottom:2px">Their price</div>
+        <div style="font-weight:700;font-size:15px">${compEx ? '£' + compEx.toFixed(2) + ' ex' : '—'}</div>
+        ${compInc ? `<div style="font-size:11px;color:var(--text2)">£${compInc.toFixed(2)} inc</div>` : ''}
+      </div>
+      <div style="font-size:11px;color:var(--text2)">
+        Stock: <span style="font-weight:600;color:${m.availability === 'in_stock' || m.availability === 'in stock' ? 'var(--green)' : m.availability === 'out_of_stock' ? 'var(--red)' : 'var(--text2)'}">${m.availability || '—'}</span>
+      </div>
+      <div style="font-size:11px;color:var(--text2)">Last scraped: ${m.scraped_at ? new Date(m.scraped_at).toLocaleDateString('en-GB') : '—'}</div>
+      ${m.competitor_url ? `<a href="${m.competitor_url}" target="_blank" rel="noopener" style="font-size:11px;color:var(--orange);margin-top:2px"><i class="ti ti-external-link"></i> View listing</a>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function clearSkuDetail() {
+  $('bysku-detail').style.display = 'none';
+  $('bysku-list').closest('.card').style.display = '';
 }
 
 async function signOut() {
@@ -1076,6 +1219,7 @@ function go(name, el) {
   if (name === 'competitors') loadCompetitors();
   if (name === 'schedule')    loadRuns();
   if (name === 'users')       loadUsers('pending');
+  if (name === 'bysku')        initBySkuTab();
 }
 
 async function loadDashboard() {
