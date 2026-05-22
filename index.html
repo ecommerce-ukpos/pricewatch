@@ -207,6 +207,7 @@ tr.oos-row td{opacity:.65}
 .pill-rejected{background:var(--red-bg);color:var(--red)}
 .pill-admin{background:#ede9fe;color:#5b21b6}
 .empty{padding:30px;text-align:center;color:var(--text2);font-size:11px}
+.cat-tile:hover{border-color:var(--orange)!important;background:rgba(232,72,28,.05)!important}
 </style>
 </head>
 <body>
@@ -512,21 +513,31 @@ tr.oos-row td{opacity:.65}
     </div>
 
   <div id="p-bysku" class="panel">
-    <!-- SKU search bar -->
-    <div class="card" style="margin-bottom:12px">
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <input id="bysku-search" type="text" placeholder="Search SKU ID or title…" oninput="bySkuSearch()" style="flex:1;min-width:200px;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px">
-        <span style="font-size:12px;color:var(--text2)" id="bysku-result-count"></span>
+
+    <!-- LEVEL 1: Category browser -->
+    <div id="bysku-cat-view">
+      <div class="card" style="margin-bottom:12px">
+        <!-- Breadcrumb -->
+        <div id="bysku-breadcrumb" style="font-size:12px;color:var(--text2);margin-bottom:14px;display:flex;align-items:center;gap:6px;flex-wrap:wrap"></div>
+        <!-- Category tiles or SKU list -->
+        <div id="bysku-cat-tiles" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px"></div>
       </div>
-      <!-- Alphabet filter -->
-      <div id="bysku-alpha" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:4px"></div>
-      <div id="bysku-list" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px"></div>
+      <!-- SKU list shown when a subcategory is selected -->
+      <div id="bysku-sku-list-wrap" style="display:none">
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+          <input id="bysku-search" type="text" placeholder="Filter SKUs…" oninput="bySkuSearch()" style="flex:1;min-width:180px;padding:7px 11px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px">
+          <div id="bysku-alpha" style="display:flex;flex-wrap:wrap;gap:4px"></div>
+          <span style="font-size:12px;color:var(--text2)" id="bysku-result-count"></span>
+        </div>
+        <div id="bysku-list" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+      </div>
     </div>
+
     <!-- SKU detail view -->
     <div id="bysku-detail" style="display:none">
       <div class="card" style="margin-bottom:12px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-          <button onclick="clearSkuDetail()" style="background:none;border:none;cursor:pointer;color:var(--orange);font-size:12px;font-weight:600;padding:0"><i class="ti ti-arrow-left"></i> Back to search</button>
+          <button onclick="clearSkuDetail()" style="background:none;border:none;cursor:pointer;color:var(--orange);font-size:12px;font-weight:600;padding:0"><i class="ti ti-arrow-left"></i> Back</button>
           <div style="display:flex;gap:4px">
             <button id="bysku-toggle-cards" onclick="setSkuView('cards')" title="Card view"
               style="padding:5px 9px;border-radius:5px;border:1px solid var(--orange);background:var(--orange);color:#fff;cursor:pointer;font-size:13px">
@@ -543,19 +554,10 @@ tr.oos-row td{opacity:.65}
       <div id="bysku-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px"></div>
       <div id="bysku-table-wrap" style="display:none;overflow-x:auto">
         <table style="width:100%;border-collapse:collapse;font-size:12px">
-          <thead>
-            <tr>
-              <th>Competitor</th>
-              <th>Domain</th>
-              <th>Their Price (ex)</th>
-              <th>Their Price (inc)</th>
-              <th>Our Price</th>
-              <th>Differential</th>
-              <th>Stock</th>
-              <th>Last Scraped</th>
-              <th>Listing</th>
-            </tr>
-          </thead>
+          <thead><tr>
+            <th>Competitor</th><th>Domain</th><th>Their Price (ex)</th><th>Their Price (inc)</th>
+            <th>Our Price</th><th>Differential</th><th>Stock</th><th>Last Scraped</th><th>Listing</th>
+          </tr></thead>
           <tbody id="bysku-table-body"></tbody>
         </table>
       </div>
@@ -828,6 +830,8 @@ async function saveMyAccount() {
 let allSkus = [];
 let skuDetailMatches = [];
 let skuDetailView = 'cards';
+let skuCatL4 = null;  // selected main category
+let skuCatL5 = null;  // selected subcategory
 
 function setSkuView(mode) {
   skuDetailView = mode;
@@ -923,6 +927,8 @@ function highlightAlphaBtn() {
 function bySkuSearch() {
   const q = ($('bysku-search')?.value || '').toLowerCase();
   let filtered = allSkus;
+  if (skuCatL4) filtered = filtered.filter(s => s.cat_l4 === skuCatL4);
+  if (skuCatL5) filtered = filtered.filter(s => (s.cat_l5 || '(uncategorised)') === skuCatL5);
   if (activeAlphaFilter) filtered = filtered.filter(s => s.sku_id[0]?.toUpperCase() === activeAlphaFilter);
   if (q) filtered = filtered.filter(s => s.sku_id.toLowerCase().includes(q) || (s.short_title||'').toLowerCase().includes(q));
   $('bysku-result-count').textContent = filtered.length + ' SKUs';
@@ -1035,7 +1041,11 @@ async function loadSkuDetail(skuId) {
 
 function clearSkuDetail() {
   $('bysku-detail').style.display = 'none';
-  $('bysku-list').closest('.card').style.display = '';
+  $('bysku-cat-view').style.display = 'block';
+  if (skuCatL5) {
+    $('bysku-sku-list-wrap').style.display = 'block';
+    renderBreadcrumb([skuCatL4, skuCatL5]);
+  }
 }
 
 
