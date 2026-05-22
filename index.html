@@ -531,10 +531,21 @@ tr.oos-row td{opacity:.65}
   </div>
 
   <div id="p-bycompetitor" class="panel">
-    <div class="card" style="text-align:center;padding:60px 20px">
-      <i class="ti ti-building-store" style="font-size:48px;color:var(--orange);display:block;margin-bottom:16px"></i>
-      <h2 style="margin-bottom:8px">By Competitor</h2>
-      <p style="color:var(--text2);font-size:13px;max-width:400px;margin:0 auto">View all matched SKUs for any competitor side by side. Coming soon.</p>
+    <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
+      <!-- Competitor list sidebar -->
+      <div class="card" style="width:200px;flex-shrink:0;padding:12px">
+        <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">Competitors</div>
+        <div id="bycomp-list" style="display:flex;flex-direction:column;gap:4px"></div>
+      </div>
+      <!-- SKU cards area -->
+      <div style="flex:1;min-width:280px">
+        <div id="bycomp-header" class="card" style="margin-bottom:12px;display:none"></div>
+        <div id="bycomp-empty" style="color:var(--text2);font-size:13px;padding:40px 0;text-align:center">
+          <i class="ti ti-arrow-left" style="font-size:24px;display:block;margin-bottom:8px;opacity:.4"></i>
+          Select a competitor to view their matched SKUs
+        </div>
+        <div id="bycomp-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px"></div>
+      </div>
     </div>
   </div>
 
@@ -912,6 +923,150 @@ function clearSkuDetail() {
   $('bysku-list').closest('.card').style.display = '';
 }
 
+
+// ── By Competitor ────────────────────────────────────────────────────────────
+let allCompetitors = [];
+
+async function initByCompetitorTab() {
+  if (allCompetitors.length) { renderCompList(); return; }
+  const { data, error } = await sbClient
+    .from('competitors')
+    .select('id, name, domain, vat_status')
+    .eq('active', true)
+    .order('name');
+  if (!error) allCompetitors = data || [];
+  renderCompList();
+}
+
+function renderCompList() {
+  $('bycomp-list').innerHTML = allCompetitors.map(c => `
+    <button id="bycomp-btn-${c.id}" onclick="loadCompetitorDetail(${c.id})"
+      style="text-align:left;padding:7px 10px;border-radius:6px;border:1px solid transparent;background:none;cursor:pointer;width:100%;font-size:12px;color:var(--text)">
+      <div style="font-weight:600">${c.name}</div>
+      <div style="font-size:11px;color:var(--text2)">${c.domain}</div>
+    </button>`).join('');
+}
+
+async function loadCompetitorDetail(compId) {
+  // Highlight selected
+  document.querySelectorAll('[id^="bycomp-btn-"]').forEach(b => {
+    b.style.background = 'none';
+    b.style.border = '1px solid transparent';
+    b.style.color = 'var(--text)';
+  });
+  const activeBtn = $('bycomp-btn-' + compId);
+  if (activeBtn) {
+    activeBtn.style.background = 'rgba(232,72,28,.1)';
+    activeBtn.style.border = '1px solid var(--orange)';
+    activeBtn.style.color = 'var(--orange)';
+  }
+
+  const comp = allCompetitors.find(c => c.id === compId);
+  $('bycomp-empty').style.display = 'none';
+  $('bycomp-header').style.display = 'block';
+  $('bycomp-header').innerHTML = '<div class="loading"><span class="spinner"></span> Loading…</div>';
+  $('bycomp-cards').innerHTML = '';
+
+  // Fetch all matches for this competitor
+  const { data: matches, error } = await sbClient
+    .from('latest_snapshots')
+    .select('*')
+    .eq('competitor_id', compId)
+    .order('diff_pct_normalised', { ascending: true, nullsFirst: false });
+
+  if (error) {
+    $('bycomp-header').innerHTML = `<div style="color:var(--red)">${error.message}</div>`;
+    return;
+  }
+
+  const total = matches?.length || 0;
+  const critical = matches?.filter(m => (m.diff_pct_normalised ?? m.diff_pct) <= -10).length || 0;
+  const cheaper  = matches?.filter(m => { const d = m.diff_pct_normalised ?? m.diff_pct; return d !== null && d > 0; }).length || 0;
+
+  $('bycomp-header').innerHTML = `
+    <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">
+      <div>
+        <div style="font-size:18px;font-weight:700">${comp?.name || 'Competitor'}</div>
+        <div style="font-size:12px;color:var(--text2)">${comp?.domain || ''} · VAT: ${comp?.vat_status || 'unknown'}</div>
+      </div>
+      <div style="display:flex;gap:16px;margin-left:auto;flex-wrap:wrap">
+        <div style="text-align:center">
+          <div style="font-size:20px;font-weight:700">${total}</div>
+          <div style="font-size:11px;color:var(--text2)">matched SKUs</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:20px;font-weight:700;color:var(--red)">${critical}</div>
+          <div style="font-size:11px;color:var(--text2)">critical gaps</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:20px;font-weight:700;color:var(--green)">${cheaper}</div>
+          <div style="font-size:11px;color:var(--text2)">we're cheaper</div>
+        </div>
+      </div>
+    </div>`;
+
+  if (!total) {
+    $('bycomp-cards').innerHTML = '<div style="color:var(--text2);font-size:13px;padding:20px">No matched SKUs for this competitor.</div>';
+    return;
+  }
+
+  $('bycomp-cards').innerHTML = matches.map(m => {
+    const diff = m.diff_pct_normalised ?? m.diff_pct;
+    const compPrice = m.competitor_price ? parseFloat(m.competitor_price) : null;
+    const vat = m.competitor_vat || m.competitor_vat_default || 'unknown';
+    const compEx  = compPrice ? (vat === 'inc' ? compPrice / 1.2 : compPrice) : null;
+    const compInc = compPrice ? (vat === 'ex'  ? compPrice * 1.2 : compPrice) : null;
+    const ourPrice = m.our_price ? parseFloat(m.our_price) : null;
+
+    let cardBorder, diffBg, diffColor;
+    if (diff === null || diff === undefined || m.availability === 'out_of_stock') {
+      cardBorder = 'var(--border)'; diffBg = 'rgba(150,150,150,.1)'; diffColor = 'var(--text2)';
+    } else if (diff <= -10) {
+      cardBorder = 'var(--red)'; diffBg = 'rgba(239,68,68,.12)'; diffColor = 'var(--red)';
+    } else if (diff <= -5) {
+      cardBorder = '#f59e0b'; diffBg = 'rgba(245,158,11,.12)'; diffColor = '#f59e0b';
+    } else if (diff < 0) {
+      cardBorder = '#f59e0b'; diffBg = 'rgba(245,158,11,.08)'; diffColor = '#f59e0b';
+    } else {
+      cardBorder = 'var(--green)'; diffBg = 'rgba(34,197,94,.1)'; diffColor = 'var(--green)';
+    }
+
+    return `<div style="border:1.5px solid ${cardBorder};border-radius:10px;background:var(--bg-card);padding:14px;display:flex;flex-direction:column;gap:8px">
+      <!-- Product image -->
+      <div style="width:100px;height:100px;border-radius:6px;background:var(--bg);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;overflow:hidden">
+        <i class="ti ti-photo" style="font-size:28px;color:var(--text3)"></i>
+      </div>
+      <div>
+        <div style="font-weight:700;font-size:13px">${m.short_title || m.sku_id}</div>
+        <div style="font-family:monospace;font-size:11px;color:var(--orange);font-weight:600">${m.sku_id}</div>
+      </div>
+      <div style="background:${diffBg};border-radius:6px;padding:8px 10px;text-align:center">
+        <div style="font-size:22px;font-weight:800;color:${diffColor}">${diff !== null && diff !== undefined ? (diff > 0 ? '+' : '') + diff.toFixed(1) + '%' : '—'}</div>
+        <div style="font-size:11px;color:var(--text2)">vs our price</div>
+      </div>
+      <div style="display:flex;gap:10px">
+        <div style="flex:1">
+          <div style="font-size:11px;color:var(--text2)">Our price</div>
+          <div style="font-weight:600;font-size:13px">${ourPrice ? '£' + ourPrice.toFixed(2) : '—'}</div>
+        </div>
+        <div style="flex:1">
+          <div style="font-size:11px;color:var(--text2)">Their price</div>
+          <div style="font-weight:600;font-size:13px">${compEx ? '£' + compEx.toFixed(2) + ' ex' : '—'}</div>
+          ${compInc ? `<div style="font-size:11px;color:var(--text2)">£${compInc.toFixed(2)} inc</div>` : ''}
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text2)">
+        Stock: <span style="font-weight:600;color:${m.availability === 'in_stock' || m.availability === 'in stock' ? 'var(--green)' : m.availability === 'out_of_stock' ? 'var(--red)' : 'var(--text2)'}">${m.availability || '—'}</span>
+      </div>
+      <div style="font-size:11px;color:var(--text2)">Scraped: ${m.scraped_at ? new Date(m.scraped_at).toLocaleDateString('en-GB') : '—'}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${m.our_url ? `<a href="${m.our_url}" target="_blank" rel="noopener" style="font-size:11px;color:var(--orange)"><i class="ti ti-home"></i> Our listing</a>` : ''}
+        ${m.competitor_url ? `<a href="${m.competitor_url}" target="_blank" rel="noopener" style="font-size:11px;color:var(--text2)"><i class="ti ti-external-link"></i> Their listing</a>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
 async function signOut() {
   if (sbClient) await sbClient.auth.signOut();
 }
@@ -1220,6 +1375,7 @@ function go(name, el) {
   if (name === 'schedule')    loadRuns();
   if (name === 'users')       loadUsers('pending');
   if (name === 'bysku')        initBySkuTab();
+  if (name === 'bycompetitor')  initByCompetitorTab();
 }
 
 async function loadDashboard() {
