@@ -1,7 +1,7 @@
 name: Run scraper
 on:
   schedule:
-    - cron: '0 2 * * *'
+    - cron: '0 2 * * 6'
   workflow_dispatch:
     inputs:
       scraper_skus:
