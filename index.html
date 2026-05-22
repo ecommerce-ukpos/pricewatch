@@ -525,10 +525,40 @@ tr.oos-row td{opacity:.65}
     <!-- SKU detail view -->
     <div id="bysku-detail" style="display:none">
       <div class="card" style="margin-bottom:12px">
-        <button onclick="clearSkuDetail()" style="background:none;border:none;cursor:pointer;color:var(--orange);font-size:12px;font-weight:600;padding:0;margin-bottom:14px"><i class="ti ti-arrow-left"></i> Back to search</button>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <button onclick="clearSkuDetail()" style="background:none;border:none;cursor:pointer;color:var(--orange);font-size:12px;font-weight:600;padding:0"><i class="ti ti-arrow-left"></i> Back to search</button>
+          <div style="display:flex;gap:4px">
+            <button id="bysku-toggle-cards" onclick="setSkuView('cards')" title="Card view"
+              style="padding:5px 9px;border-radius:5px;border:1px solid var(--orange);background:var(--orange);color:#fff;cursor:pointer;font-size:13px">
+              <i class="ti ti-layout-grid"></i>
+            </button>
+            <button id="bysku-toggle-table" onclick="setSkuView('table')" title="Table view"
+              style="padding:5px 9px;border-radius:5px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);cursor:pointer;font-size:13px">
+              <i class="ti ti-table"></i>
+            </button>
+          </div>
+        </div>
         <div id="bysku-header" style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap"></div>
       </div>
       <div id="bysku-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px"></div>
+      <div id="bysku-table-wrap" style="display:none;overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead>
+            <tr>
+              <th>Competitor</th>
+              <th>Domain</th>
+              <th>Their Price (ex)</th>
+              <th>Their Price (inc)</th>
+              <th>Our Price</th>
+              <th>Differential</th>
+              <th>Stock</th>
+              <th>Last Scraped</th>
+              <th>Listing</th>
+            </tr>
+          </thead>
+          <tbody id="bysku-table-body"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -796,6 +826,52 @@ async function saveMyAccount() {
 
 // ── By SKU ──────────────────────────────────────────────────────────────────
 let allSkus = [];
+let skuDetailMatches = [];
+let skuDetailView = 'cards';
+
+function setSkuView(mode) {
+  skuDetailView = mode;
+  $('bysku-cards').style.display        = mode === 'cards' ? 'grid' : 'none';
+  $('bysku-table-wrap').style.display   = mode === 'table' ? 'block' : 'none';
+  $('bysku-toggle-cards').style.background   = mode === 'cards' ? 'var(--orange)' : 'var(--bg-card)';
+  $('bysku-toggle-cards').style.color        = mode === 'cards' ? '#fff' : 'var(--text)';
+  $('bysku-toggle-cards').style.borderColor  = mode === 'cards' ? 'var(--orange)' : 'var(--border)';
+  $('bysku-toggle-table').style.background   = mode === 'table' ? 'var(--orange)' : 'var(--bg-card)';
+  $('bysku-toggle-table').style.color        = mode === 'table' ? '#fff' : 'var(--text)';
+  $('bysku-toggle-table').style.borderColor  = mode === 'table' ? 'var(--orange)' : 'var(--border)';
+  if (mode === 'table') renderSkuTable();
+}
+
+function renderSkuTable() {
+  $('bysku-table-body').innerHTML = skuDetailMatches.map(m => {
+    const diff = m.diff_pct_normalised ?? m.diff_pct;
+    const compPrice = m.competitor_price ? parseFloat(m.competitor_price) : null;
+    const vat = m.competitor_vat || m.competitor_vat_default || 'unknown';
+    const compEx  = compPrice ? (vat === 'inc' ? compPrice / 1.2 : compPrice) : null;
+    const compInc = compPrice ? (vat === 'ex'  ? compPrice * 1.2 : compPrice) : null;
+    const ourPrice = m.our_price ? parseFloat(m.our_price) : null;
+
+    let diffColor = 'var(--text)';
+    if (diff !== null && diff !== undefined) {
+      if (diff <= -10) diffColor = 'var(--red)';
+      else if (diff <= -5) diffColor = '#f59e0b';
+      else if (diff < 0)  diffColor = '#f59e0b';
+      else diffColor = 'var(--green)';
+    }
+
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:8px;font-weight:600">${m.competitor_name || '—'}</td>
+      <td style="padding:8px;color:var(--text2)">${m.competitor_domain || '—'}</td>
+      <td style="padding:8px;font-weight:600">${compEx ? '£' + compEx.toFixed(2) : '—'}</td>
+      <td style="padding:8px;color:var(--text2)">${compInc ? '£' + compInc.toFixed(2) : '—'}</td>
+      <td style="padding:8px">${ourPrice ? '£' + ourPrice.toFixed(2) : '—'}</td>
+      <td style="padding:8px;font-weight:700;color:${diffColor}">${diff !== null && diff !== undefined ? (diff > 0 ? '+' : '') + diff.toFixed(1) + '%' : '—'}</td>
+      <td style="padding:8px">${m.availability || '—'}</td>
+      <td style="padding:8px;color:var(--text2)">${m.scraped_at ? new Date(m.scraped_at).toLocaleDateString('en-GB') : '—'}</td>
+      <td style="padding:8px">${m.competitor_url ? `<a href="${m.competitor_url}" target="_blank" rel="noopener" style="color:var(--orange);font-size:11px"><i class="ti ti-external-link"></i></a>` : '—'}</td>
+    </tr>`;
+  }).join('');
+}
 
 async function initBySkuTab() {
   if (allSkus.length) return; // already loaded
@@ -911,6 +987,7 @@ async function loadSkuDetail(skuId) {
     return;
   }
 
+  skuDetailMatches = matches;
   $('bysku-cards').innerHTML = matches.map(m => {
     const diff = m.diff_pct_normalised ?? m.diff_pct;
     const compPrice = m.competitor_price ? parseFloat(m.competitor_price) : null;
