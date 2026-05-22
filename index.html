@@ -525,11 +525,37 @@ tr.oos-row td{opacity:.65}
       <!-- SKU list shown when a subcategory is selected -->
       <div id="bysku-sku-list-wrap" style="display:none">
         <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
-          <input id="bysku-search" type="text" placeholder="Filter SKUs…" oninput="bySkuSearch()" style="flex:1;min-width:180px;padding:7px 11px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px">
+          <input id="bysku-search" type="text" placeholder="Filter SKUs…" oninput="bySkuCatSearch()" style="flex:1;min-width:180px;padding:7px 11px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px">
           <div id="bysku-alpha" style="display:flex;flex-wrap:wrap;gap:4px"></div>
           <span style="font-size:12px;color:var(--text2)" id="bysku-result-count"></span>
+          <div style="display:flex;gap:4px;margin-left:auto">
+            <button id="bysku-cat-toggle-cols" onclick="setSkuCatView('cols')" title="Column view"
+              style="padding:5px 9px;border-radius:5px;border:1px solid var(--orange);background:var(--orange);color:#fff;cursor:pointer;font-size:13px">
+              <i class="ti ti-columns"></i>
+            </button>
+            <button id="bysku-cat-toggle-table" onclick="setSkuCatView('table')" title="Table view"
+              style="padding:5px 9px;border-radius:5px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);cursor:pointer;font-size:13px">
+              <i class="ti ti-table"></i>
+            </button>
+          </div>
         </div>
+        <!-- Column view -->
         <div id="bysku-list" style="columns:4 180px;column-gap:10px;margin-top:4px"></div>
+        <!-- Table view -->
+        <div id="bysku-cat-table-wrap" style="display:none">
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead><tr>
+              <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);color:var(--text2);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.06em">SKU ID</th>
+              <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);color:var(--text2);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.06em">Title</th>
+              <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);color:var(--text2);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.06em">Category</th>
+              <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);color:var(--text2);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.06em">Subcategory</th>
+              <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);color:var(--text2);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.06em">Our Price</th>
+              <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);color:var(--text2);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.06em">Stock</th>
+            </tr></thead>
+            <tbody id="bysku-cat-table-body"></tbody>
+          </table>
+          <div id="bysku-cat-pagination" style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:11px;color:var(--text2)"></div>
+        </div>
       </div>
     </div>
 
@@ -833,6 +859,63 @@ let skuDetailView = 'cards';
 let skuCatL4 = null;  // selected main category
 let skuCatL5 = null;  // selected subcategory
 
+
+// ── By SKU category list view toggle ────────────────────────────────────────
+let skuCatViewMode = 'cols';
+let skuCatPage = 1;
+let skuCatLimit = 50;
+let skuCatFiltered = [];
+
+function setSkuCatView(mode) {
+  skuCatViewMode = mode;
+  $('bysku-list').style.display              = mode === 'cols'  ? '' : 'none';
+  $('bysku-cat-table-wrap').style.display    = mode === 'table' ? 'block' : 'none';
+  $('bysku-cat-toggle-cols').style.background   = mode === 'cols'  ? 'var(--orange)' : 'var(--bg-card)';
+  $('bysku-cat-toggle-cols').style.color        = mode === 'cols'  ? '#fff' : 'var(--text)';
+  $('bysku-cat-toggle-cols').style.borderColor  = mode === 'cols'  ? 'var(--orange)' : 'var(--border)';
+  $('bysku-cat-toggle-table').style.background  = mode === 'table' ? 'var(--orange)' : 'var(--bg-card)';
+  $('bysku-cat-toggle-table').style.color       = mode === 'table' ? '#fff' : 'var(--text)';
+  $('bysku-cat-toggle-table').style.borderColor = mode === 'table' ? 'var(--orange)' : 'var(--border)';
+  if (mode === 'table') renderSkuCatTable();
+}
+
+function bySkuCatSearch() {
+  skuCatPage = 1;
+  bySkuSearch();
+}
+
+function renderSkuCatTable() {
+  const start = (skuCatPage - 1) * skuCatLimit;
+  const page  = skuCatFiltered.slice(start, start + skuCatLimit);
+  const from  = start + 1;
+  const to    = start + page.length;
+
+  $('bysku-cat-table-body').innerHTML = page.map(s => `
+    <tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="loadSkuDetail('${s.sku_id}')">
+      <td style="padding:7px 8px;font-weight:700;color:var(--orange);font-family:monospace">${s.sku_id}</td>
+      <td style="padding:7px 8px">${s.short_title || '—'}</td>
+      <td style="padding:7px 8px;color:var(--text2);font-size:11px">${s.cat_l4 || '—'}</td>
+      <td style="padding:7px 8px;color:var(--text2);font-size:11px">${s.cat_l5 || '—'}</td>
+      <td style="padding:7px 8px;font-weight:600">${s.price_ex_vat ? '£' + parseFloat(s.price_ex_vat).toFixed(2) : '—'}</td>
+      <td style="padding:7px 8px"><span style="color:${s.availability === 'in stock' ? 'var(--green)' : s.availability === 'out_of_stock' ? 'var(--red)' : 'var(--text2)'};font-weight:600">${s.availability || '—'}</span></td>
+    </tr>`).join('');
+
+  $('bysku-cat-pagination').innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px">
+      <span>${from}–${to} of ${skuCatFiltered.length}</span>
+      <select onchange="skuCatLimit=+this.value;skuCatPage=1;renderSkuCatTable()" style="padding:3px 6px;border-radius:5px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:11px">
+        <option value="50"  ${skuCatLimit===50?'selected':''}>50 / page</option>
+        <option value="100" ${skuCatLimit===100?'selected':''}>100 / page</option>
+        <option value="250" ${skuCatLimit===250?'selected':''}>250 / page</option>
+        <option value="500" ${skuCatLimit===500?'selected':''}>500 / page</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:6px">
+      ${skuCatPage > 1 ? `<button class="btn sm" onclick="skuCatPage--;renderSkuCatTable()">← Prev</button>` : ''}
+      ${to < skuCatFiltered.length ? `<button class="btn sm" onclick="skuCatPage++;renderSkuCatTable()">Next →</button>` : ''}
+    </div>`;
+}
+
 function setSkuView(mode) {
   skuDetailView = mode;
   $('bysku-cards').style.display        = mode === 'cards' ? 'grid' : 'none';
@@ -990,14 +1073,13 @@ function bySkuSearch() {
   if (skuCatL5) filtered = filtered.filter(s => (s.cat_l5 || '(uncategorised)') === skuCatL5);
   if (activeAlphaFilter) filtered = filtered.filter(s => s.sku_id[0]?.toUpperCase() === activeAlphaFilter);
   if (q) filtered = filtered.filter(s => s.sku_id.toLowerCase().includes(q) || (s.short_title||'').toLowerCase().includes(q));
+  skuCatFiltered = filtered;
   $('bysku-result-count').textContent = filtered.length + ' SKUs';
-  $('bysku-list').innerHTML = filtered.slice(0, 500).map(s => `
+  $('bysku-list').innerHTML = filtered.map(s => `
     <div onclick="loadSkuDetail('${s.sku_id}')" style="display:block;break-inside:avoid;padding:5px 8px;border-radius:5px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;cursor:pointer;margin-bottom:4px">
       <span style="font-weight:600;color:var(--orange)">${s.sku_id}</span> <span style="color:var(--text2)">${s.short_title || ''}</span>
     </div>`).join('');
-  if (filtered.length > 200) {
-    $('bysku-list').innerHTML += `<span style="font-size:11px;color:var(--text2);align-self:center">+ ${filtered.length - 200} more — refine your search</span>`;
-  }
+  if (skuCatViewMode === 'table') { skuCatPage = 1; renderSkuCatTable(); }
 }
 
 async function loadSkuDetail(skuId) {
@@ -1553,13 +1635,24 @@ function go(name, el) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   $(`p-${name}`).classList.add('active');
   if (el) el.classList.add('active');
-  if (name === 'review')      loadReview();
-  if (name === 'skus')        { if (!$('sku-tbody').querySelector('tr td:not([colspan])')) loadSKUs(); }
-  if (name === 'competitors') loadCompetitors();
-  if (name === 'schedule')    loadRuns();
-  if (name === 'users')       loadUsers('pending');
+  // Update URL hash
+  history.replaceState(null, '', '#' + name);
+  if (name === 'review')       loadReview();
+  if (name === 'skus')         { if (!$('sku-tbody').querySelector('tr td:not([colspan])')) loadSKUs(); }
+  if (name === 'competitors')  loadCompetitors();
+  if (name === 'schedule')     loadRuns();
+  if (name === 'users')        loadUsers('pending');
   if (name === 'bysku')        initBySkuTab();
-  if (name === 'bycompetitor')  initByCompetitorTab();
+  if (name === 'bycompetitor') initByCompetitorTab();
+}
+
+function restoreHashNav() {
+  const hash = location.hash.replace('#', '');
+  const valid = ['dashboard','skus','review','competitors','schedule','users','bysku','bycompetitor'];
+  if (hash && valid.includes(hash)) {
+    const tab = document.querySelector(`.tab[onclick*="${hash}"]`);
+    go(hash, tab);
+  }
 }
 
 async function loadDashboard() {
