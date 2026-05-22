@@ -878,34 +878,94 @@ function renderSkuTable() {
 }
 
 async function initBySkuTab() {
-  if (allSkus.length) return; // already loaded
+  if (allSkus.length) { renderCatView(); return; }
   const { data, error } = await sbClient
     .from('skus')
-    .select('sku_id, short_title, price_ex_vat, image_url, product_url, availability, category, mpn, color, material, unit_qty')
+    .select('sku_id, short_title, price_ex_vat, image_url, product_url, availability, category, mpn, color, material, unit_qty, cat_l4, cat_l5')
     .eq('active', true)
     .order('sku_id');
   if (!error) allSkus = data || [];
+  renderCatView();
+}
+
+let skuCatL4 = null;
+let skuCatL5 = null;
+
+function renderCatView() {
+  $('bysku-cat-view').style.display = 'block';
+  $('bysku-detail').style.display = 'none';
+  $('bysku-sku-list-wrap').style.display = 'none';
+
+  if (!skuCatL4) {
+    renderBreadcrumb([]);
+    const counts = {};
+    allSkus.forEach(s => { if (s.cat_l4) counts[s.cat_l4] = (counts[s.cat_l4] || 0) + 1; });
+    const cats = Object.entries(counts).sort((a,b) => a[0].localeCompare(b[0]));
+    $('bysku-cat-tiles').innerHTML = cats.map(([name, count]) => {
+      const safe = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+      return `<div onclick="selectCatL4('${safe}')" class="cat-tile"
+        style="padding:14px 16px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);cursor:pointer">
+        <div style="font-weight:700;font-size:13px;margin-bottom:4px">${name}</div>
+        <div style="font-size:11px;color:var(--text2)">${count} SKUs</div>
+      </div>`;
+    }).join('');
+  } else if (!skuCatL5) {
+    renderBreadcrumb([skuCatL4]);
+    const counts = {};
+    allSkus.filter(s => s.cat_l4 === skuCatL4).forEach(s => {
+      const sub = s.cat_l5 || '(uncategorised)';
+      counts[sub] = (counts[sub] || 0) + 1;
+    });
+    const subs = Object.entries(counts).sort((a,b) => a[0].localeCompare(b[0]));
+    if (subs.length <= 1) { skuCatL5 = subs[0]?.[0] || ''; showSkuList(); return; }
+    $('bysku-cat-tiles').innerHTML = subs.map(([name, count]) => {
+      const safe = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+      return `<div onclick="selectCatL5('${safe}')" class="cat-tile"
+        style="padding:14px 16px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);cursor:pointer">
+        <div style="font-weight:700;font-size:13px;margin-bottom:4px">${name}</div>
+        <div style="font-size:11px;color:var(--text2)">${count} SKUs</div>
+      </div>`;
+    }).join('');
+  }
+}
+
+function selectCatL4(name) { skuCatL4 = name; skuCatL5 = null; renderCatView(); }
+function selectCatL5(name) { skuCatL5 = name; showSkuList(); }
+
+function showSkuList() {
+  $('bysku-cat-tiles').innerHTML = '';
+  $('bysku-sku-list-wrap').style.display = 'block';
+  renderBreadcrumb([skuCatL4, skuCatL5]);
+  activeAlphaFilter = '';
   renderAlphaBar();
   bySkuSearch();
 }
 
+function renderBreadcrumb(parts) {
+  const items = [`<span onclick="resetCatNav()" style="cursor:pointer;color:var(--orange);font-weight:600">All Categories</span>`];
+  if (parts[0]) items.push(`<i class="ti ti-chevron-right" style="font-size:11px;opacity:.5"></i><span onclick="selectCatL4Back()" style="cursor:pointer;color:${parts[1]?'var(--orange)':'var(--text)'};font-weight:600">${parts[0]}</span>`);
+  if (parts[1]) items.push(`<i class="ti ti-chevron-right" style="font-size:11px;opacity:.5"></i><span style="color:var(--text);font-weight:600">${parts[1]}</span>`);
+  $('bysku-breadcrumb').innerHTML = items.join(' ');
+}
+
+function resetCatNav() { skuCatL4 = null; skuCatL5 = null; renderCatView(); }
+function selectCatL4Back() { skuCatL5 = null; renderCatView(); }
+
 let activeAlphaFilter = '';
 
 function renderAlphaBar() {
-  const letters = [...new Set(allSkus.map(s => s.sku_id[0]?.toUpperCase()).filter(Boolean))].sort();
+  const letters = [...new Set(allSkus.filter(s => !skuCatL4 || (s.cat_l4===skuCatL4 && (!skuCatL5 || (s.cat_l5||'(uncategorised)')===skuCatL5))).map(s => s.sku_id[0]?.toUpperCase()).filter(Boolean))].sort();
   $('bysku-alpha').innerHTML = [
-    `<button onclick="setAlpha('')" id="alpha-btn-all"
-      style="padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;cursor:pointer;font-weight:600">All</button>`
+    `<button onclick="setAlpha('')" id="alpha-btn-all" style="padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;cursor:pointer;font-weight:600">All</button>`
   ].concat(letters.map(l =>
-    `<button onclick="setAlpha('${l}')" id="alpha-btn-${l}"
-      style="padding:4px 8px;border-radius:5px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;cursor:pointer;font-weight:600;min-width:28px">${l}</button>`
+    `<button onclick="setAlpha('${l}')" id="alpha-btn-${l}" style="padding:4px 8px;border-radius:5px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;cursor:pointer;font-weight:600;min-width:28px">${l}</button>`
   )).join('');
   highlightAlphaBtn();
 }
 
 function setAlpha(letter) {
   activeAlphaFilter = letter;
-  $('bysku-search').value = '';
+  if ($('bysku-search')) $('bysku-search').value = '';
   highlightAlphaBtn();
   bySkuSearch();
 }
