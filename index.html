@@ -735,22 +735,20 @@ async function approveRow(kind, idEnc, btnEl) {
   const id = decodeURIComponent(idEnc);
   try {
     if (kind === 'request') {
-      // Create approved profile directly from access_requests row
-      const { data: reqs } = await sbClient.from('access_requests').select('*').eq('email', id).limit(1);
-      if (!reqs || !reqs.length) throw new Error('Request not found');
-      const req = reqs[0];
-      const { error: insErr } = await sbClient.from('profiles').upsert({
-        email: req.email,
-        full_name: req.full_name,
-        status: 'approved',
-        role: 'user',
-        requested_at: req.requested_at,
-        approved_at: new Date().toISOString(),
-        approved_by: currentProfile.id,
-      }, { onConflict: 'email' });
-      if (insErr) throw new Error(insErr.message);
-      // Delete from access_requests
-      await sbClient.from('access_requests').delete().eq('email', id);
+      // Call Edge Function which sends invite (creates auth user + triggers profile creation)
+      const { data: { session } } = await sbClient.auth.getSession();
+      const res = await fetch('https://uaqakssusydpjzrcznhb.supabase.co/functions/v1/approve-user', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + session.access_token,
+        },
+        body: JSON.stringify({ email: id }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Approve failed');
+      }
     } else {
       // Reinstate profile directly
       const { error } = await sbClient.from('profiles').update({
