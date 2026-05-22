@@ -974,6 +974,8 @@ function renderWorstTable(rows) {
 function buildDistChart(m) {
   const ctx = $('distChart');
   if (!ctx) return;
+  const existing = Chart.getChart(ctx);
+  if (existing) existing.destroy();
   new Chart(ctx, {
     type: 'bar',
     data: {
