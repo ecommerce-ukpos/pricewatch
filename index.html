@@ -365,6 +365,8 @@ tr.oos-row td{opacity:.65}
     <div class="tab active" onclick="go('dashboard',this)"><i class="ti ti-layout-dashboard"></i> Dashboard</div>
     <div class="tab" onclick="go('skus',this)"><i class="ti ti-tag"></i> SKU Comparisons</div>
     <div class="tab" onclick="go('review',this)"><i class="ti ti-eye"></i> Review Queue <span id="review-badge" class="tab-badge" style="display:none">0</span></div>
+    <div class="tab" onclick="go('bysku',this)"><i class="ti ti-package"></i> By SKU</div>
+    <div class="tab" onclick="go('bycompetitor',this)"><i class="ti ti-building-store"></i> By Competitor</div>
     <div class="tab" onclick="go('competitors',this)"><i class="ti ti-building-store"></i> Competitors</div>
     <div class="tab" onclick="go('schedule',this)"><i class="ti ti-clock"></i> Schedule</div>
     <div id="tab-users" class="tab" style="display:none" onclick="go('users',this)"><i class="ti ti-users"></i> User Management <span id="pending-badge" class="tab-badge" style="display:none">0</span></div>
@@ -406,7 +408,7 @@ tr.oos-row td{opacity:.65}
       <div class="card">
         <div class="card-hd">
           <h3>Biggest price gaps — where we're most expensive</h3>
-          <button class="btn sm" onclick="go('skus',document.querySelector('[onclick*=skus]'))">All SKUs</button>
+          <button class="btn" style="font-size:14px;padding:8px 18px;font-weight:600" onclick="go('skus',document.querySelector('[onclick*=skus]'))">All SKUs →</button>
         </div>
         <div class="tw"><table><thead><tr>
           <th>Your SKU</th><th>Competitor · product</th><th>Your price</th><th>Their price</th><th>VAT</th><th>Diff</th><th>Stock</th><th>Confidence</th><th>Updated</th>
@@ -453,6 +455,7 @@ tr.oos-row td{opacity:.65}
         <div>Matches below 80% confidence need human review. Both product pages are linked — open both to visually confirm before approving.</div>
       </div>
       <div id="review-list"><div class="loading"><span class="spinner"></span> Loading review queue…</div></div>
+      <div id="review-pagination" style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:11px;color:var(--text2)"></div>
     </div>
 
     <!-- COMPETITORS -->
@@ -507,6 +510,22 @@ tr.oos-row td{opacity:.65}
         </tbody></table></div>
       </div>
     </div>
+
+  <div id="p-bysku" class="panel">
+    <div class="card" style="text-align:center;padding:60px 20px">
+      <i class="ti ti-package" style="font-size:48px;color:var(--orange);display:block;margin-bottom:16px"></i>
+      <h2 style="margin-bottom:8px">By SKU</h2>
+      <p style="color:var(--text2);font-size:13px;max-width:400px;margin:0 auto">Drill into any SKU to see all competitor matches, price differentials and stock status in one view. Coming soon.</p>
+    </div>
+  </div>
+
+  <div id="p-bycompetitor" class="panel">
+    <div class="card" style="text-align:center;padding:60px 20px">
+      <i class="ti ti-building-store" style="font-size:48px;color:var(--orange);display:block;margin-bottom:16px"></i>
+      <h2 style="margin-bottom:8px">By Competitor</h2>
+      <p style="color:var(--text2);font-size:13px;max-width:400px;margin:0 auto">View all matched SKUs for any competitor side by side. Coming soon.</p>
+    </div>
+  </div>
 
   </div><!-- /content -->
   </div>
@@ -959,7 +978,11 @@ function escapeHtml(s) {
    ════════════════════════════════════════════════════════════════════════ */
 
 let skuPage = 1;
-const skuLimit = 50;
+let skuLimit = 50;
+let skuTotal = 0;
+let reviewPage = 1;
+let reviewLimit = 50;
+let reviewTotal = 0;
 
 function debounce(fn, ms) {
   let t;
@@ -1227,8 +1250,25 @@ async function loadSKUs() {
       <td><button class="btn sm" onclick="lookupSKU('${r.sku_id}',this)" title="Manual real-time lookup"><i class="ti ti-refresh"></i></button></td>
     </tr>`).join('');
 
+    // Update total if backend returns it, else estimate
+    if (d.total !== undefined) skuTotal = d.total;
+    else if (rows.length < skuLimit) skuTotal = (skuPage - 1) * skuLimit + rows.length;
+
+    const skuFrom = (skuPage - 1) * skuLimit + 1;
+    const skuTo   = (skuPage - 1) * skuLimit + rows.length;
+    const skuTotalDisplay = skuTotal > 0 ? ` of ${skuTotal}` : '';
+
     $('sku-pagination').innerHTML = `
-      <span>Page ${skuPage}</span>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span style="white-space:nowrap">${skuFrom}–${skuTo}${skuTotalDisplay}</span>
+        <select onchange="skuLimit=+this.value==='0'?999999:+this.value;skuPage=1;loadSKUs()" style="padding:3px 6px;border-radius:5px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:11px">
+          <option value="50"  ${skuLimit===50?'selected':''}>50 / page</option>
+          <option value="100" ${skuLimit===100?'selected':''}>100 / page</option>
+          <option value="250" ${skuLimit===250?'selected':''}>250 / page</option>
+          <option value="500" ${skuLimit===500?'selected':''}>500 / page</option>
+          <option value="0"   ${skuLimit===999999?'selected':''}>All</option>
+        </select>
+      </div>
       <div style="display:flex;gap:6px">
         ${skuPage > 1 ? `<button class="btn sm" onclick="skuPage--;loadSKUs()">← Prev</button>` : ''}
         ${rows.length === skuLimit ? `<button class="btn sm" onclick="skuPage++;loadSKUs()">Next →</button>` : ''}
@@ -1260,12 +1300,33 @@ async function manualLookupAll() {
 
 async function loadReview() {
   try {
-    const d = await api('/review');
+    const d = await api(`/review?page=${reviewPage}&limit=${reviewLimit === 999999 ? 9999 : reviewLimit}`);
     const rows = d.data || [];
     if (!rows.length) {
       $('review-list').innerHTML = '<div style="text-align:center;color:var(--text2);padding:40px;font-size:12px">No items in review queue</div>';
+      $('review-pagination').innerHTML = '';
       return;
     }
+    if (d.total !== undefined) reviewTotal = d.total;
+    else if (rows.length < reviewLimit) reviewTotal = (reviewPage - 1) * reviewLimit + rows.length;
+    const revFrom = (reviewPage - 1) * reviewLimit + 1;
+    const revTo   = (reviewPage - 1) * reviewLimit + rows.length;
+    const revTotalDisplay = reviewTotal > 0 ? ` of ${reviewTotal}` : '';
+    $('review-pagination').innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span style="white-space:nowrap">${revFrom}–${revTo}${revTotalDisplay}</span>
+        <select onchange="reviewLimit=+this.value==='0'?999999:+this.value;reviewPage=1;loadReview()" style="padding:3px 6px;border-radius:5px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:11px">
+          <option value="50"  ${reviewLimit===50?'selected':''}>50 / page</option>
+          <option value="100" ${reviewLimit===100?'selected':''}>100 / page</option>
+          <option value="250" ${reviewLimit===250?'selected':''}>250 / page</option>
+          <option value="500" ${reviewLimit===500?'selected':''}>500 / page</option>
+          <option value="0"   ${reviewLimit===999999?'selected':''}>All</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:6px">
+        ${reviewPage > 1 ? `<button class="btn sm" onclick="reviewPage--;loadReview()">← Prev</button>` : ''}
+        ${rows.length === reviewLimit ? `<button class="btn sm" onclick="reviewPage++;loadReview()">Next →</button>` : ''}
+      </div>`;
     $('review-list').innerHTML = rows.map(r => {
       const sku  = r.skus || {};
       const comp = r.competitors || {};
