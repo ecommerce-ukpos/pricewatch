@@ -2,9 +2,9 @@
   "version": 2,
   "outputDirectory": ".",
   "functions": {
-    "api/*.py": {
+    "api/**/*.py": {
       "runtime": "python3.12",
-      "excludeFiles": "scraper/**,scripts/**,supabase/**,.github/**,requirements-scraper.txt"
+      "excludeFiles": "{scraper/**,scripts/**,supabase/**,.github/**,node_modules/**,__pycache__/**,*.pyc}"
     }
   }
 }
