@@ -20,11 +20,9 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install dependencies
-        run: pip install -r requirements-scraper.txt
+        run: pip install supabase playwright
       - name: Install Playwright browsers
-        run: |
-          pip install playwright
-          python -m playwright install chromium
+        run: python -m playwright install chromium
       - name: Run scraper
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
