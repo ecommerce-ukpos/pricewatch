@@ -1001,12 +1001,20 @@ function slugify(name) {
   return (name||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
 }
 
+/* Cached access token — avoids a getSession() round-trip on every fetch */
+let cachedToken = null;
+
+async function getToken() {
+  if (cachedToken) return cachedToken;
+  const { data: { session } } = await sb.auth.getSession();
+  cachedToken = session?.access_token || null;
+  return cachedToken;
+}
+
 async function authFetch(path, opts = {}) {
   opts.headers = opts.headers || {};
-  if (sb) {
-    const { data: { session } } = await sb.auth.getSession();
-    if (session) opts.headers['Authorization'] = 'Bearer ' + session.access_token;
-  }
+  const token = await getToken();
+  if (token) opts.headers['Authorization'] = 'Bearer ' + token;
   const res = await fetch(API_BASE + path, opts);
   if (!res.ok) throw new Error(`API ${path} → ${res.status}`);
   return res.json();
@@ -1136,13 +1144,16 @@ async function bootstrap() {
   await onSignedIn(session);
 
   sb.auth.onAuthStateChange(async (event, session) => {
+    /* Always invalidate cached token on any auth event */
+    cachedToken = session?.access_token || null;
     if (event === 'SIGNED_OUT' || !session) { currentUser = null; currentProfile = null; showView('view-login'); return; }
     if (['SIGNED_IN','TOKEN_REFRESHED','USER_UPDATED','INITIAL_SESSION'].includes(event)) await onSignedIn(session);
   });
 }
 
 async function onSignedIn(session) {
-  currentUser = session.user;
+  currentUser  = session.user;
+  cachedToken  = session.access_token || null;  /* prime cache immediately */
   const { data: profiles } = await sb.from('profiles').select('*').eq('id', session.user.id).limit(1);
   if (!profiles || !profiles.length) { showView('view-pending'); return; }
   currentProfile = profiles[0];
@@ -1160,6 +1171,14 @@ async function onSignedIn(session) {
   }
   loadDashboard();
   restoreRoute();
+  /* Pre-fetch SKU list in the background so By Category loads instantly */
+  if (!allSkus.length) {
+    sb.from('skus')
+      .select('sku_id,short_title,price_ex_vat,product_url,availability,cat_l4,cat_l5,image_url,slug')
+      .eq('active', true)
+      .order('sku_id')
+      .then(({ data }) => { if (data) allSkus = data; });
+  }
   setInterval(() => { if ($('p-alerts').classList.contains('active')) loadDashboard(); }, 5 * 60 * 1000);
 }
 
@@ -2338,7 +2357,11 @@ function renderSkuCompRows(rows) {
     const barC  = {r:'var(--red)',a:'var(--amb)',g:'var(--grn)',p:'var(--t3)'}[tier];
     return `<tr class="${rowClass(diff)}">
       <td style="font-weight:500">${r.competitor_name||'—'}<div style="font-size:10px;color:var(--t2)">${r.competitor_domain||''}</div></td>
-      <td style="font-weight:500">${ex?fmtPrice(ex):'—'}</td>
+      <td style="font-weight:500">${ex
+        ? (r.competitor_url
+            ? `<a href="${r.competitor_url}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:underline;text-decoration-color:rgba(0,0,0,.2);text-underline-offset:2px" onclick="event.stopPropagation()">${fmtPrice(ex)} <i class="ti ti-external-link" style="font-size:10px;color:var(--t3)"></i></a>`
+            : fmtPrice(ex))
+        : '—'}</td>
       <td>${vatPill(vat)}</td>
       <td><span class="${diffClass(diff)}">${diffLabel(diff)}</span></td>
       <td><div class="dbar-wrap"><div class="dbar-track"><div class="dbar-fill" style="width:${barW}%;background:${barC}"></div></div></div></td>
