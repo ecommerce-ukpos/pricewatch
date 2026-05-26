@@ -16,23 +16,15 @@ Per-competitor special handling:
 Environment variables:
     SUPABASE_URL
     SUPABASE_SERVICE_KEY
-    SCRAPER_MODE             (default: matched) — matched | full | skus
-    SCRAPER_WORKERS          (default: 5)
+    SCRAPER_WORKERS          (default: 2)
     SCRAPER_PAGE_TIMEOUT_MS  (default: 30000)
-    SCRAPER_DELAY_MIN        (default: 3)
-    SCRAPER_DELAY_MAX        (default: 7)
-    SCRAPER_SKU_LIMIT        (default: 500)
+    SCRAPER_DELAY_MIN        (default: 8)
+    SCRAPER_DELAY_MAX        (default: 15)
+    SCRAPER_SKU_LIMIT        (default: 250)
     SCRAPER_COMPETITOR_LIMIT (default: 23)
+    SCRAPER_MODE             (default: matched) — matched | full | skus
     SCRAPER_SKUS             comma-separated SKU IDs (mode=skus only)
     LOG_LEVEL                (default: INFO)
-
-Modes:
-    matched  Re-scrape confirmed URL pairs only. No search phase. Fast (~30–60 min).
-             Use for nightly cron.
-    full     All SKUs × all competitors, full search + scrape. Slow (4–6 h).
-             Use weekly or when adding new competitors.
-    skus     Specific SKUs only (set SCRAPER_SKUS). Full search + scrape per SKU.
-             Use for ad-hoc spot checks.
 """
 
 import asyncio
@@ -57,11 +49,11 @@ log = logging.getLogger("pricewatch")
 
 SUPABASE_URL       = os.environ["SUPABASE_URL"]
 SUPABASE_KEY       = os.environ["SUPABASE_SERVICE_KEY"]
-WORKERS            = int(os.getenv("SCRAPER_WORKERS", "5"))
+WORKERS            = int(os.getenv("SCRAPER_WORKERS", "2"))
 TIMEOUT_MS         = int(os.getenv("SCRAPER_PAGE_TIMEOUT_MS", "30000"))
-DELAY_MIN          = float(os.getenv("SCRAPER_DELAY_MIN", "3"))
-DELAY_MAX          = float(os.getenv("SCRAPER_DELAY_MAX", "7"))
-SKU_LIMIT          = int(os.getenv("SCRAPER_SKU_LIMIT", "500"))
+DELAY_MIN          = float(os.getenv("SCRAPER_DELAY_MIN", "8"))
+DELAY_MAX          = float(os.getenv("SCRAPER_DELAY_MAX", "15"))
+SKU_LIMIT          = int(os.getenv("SCRAPER_SKU_LIMIT", "250"))
 COMPETITOR_LIMIT   = int(os.getenv("SCRAPER_COMPETITOR_LIMIT", "23"))
 SCRAPER_MODE       = os.getenv("SCRAPER_MODE", "matched")  # matched | full | skus
 
@@ -199,6 +191,38 @@ def diff_pct(our: float, their: float) -> float:
 
 def normalise_price(price: float, vat: str) -> float:
     return round(price / 1.2, 2) if vat == "inc" else price
+
+# Pack quantity patterns — matches "x 100", "x100", "pack of 50", "50 pack", "pack of 1" etc.
+PACK_QTY_PATTERNS = [
+    r"\bx\s*(\d+)\b",
+    r"\bpack\s+of\s+(\d+)\b",
+    r"\b(\d+)\s*pack\b",
+    r"\bset\s+of\s+(\d+)\b",
+    r"\bbox\s+of\s+(\d+)\b",
+    r"\bbag\s+of\s+(\d+)\b",
+    r"\bper\s+(\d+)\b",
+    r"\bqty\s*[:\-]?\s*(\d+)\b",
+    r"\b(\d+)\s*x\b",
+]
+
+def extract_pack_qty(title: str) -> Optional[int]:
+    """Extract pack quantity from a product title. Returns None if not found or qty=1."""
+    if not title:
+        return None
+    t = title.lower()
+    for pattern in PACK_QTY_PATTERNS:
+        m = re.search(pattern, t, re.I)
+        if m:
+            qty = int(m.group(1))
+            if 2 <= qty <= 10000:  # sanity bounds
+                return qty
+    return None
+
+def per_unit_price(price: float, qty: Optional[int]) -> float:
+    """Return price per single unit. If qty is None or 1, returns price unchanged."""
+    if qty and qty > 1:
+        return round(price / qty, 6)
+    return price
 
 
 # ── Scraper class ──────────────────────────────────────────────────────────────
@@ -937,16 +961,41 @@ class PriceScraper:
                 snapshot["competitor_vat"] = vat_hint
 
             if price:
-                our_price                       = float(sku["price_ex_vat"])
-                their_ex                        = normalise_price(price, snapshot["competitor_vat"])
+                our_price = float(sku["price_ex_vat"])
+                their_ex  = normalise_price(price, snapshot["competitor_vat"])
+
+                # ── Per-unit normalisation ─────────────────────────────────────
+                # If pack quantities differ on either side, normalise both prices
+                # to per-unit before computing diff_pct_normalised.
+                # Cases:
+                #   our_qty=100, comp_qty=1   → we sell pack, they sell single
+                #   our_qty=1,   comp_qty=100 → we sell single, they sell pack
+                #   our_qty=100, comp_qty=100 → like-for-like, no normalisation
+                #   our_qty=1,   comp_qty=1   → both singles, no normalisation
+                our_qty  = sku.get("unit_qty") or 1
+                comp_qty = extract_pack_qty(comp_title) or 1
+
+                if our_qty != comp_qty:
+                    our_per_unit   = per_unit_price(our_price, our_qty)
+                    their_per_unit = per_unit_price(their_ex,  comp_qty)
+                    normalised_diff = diff_pct(our_per_unit, their_per_unit)
+                    log.info(
+                        f"  ✓ {competitor['domain']:35s} "
+                        f"£{price:>7.2f} ({snapshot['competitor_vat']:7s}) "
+                        f"our_qty={our_qty} comp_qty={comp_qty} "
+                        f"→ per-unit diff {normalised_diff:+.1f}%  conf {confidence}%"
+                    )
+                else:
+                    normalised_diff = diff_pct(our_price, their_ex)
+                    log.info(
+                        f"  ✓ {competitor['domain']:35s} "
+                        f"£{price:>7.2f} ({snapshot['competitor_vat']:7s}) "
+                        f"diff {normalised_diff:+.1f}%  conf {confidence}%"
+                    )
+
                 snapshot["competitor_price"]    = price
                 snapshot["diff_pct"]            = diff_pct(our_price, price)
-                snapshot["diff_pct_normalised"] = diff_pct(our_price, their_ex)
-                log.info(
-                    f"  ✓ {competitor['domain']:35s} "
-                    f"£{price:>7.2f} ({snapshot['competitor_vat']:7s}) "
-                    f"diff {snapshot['diff_pct_normalised']:+.1f}%  conf {confidence}%"
-                )
+                snapshot["diff_pct_normalised"] = normalised_diff
             else:
                 log.info(
                     f"  ✗ {competitor['domain']:35s} "
@@ -1041,10 +1090,9 @@ async def run_scraper(trigger: str = "scheduled"):
         .data
     )
 
-    # ── Build work list ────────────────────────────────────────────────────────
+    from collections import defaultdict
 
     if mode == "matched":
-        # Only re-scrape pairs that already have a confirmed URL — no search phase
         log.info("Mode: matched — re-scraping confirmed URLs only")
         matched_rows = (
             sb.table("competitor_matches")
@@ -1063,22 +1111,15 @@ async def run_scraper(trigger: str = "scheduled"):
             return
 
         log.info(f"  {len(matched_rows)} confirmed matches to re-scrape")
-
-        match_lookup = {(r["sku_id"], r["competitor_id"]): r for r in matched_rows}
+        match_lookup    = {(r["sku_id"], r["competitor_id"]): r for r in matched_rows}
         matched_sku_ids = list({r["sku_id"] for r in matched_rows})
 
-        # Fetch SKUs in batches to avoid URL-length limits
         skus = []
-        batch = 200
-        for i in range(0, len(matched_sku_ids), batch):
-            chunk = matched_sku_ids[i:i + batch]
-            rows  = sb.table("skus").select("*").in_("sku_id", chunk).execute().data
+        for i in range(0, len(matched_sku_ids), 200):
+            rows = sb.table("skus").select("*").in_("sku_id", matched_sku_ids[i:i+200]).execute().data
             skus.extend(rows or [])
 
-        comp_map = {c["id"]: c for c in comps}
-
-        # Only pair SKUs with competitors where a confirmed match exists
-        from collections import defaultdict
+        comp_map  = {c["id"]: c for c in comps}
         sku_work: dict = defaultdict(list)
         for sku in skus:
             for comp_id, comp in comp_map.items():
@@ -1086,44 +1127,27 @@ async def run_scraper(trigger: str = "scheduled"):
                 if key in match_lookup:
                     sku_work[sku["sku_id"]].append((sku, comp, match_lookup[key]))
 
-        log.info(f"  {sum(len(v) for v in sku_work.values())} work items across {len(sku_work)} SKUs")
-
     elif mode == "skus":
-        # Specific SKUs, full search + scrape per competitor
         log.info(f"Mode: skus — targeting {specific_skus}")
-        skus = sb.table("skus").select("*").in_("sku_id", specific_skus).execute().data
+        skus        = sb.table("skus").select("*").in_("sku_id", specific_skus).execute().data
         all_matches = sb.table("competitor_matches").select("*").execute().data
         match_lookup = {(m["sku_id"], m["competitor_id"]): m for m in all_matches}
-        from collections import defaultdict
         sku_work: dict = defaultdict(list)
         for sku in skus:
             for comp in comps:
-                existing = match_lookup.get((sku["sku_id"], comp["id"]))
-                sku_work[sku["sku_id"]].append((sku, comp, existing))
-        log.info(f"  {sum(len(v) for v in sku_work.values())} work items across {len(sku_work)} SKUs")
+                sku_work[sku["sku_id"]].append((sku, comp, match_lookup.get((sku["sku_id"], comp["id"]))))
 
     else:
-        # full — all SKUs × all competitors, search + scrape
         log.info("Mode: full — all SKUs × all competitors")
-        skus = (
-            sb.table("skus")
-            .select("*")
-            .eq("active", True)
-            .limit(SKU_LIMIT)
-            .execute()
-            .data
-        )
+        skus        = sb.table("skus").select("*").eq("active", True).limit(SKU_LIMIT).execute().data
         all_matches = sb.table("competitor_matches").select("*").execute().data
         match_lookup = {(m["sku_id"], m["competitor_id"]): m for m in all_matches}
-        from collections import defaultdict
         sku_work: dict = defaultdict(list)
         for sku in skus:
             for comp in comps:
-                existing = match_lookup.get((sku["sku_id"], comp["id"]))
-                sku_work[sku["sku_id"]].append((sku, comp, existing))
-        log.info(f"  {sum(len(v) for v in sku_work.values())} work items across {len(sku_work)} SKUs")
+                sku_work[sku["sku_id"]].append((sku, comp, match_lookup.get((sku["sku_id"], comp["id"]))))
 
-    # ── Execute ────────────────────────────────────────────────────────────────
+    log.info(f"  {sum(len(v) for v in sku_work.values())} work items across {len(sku_work)} SKUs")
 
     scraper = PriceScraper(sb, run_id)
     stats   = {"attempted": 0, "succeeded": 0, "failed": 0, "oos": 0}
@@ -1157,8 +1181,6 @@ async def run_scraper(trigger: str = "scheduled"):
                 finally:
                     await asyncio.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
 
-            # Only update match records in full/skus mode — in matched mode the
-            # URLs are already confirmed and we don't want to overwrite confidence
             if mode != "matched":
                 await scraper.flush_matches_for_sku(sku, sku_snapshots, comps)
 
