@@ -145,6 +145,10 @@ a:hover{text-decoration-color:var(--blu)}
 .tw{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:12px}
 th{text-align:left;padding:7px 10px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--t3);border-bottom:1px solid var(--border);white-space:nowrap;background:var(--surface);position:sticky;top:0;z-index:2}
+th.sortable{cursor:pointer;user-select:none}
+th.sortable:hover{color:var(--text)}
+th.sort-asc::after{content:' ↑';color:var(--orange)}
+th.sort-desc::after{content:' ↓';color:var(--orange)}
 td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
 tr:last-child td{border-bottom:none}
 tr:hover td{background:var(--bg)}
@@ -551,8 +555,16 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
               </select>
             </div>
           </div>
-          <div class="tw"><table><thead><tr>
-            <th style="border-left:3px solid transparent">SKU ID</th><th>Product</th><th>Our price</th><th>Best competitor</th><th>Gap</th><th>Comps</th><th>Stock</th><th>Scraped</th><th></th>
+          <div class="tw"><table id="skus-table"><thead><tr>
+            <th class="sortable" style="border-left:3px solid transparent" onclick="sortSkusTable('sku_id')">SKU ID</th>
+            <th class="sortable" onclick="sortSkusTable('short_title')">Product</th>
+            <th class="sortable" onclick="sortSkusTable('our_price')">Our price</th>
+            <th class="sortable" onclick="sortSkusTable('competitor_name')">Best competitor</th>
+            <th class="sortable" onclick="sortSkusTable('diff')">Gap</th>
+            <th>Comps</th>
+            <th class="sortable" onclick="sortSkusTable('availability')">Stock</th>
+            <th class="sortable" onclick="sortSkusTable('scraped_at')">Scraped</th>
+            <th></th>
           </tr></thead><tbody id="sku-tbody"><tr><td colspan="9"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table></div>
           <div id="sku-pagination" style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-top:1px solid var(--border);font-size:11px;color:var(--t2)"></div>
         </div>
@@ -580,8 +592,15 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
       </div>
       <div class="content">
         <div class="card-0p">
-          <table><thead><tr>
-            <th>Competitor</th><th>Domain</th><th>VAT</th><th>Matched SKUs</th><th>Critical</th><th>Warning</th><th>We're cheaper</th><th>Parity</th>
+          <table id="bycomp-table"><thead><tr>
+            <th class="sortable" style="border-left:3px solid transparent" onclick="sortByCompTable('name')">Competitor</th>
+            <th class="sortable" onclick="sortByCompTable('domain')">Domain</th>
+            <th class="sortable" onclick="sortByCompTable('vat_status')">VAT</th>
+            <th class="sortable" onclick="sortByCompTable('matched')">Matched SKUs</th>
+            <th class="sortable" onclick="sortByCompTable('critical')">Critical</th>
+            <th class="sortable" onclick="sortByCompTable('warning')">Warning</th>
+            <th class="sortable" onclick="sortByCompTable('cheaper')">We're cheaper</th>
+            <th class="sortable" onclick="sortByCompTable('parity')">Parity</th>
           </tr></thead><tbody id="bycomp-tbody"><tr><td colspan="8"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table>
         </div>
       </div>
@@ -620,8 +639,15 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
       <!-- list -->
       <div id="comp-list-wrap" style="display:none;flex:1;overflow-y:auto;padding:14px 18px">
         <div class="card-0p">
-          <table><thead><tr>
-            <th style="border-left:3px solid transparent">SKU ID</th><th>Product</th><th>Our price</th><th>Their price (ex)</th><th>Gap</th><th>Stock</th><th>Updated</th><th></th>
+          <table id="comp-sku-table"><thead><tr>
+            <th class="sortable" style="border-left:3px solid transparent" onclick="sortCompSkuTable('sku_id')">SKU ID</th>
+            <th class="sortable" onclick="sortCompSkuTable('short_title')">Product</th>
+            <th class="sortable" onclick="sortCompSkuTable('our_price')">Our price</th>
+            <th class="sortable" onclick="sortCompSkuTable('their_price')">Their price (ex)</th>
+            <th class="sortable" onclick="sortCompSkuTable('diff')">Gap</th>
+            <th class="sortable" onclick="sortCompSkuTable('availability')">Stock</th>
+            <th class="sortable" onclick="sortCompSkuTable('scraped_at')">Updated</th>
+            <th></th>
           </tr></thead><tbody id="comp-sku-tbody"></tbody></table>
         </div>
       </div>
@@ -653,8 +679,15 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
             <div class="card-title">All competitor prices <span style="font-weight:400;font-size:11px;color:var(--t2)">— normalised to ex-VAT · sorted worst to best</span></div>
             <div class="legend" id="sku-detail-legend"></div>
           </div>
-          <div class="tw"><table><thead><tr>
-            <th style="border-left:3px solid transparent">Competitor</th><th>Their price (ex)</th><th>VAT basis</th><th>Gap</th><th>Diff bar</th><th>Stock</th><th>Confidence</th><th>Scraped</th>
+          <div class="tw"><table id="sku-comp-table"><thead><tr>
+            <th class="sortable" style="border-left:3px solid transparent" onclick="sortSkuCompTable('name')">Competitor</th>
+            <th class="sortable" onclick="sortSkuCompTable('price')">Their price (ex)</th>
+            <th class="sortable" onclick="sortSkuCompTable('vat')">VAT basis</th>
+            <th class="sortable" onclick="sortSkuCompTable('diff')">Gap</th>
+            <th>Diff bar</th>
+            <th class="sortable" onclick="sortSkuCompTable('availability')">Stock</th>
+            <th class="sortable" onclick="sortSkuCompTable('confidence')">Confidence</th>
+            <th class="sortable" onclick="sortSkuCompTable('scraped_at')">Scraped</th>
           </tr></thead><tbody id="sku-comp-tbody"><tr><td colspan="8"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table></div>
         </div>
       </div>
@@ -1399,23 +1432,10 @@ async function loadSKUs() {
       return;
     }
 
-    $('sku-tbody').innerHTML = rows.map(r => {
-      const diff = r.diff_pct_normalised ?? r.diff_pct;
-      const raw  = r.competitor_price ? parseFloat(r.competitor_price) : null;
-      const vat  = r.competitor_vat || r.competitor_vat_default || 'unknown';
-      const ex   = raw ? normalisePrice(raw, vat) : null;
-      return `<tr class="${rowClass(diff)} tr-link" onclick="openDrawer('${r.sku_id}','${(r.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(r.our_price)}','skus')">
-        <td>${skuLink(r)}</td>
-        <td style="font-size:11px;color:var(--t2);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.short_title||''}</td>
-        <td style="font-weight:500">${fmtPrice(r.our_price)}</td>
-        <td style="font-size:11px">${r.competitor_name||'—'} <span style="color:var(--t3)">${ex?fmtPrice(ex):''}</span></td>
-        <td><span class="${diffClass(diff)}">${diffLabel(diff)}</span></td>
-        <td style="color:var(--t2)">—</td>
-        <td>${stockBadge(r.availability)}</td>
-        <td style="font-size:10px;color:var(--t3)">${ts(r.scraped_at)}</td>
-        <td><button class="btn sm ghost" onclick="event.stopPropagation();openDrawer('${r.sku_id}','${(r.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(r.our_price)}','skus')"><i class="ti ti-layout-sidebar-right"></i></button></td>
-      </tr>`;
-    }).join('');
+    skusData = rows;
+    sortState.skus = { col: null, dir: 1 };
+    updateSortHeaders('skus-table', 'skus', null);
+    renderSkusRows(rows);
 
     const from = (skuPage-1)*skuLimit+1, to = (skuPage-1)*skuLimit+rows.length;
     $('sku-pagination').innerHTML = `
@@ -1609,19 +1629,11 @@ async function loadByCompetitor() {
     const { data: comps } = await sb.from('competitors').select('id,name,domain,vat_status,active').eq('active',true).order('name');
     if (!comps?.length) { $('bycomp-tbody').innerHTML = '<tr><td colspan="8" style="padding:20px;text-align:center;color:var(--t2)">No competitors found</td></tr>'; return; }
 
-    $('bycomp-tbody').innerHTML = comps.map(c => {
-      const slug = slugify(c.name);
-      return `<tr class="tr-link" onclick="go('comp-detail',{compId:${c.id},compName:'${c.name.replace(/'/g,"\\'")}',compSlug:'${slug}',compDomain:'${c.domain}',compVat:'${c.vat_status}'})">
-        <td style="font-weight:500">${c.name}</td>
-        <td style="font-size:11px;color:var(--t2)">${c.domain}</td>
-        <td>${vatPill(c.vat_status)}</td>
-        <td style="color:var(--t2)">—</td>
-        <td style="color:var(--red);font-weight:600">—</td>
-        <td style="color:var(--amb)">—</td>
-        <td style="color:var(--grn)">—</td>
-        <td style="color:var(--t2)">—</td>
-      </tr>`;
-    }).join('');
+    /* Store with placeholder stats — stats cols show — until we add snapshot counts */
+    bycompData = comps.map(c => ({ ...c, _matched: null, _critical: null, _warning: null, _cheaper: null, _parity: null }));
+    sortState.bycomp = { col: null, dir: 1 };
+    renderByCompRows(bycompData);
+    updateSortHeaders('bycomp-table', 'bycomp', null);
   } catch (e) {
     $('bycomp-tbody').innerHTML = `<tr><td colspan="8" style="color:var(--red);padding:8px">${e.message}</td></tr>`;
   }
@@ -1653,6 +1665,8 @@ async function loadCompDetail(opts) {
     const { data: snaps } = await sb.from('latest_snapshots').select('*').eq('competitor_id', currentCompId).not('competitor_price','is',null).order('diff_pct_normalised', {ascending:true, nullsFirst:false});
     compSkusAll = snaps || [];
     compSkusFiltered = [...compSkusAll];
+    sortState.compSku = { col: null, dir: 1 };
+    updateSortHeaders('comp-sku-table', 'compSku', null);
     renderCompDetail();
   } catch (e) {
     $('comp-sku-grid').innerHTML = `<div style="color:var(--red);padding:8px">${e.message}</div>`;
@@ -1792,25 +1806,10 @@ async function loadSkuDetail(opts) {
       return;
     }
 
-    $('sku-comp-tbody').innerHTML = rows.map(r => {
-      const diff  = r.diff_pct_normalised ?? r.diff_pct;
-      const raw   = r.competitor_price ? parseFloat(r.competitor_price) : null;
-      const vat   = r.competitor_vat || r.competitor_vat_default || 'unknown';
-      const ex    = raw ? normalisePrice(raw, vat) : null;
-      const tier  = getTier(diff);
-      const barW  = Math.min(100, Math.abs(diff||0) * 4);
-      const barC  = {r:'var(--red)',a:'var(--amb)',g:'var(--grn)',p:'var(--t3)'}[tier];
-      return `<tr class="${rowClass(diff)}">
-        <td style="font-weight:500">${r.competitor_name||'—'}<div style="font-size:10px;color:var(--t2)">${r.competitor_domain||''}</div></td>
-        <td style="font-weight:500">${ex?fmtPrice(ex):'—'}</td>
-        <td>${vatPill(vat)}</td>
-        <td><span class="${diffClass(diff)}">${diffLabel(diff)}</span></td>
-        <td><div class="dbar-wrap"><div class="dbar-track"><div class="dbar-fill" style="width:${barW}%;background:${barC}"></div></div></div></td>
-        <td>${stockBadge(r.availability)}</td>
-        <td>${confWidget(r.confidence)}</td>
-        <td style="font-size:10px;color:var(--t3)">${ts(r.scraped_at)}</td>
-      </tr>`;
-    }).join('');
+    skuCompData = rows;
+    sortState.skuComp = { col: null, dir: 1 };
+    updateSortHeaders('sku-comp-table', 'skuComp', null);
+    renderSkuCompRows(rows);
 
   } catch (e) {
     $('sku-hero-content').innerHTML = `<div style="color:var(--red);padding:8px">${e.message}</div>`;
@@ -2135,6 +2134,216 @@ async function manualRefresh() {
   await loadDashboard();
   btn.innerHTML = orig;
   btn.disabled = false;
+}
+
+/* ════════════════════════════════════════
+   SORTING ENGINE
+════════════════════════════════════════ */
+
+/* Sort state per table */
+const sortState = {
+  bycomp:   { col: null, dir: 1 },
+  skus:     { col: null, dir: 1 },
+  compSku:  { col: null, dir: 1 },
+  skuComp:  { col: null, dir: 1 },
+};
+
+/* Cached data for client-side sort */
+let bycompData   = [];   // raw competitor rows from loadByCompetitor
+let skusData     = [];   // current page rows from loadSKUs
+let skuCompData  = [];   // rows from loadSkuDetail
+
+function updateSortHeaders(tableId, stateKey, col) {
+  const tbl = document.getElementById(tableId);
+  if (!tbl) return;
+  tbl.querySelectorAll('th.sortable').forEach(th => {
+    th.classList.remove('sort-asc','sort-desc');
+    const fn = th.getAttribute('onclick') || '';
+    const m  = fn.match(/'([^']+)'/);
+    if (m && m[1] === col) {
+      th.classList.add(sortState[stateKey].dir === 1 ? 'sort-asc' : 'sort-desc');
+    }
+  });
+}
+
+function toggleSort(stateKey, col) {
+  const s = sortState[stateKey];
+  if (s.col === col) s.dir = s.dir === 1 ? -1 : 1;
+  else { s.col = col; s.dir = 1; }
+}
+
+function cmpVal(a, b, dir) {
+  if (a === null || a === undefined) return 1;
+  if (b === null || b === undefined) return -1;
+  if (typeof a === 'string' && typeof b === 'string') return a.localeCompare(b) * dir;
+  return (a - b) * dir;
+}
+
+/* ── By competitor list ── */
+function sortByCompTable(col) {
+  toggleSort('bycomp', col);
+  updateSortHeaders('bycomp-table', 'bycomp', col);
+  const { dir } = sortState.bycomp;
+  const sorted = [...bycompData].sort((a, b) => {
+    const getV = r => {
+      if (col === 'name')     return (r.name||'').toLowerCase();
+      if (col === 'domain')   return (r.domain||'').toLowerCase();
+      if (col === 'vat_status') return (r.vat_status||'').toLowerCase();
+      if (col === 'matched')  return r._matched  ?? 0;
+      if (col === 'critical') return r._critical ?? 0;
+      if (col === 'warning')  return r._warning  ?? 0;
+      if (col === 'cheaper')  return r._cheaper  ?? 0;
+      if (col === 'parity')   return r._parity   ?? 0;
+      return '';
+    };
+    return cmpVal(getV(a), getV(b), dir);
+  });
+  renderByCompRows(sorted);
+}
+
+function renderByCompRows(comps) {
+  $('bycomp-tbody').innerHTML = comps.map(c => {
+    const slug = slugify(c.name);
+    return `<tr class="tr-link" onclick="go('comp-detail',{compId:${c.id},compName:'${c.name.replace(/'/g,"\\'")}',compSlug:'${slug}',compDomain:'${c.domain}',compVat:'${c.vat_status}'})">
+      <td style="font-weight:500">${c.name}</td>
+      <td style="font-size:11px;color:var(--t2)">${c.domain}</td>
+      <td>${vatPill(c.vat_status)}</td>
+      <td style="color:var(--t2)">${c._matched  ?? '—'}</td>
+      <td style="color:var(--red);font-weight:600">${c._critical ?? '—'}</td>
+      <td style="color:var(--amb)">${c._warning  ?? '—'}</td>
+      <td style="color:var(--grn)">${c._cheaper  ?? '—'}</td>
+      <td style="color:var(--t2)">${c._parity   ?? '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+/* ── All SKUs (current page) ── */
+function sortSkusTable(col) {
+  toggleSort('skus', col);
+  updateSortHeaders('skus-table', 'skus', col);
+  const { dir } = sortState.skus;
+  const sorted = [...skusData].sort((a, b) => {
+    const getV = r => {
+      if (col === 'sku_id')        return (r.sku_id||'').toLowerCase();
+      if (col === 'short_title')   return (r.short_title||'').toLowerCase();
+      if (col === 'our_price')     return parseFloat(r.our_price||0);
+      if (col === 'competitor_name') return (r.competitor_name||'').toLowerCase();
+      if (col === 'diff')          return parseFloat(r.diff_pct_normalised??r.diff_pct??0);
+      if (col === 'availability')  return (r.availability||'').toLowerCase();
+      if (col === 'scraped_at')    return r.scraped_at ? new Date(r.scraped_at).getTime() : 0;
+      return '';
+    };
+    return cmpVal(getV(a), getV(b), dir);
+  });
+  renderSkusRows(sorted);
+}
+
+function renderSkusRows(rows) {
+  $('sku-tbody').innerHTML = rows.map(r => {
+    const diff = r.diff_pct_normalised ?? r.diff_pct;
+    const raw  = r.competitor_price ? parseFloat(r.competitor_price) : null;
+    const vat  = r.competitor_vat || r.competitor_vat_default || 'unknown';
+    const ex   = raw ? normalisePrice(raw, vat) : null;
+    return `<tr class="${rowClass(diff)} tr-link" onclick="openDrawer('${r.sku_id}','${(r.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(r.our_price)}','skus')">
+      <td>${skuLink(r)}</td>
+      <td style="font-size:11px;color:var(--t2);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.short_title||''}</td>
+      <td style="font-weight:500">${fmtPrice(r.our_price)}</td>
+      <td style="font-size:11px">${r.competitor_name||'—'} <span style="color:var(--t3)">${ex?fmtPrice(ex):''}</span></td>
+      <td><span class="${diffClass(diff)}">${diffLabel(diff)}</span></td>
+      <td style="color:var(--t2)">—</td>
+      <td>${stockBadge(r.availability)}</td>
+      <td style="font-size:10px;color:var(--t3)">${ts(r.scraped_at)}</td>
+      <td><button class="btn sm ghost" onclick="event.stopPropagation();openDrawer('${r.sku_id}','${(r.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(r.our_price)}','skus')"><i class="ti ti-layout-sidebar-right"></i></button></td>
+    </tr>`;
+  }).join('');
+}
+
+/* ── Competitor detail SKU list ── */
+function sortCompSkuTable(col) {
+  toggleSort('compSku', col);
+  updateSortHeaders('comp-sku-table', 'compSku', col);
+  const { dir } = sortState.compSku;
+  const sorted = [...compSkusFiltered].sort((a, b) => {
+    const getV = r => {
+      const diff = r.diff_pct_normalised ?? r.diff_pct;
+      const raw  = r.competitor_price ? parseFloat(r.competitor_price) : null;
+      const vat  = r.competitor_vat || r.competitor_vat_default || 'unknown';
+      const ex   = raw ? normalisePrice(raw, vat) : null;
+      if (col === 'sku_id')      return (r.sku_id||'').toLowerCase();
+      if (col === 'short_title') return (r.short_title||'').toLowerCase();
+      if (col === 'our_price')   return parseFloat(r.our_price||0);
+      if (col === 'their_price') return ex ?? 999999;
+      if (col === 'diff')        return parseFloat(diff??0);
+      if (col === 'availability')return (r.availability||'').toLowerCase();
+      if (col === 'scraped_at')  return r.scraped_at ? new Date(r.scraped_at).getTime() : 0;
+      return '';
+    };
+    return cmpVal(getV(a), getV(b), dir);
+  });
+  /* Re-render just the tbody using the existing renderCompDetail row template */
+  $('comp-sku-tbody').innerHTML = sorted.map(s => {
+    const diff = s.diff_pct_normalised ?? s.diff_pct;
+    const raw  = s.competitor_price ? parseFloat(s.competitor_price) : null;
+    const vat  = s.competitor_vat || s.competitor_vat_default || 'unknown';
+    const ex   = raw ? normalisePrice(raw, vat) : null;
+    return `<tr class="${rowClass(diff)} tr-link" onclick="openDrawer('${s.sku_id}','${(s.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(s.our_price)}','comp-detail')">
+      <td><span style="font-family:'SF Mono',monospace;font-size:11px;color:var(--blu)">${s.sku_id}</span></td>
+      <td style="font-size:11px;color:var(--t2);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.short_title||''}</td>
+      <td style="font-weight:500">${fmtPrice(s.our_price)}</td>
+      <td style="font-weight:500">${ex?fmtPrice(ex):'—'}</td>
+      <td><span class="${diffClass(diff)}">${diffLabel(diff)}</span></td>
+      <td>${stockBadge(s.availability)}</td>
+      <td style="font-size:10px;color:var(--t3)">${ts(s.scraped_at)}</td>
+      <td><button class="btn sm ghost" onclick="event.stopPropagation();openDrawer('${s.sku_id}','${(s.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(s.our_price)}','comp-detail')"><i class="ti ti-layout-sidebar-right"></i></button></td>
+    </tr>`;
+  }).join('');
+}
+
+/* ── SKU detail competitor table ── */
+function sortSkuCompTable(col) {
+  toggleSort('skuComp', col);
+  updateSortHeaders('sku-comp-table', 'skuComp', col);
+  const { dir } = sortState.skuComp;
+  const sorted = [...skuCompData].sort((a, b) => {
+    const getV = r => {
+      const diff = r.diff_pct_normalised ?? r.diff_pct;
+      const raw  = r.competitor_price ? parseFloat(r.competitor_price) : null;
+      const vat  = r.competitor_vat || r.competitor_vat_default || 'unknown';
+      const ex   = raw ? normalisePrice(raw, vat) : null;
+      if (col === 'name')        return (r.competitor_name||'').toLowerCase();
+      if (col === 'price')       return ex ?? 999999;
+      if (col === 'vat')         return (vat||'').toLowerCase();
+      if (col === 'diff')        return parseFloat(diff??0);
+      if (col === 'availability')return (r.availability||'').toLowerCase();
+      if (col === 'confidence')  return parseFloat(r.confidence||0);
+      if (col === 'scraped_at')  return r.scraped_at ? new Date(r.scraped_at).getTime() : 0;
+      return '';
+    };
+    return cmpVal(getV(a), getV(b), dir);
+  });
+  renderSkuCompRows(sorted);
+}
+
+function renderSkuCompRows(rows) {
+  $('sku-comp-tbody').innerHTML = rows.map(r => {
+    const diff  = r.diff_pct_normalised ?? r.diff_pct;
+    const raw   = r.competitor_price ? parseFloat(r.competitor_price) : null;
+    const vat   = r.competitor_vat || r.competitor_vat_default || 'unknown';
+    const ex    = raw ? normalisePrice(raw, vat) : null;
+    const tier  = getTier(diff);
+    const barW  = Math.min(100, Math.abs(diff||0) * 4);
+    const barC  = {r:'var(--red)',a:'var(--amb)',g:'var(--grn)',p:'var(--t3)'}[tier];
+    return `<tr class="${rowClass(diff)}">
+      <td style="font-weight:500">${r.competitor_name||'—'}<div style="font-size:10px;color:var(--t2)">${r.competitor_domain||''}</div></td>
+      <td style="font-weight:500">${ex?fmtPrice(ex):'—'}</td>
+      <td>${vatPill(vat)}</td>
+      <td><span class="${diffClass(diff)}">${diffLabel(diff)}</span></td>
+      <td><div class="dbar-wrap"><div class="dbar-track"><div class="dbar-fill" style="width:${barW}%;background:${barC}"></div></div></div></td>
+      <td>${stockBadge(r.availability)}</td>
+      <td>${confWidget(r.confidence)}</td>
+      <td style="font-size:10px;color:var(--t3)">${ts(r.scraped_at)}</td>
+    </tr>`;
+  }).join('');
 }
 
 /* ════════════════════════════════════════
