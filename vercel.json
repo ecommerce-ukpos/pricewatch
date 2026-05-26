@@ -3,7 +3,6 @@
   "outputDirectory": ".",
   "functions": {
     "api/**/*.py": {
-      "runtime": "python3.12",
       "excludeFiles": "{scraper/**,scripts/**,supabase/**,.github/**,node_modules/**,__pycache__/**,*.pyc}"
     }
   }
