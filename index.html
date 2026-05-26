@@ -59,9 +59,9 @@ a:hover{text-decoration-color:var(--blu)}
 .sidebar-foot strong{color:var(--t2);font-weight:500}
 
 /* ── Main area ── */
-.main{overflow:hidden;display:flex;flex-direction:column;position:relative}
-.panel{display:none;flex-direction:column;height:100%;overflow:hidden}
-.panel.active{display:flex}
+.main{overflow:hidden;display:flex;flex-direction:column;position:relative;min-height:0}
+.panel{display:none;flex-direction:column;min-height:0;overflow:hidden}
+.panel.active{display:flex;height:100%}
 
 /* ── URL bar (permalink indicator) ── */
 .url-bar{background:var(--bg);border-bottom:1px solid var(--border);padding:5px 18px;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--t3);flex-shrink:0}
