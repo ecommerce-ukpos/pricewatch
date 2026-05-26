@@ -1,17 +1,30 @@
 name: Run scraper
 on:
   schedule:
-    - cron: '0 2 * * 6'
+    - cron: '0 1 * * *'
   workflow_dispatch:
     inputs:
+      mode:
+        description: 'Scrape mode'
+        required: true
+        default: 'matched'
+        type: choice
+        options:
+          - matched
+          - full
+          - skus
       scraper_skus:
-        description: 'Comma-separated SKU IDs to scrape (leave blank for all)'
+        description: 'Comma-separated SKU IDs (only used when mode=skus)'
+        required: false
+        default: ''
+      scraper_workers:
+        description: 'Parallel workers (default: 5)'
         required: false
         default: ''
 jobs:
   scrape:
     runs-on: ubuntu-22.04
-    timeout-minutes: 180
+    timeout-minutes: 360
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -27,5 +40,9 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SCRAPER_MODE: ${{ github.event.inputs.mode || 'matched' }}
           SCRAPER_SKUS: ${{ github.event.inputs.scraper_skus }}
+          SCRAPER_WORKERS: ${{ github.event.inputs.scraper_workers || '5' }}
+          SCRAPER_DELAY_MIN: '3'
+          SCRAPER_DELAY_MAX: '7'
         run: python scraper/scraper.py
