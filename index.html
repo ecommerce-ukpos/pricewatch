@@ -508,7 +508,7 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
         </div>
         <div class="cmd-actions">
           <div class="filter-row" style="margin:0">
-            <input type="text" class="search" id="review-search" placeholder="Filter by SKU or competitor…" oninput="filterReview()" style="min-width:200px" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+            <input type="text" class="search" id="review-search" placeholder="Filter by SKU or competitor…" oninput="filterReview()" style="min-width:200px" autocomplete="new-password" autocorrect="off" autocapitalize="off" spellcheck="false">
             <select id="review-comp-filter" onchange="loadReview()"><option value="">All competitors</option></select>
           </div>
         </div>
@@ -533,7 +533,7 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
         <div class="card-0p">
           <div style="padding:12px 14px;border-bottom:1px solid var(--border)">
             <div class="filter-row" style="margin:0">
-              <input type="text" class="search" id="skuQ" placeholder="Search SKU ID, product name, competitor…" oninput="debounce(filterSKUs,400)()" autocomplete="off" spellcheck="false">
+              <input type="text" class="search" id="skuQ" placeholder="Search SKU ID, product name, competitor…" oninput="debounce(filterSKUs,400)()" autocomplete="new-password" spellcheck="false">
               <select id="fDiff" onchange="filterSKUs()">
                 <option value="">All differentials</option>
                 <option value="crit">Critical — we're most expensive</option>
@@ -628,7 +628,7 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
             <button class="icon-tog active" id="tog-grid" onclick="setCompView('grid')" title="Card grid"><i class="ti ti-layout-grid" style="font-size:14px"></i></button>
             <button class="icon-tog" id="tog-list" onclick="setCompView('list')" title="List"><i class="ti ti-list" style="font-size:14px"></i></button>
           </div>
-          <input type="text" id="comp-filter-q" placeholder="Filter SKUs…" style="padding:5px 9px;border:1px solid var(--bm);border-radius:var(--r);font-size:12px;font-family:inherit;outline:none;width:170px" oninput="filterCompSKUs(this.value)" autocomplete="off" spellcheck="false">
+          <input type="text" id="comp-filter-q" placeholder="Filter SKUs…" style="padding:5px 9px;border:1px solid var(--bm);border-radius:var(--r);font-size:12px;font-family:inherit;outline:none;width:170px" oninput="filterCompSKUs(this.value)" autocomplete="new-password" spellcheck="false">
           <button class="btn sm"><i class="ti ti-download"></i> Export</button>
         </div>
       </div>
@@ -688,8 +688,9 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
             <th class="sortable" onclick="sortSkuCompTable('availability')">Stock</th>
             <th class="sortable" onclick="sortSkuCompTable('confidence')">Confidence</th>
             <th class="sortable" onclick="sortSkuCompTable('scraped_at')">Last scraped</th>
+            <th style="min-width:90px">Match URL</th>
             <th></th>
-          </tr></thead><tbody id="sku-comp-tbody"><tr><td colspan="9"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table></div>
+          </tr></thead><tbody id="sku-comp-tbody"><tr><td colspan="10"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table></div>
         </div>
       </div>
     </div>
@@ -1579,7 +1580,7 @@ function filterReview() {
         <div style="font-size:11px;color:var(--t2);margin-bottom:6px">Paste the correct URL for this product (optional — leave blank to reject without one):</div>
         <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
           <input id="rev-url-${r.id}" type="text" placeholder="https://competitor.com/correct-product-page"
-            autocomplete="off" spellcheck="false"
+            autocomplete="new-password" spellcheck="false"
             style="flex:1;min-width:200px;padding:6px 10px;font-size:11px;border:1px solid var(--bm);border-radius:var(--r);font-family:inherit;outline:none">
           <button class="btn sm prim" onclick="saveCorrectUrl(${r.id},this)"><i class="ti ti-device-floppy"></i> Save URL &amp; reject</button>
           <button class="btn sm danger" onclick="reviewDecision(${r.id},'reject',this)">Reject without URL</button>
@@ -2460,7 +2461,9 @@ function renderSkuCompRows(rows) {
     const tier  = getTier(diff);
     const barW  = Math.min(100, Math.abs(diff||0) * 4);
     const barC  = {r:'var(--red)',a:'var(--amb)',g:'var(--grn)',p:'var(--t3)'}[tier];
-    return `<tr class="${rowClass(diff)}">
+    const rowId = `${r.sku_id}-${r.competitor_id}`;
+    const hasUrl = !!r.competitor_url;
+    return `<tr class="${rowClass(diff)}" id="skurow-${rowId}">
       <td style="font-weight:500">${r.competitor_name||'—'}<div style="font-size:10px;color:var(--t2)">${r.competitor_domain||''}</div></td>
       <td style="font-weight:500">${ex
         ? (r.competitor_url
@@ -2473,14 +2476,102 @@ function renderSkuCompRows(rows) {
       <td>${stockBadge(r.availability)}</td>
       <td>${confWidget(r.confidence)}</td>
       <td style="font-size:10px;color:var(--t3)">${ts(r.scraped_at)}</td>
-      <td><button class="btn sm ghost" id="scrape-${r.sku_id}-${r.competitor_id}" onclick="scrapeRow('${r.sku_id}',${r.competitor_id},this)" title="Re-scrape this competitor now"><i class="ti ti-refresh" style="font-size:13px"></i></button></td>
+      <td>
+        <button class="btn sm ghost" onclick="editMatchUrl('${rowId}','${r.sku_id}',${r.competitor_id},'${(r.competitor_url||'').replace(/'/g,"\\'")}',this)"
+          style="font-size:10px;color:${hasUrl?'var(--grn)':'var(--t3)'}" title="${hasUrl?'Edit matching URL':'Add matching URL'}">
+          <i class="ti ${hasUrl?'ti-link':'ti-link-plus'}" style="font-size:13px"></i>
+          ${hasUrl?'Edit URL':'Add URL'}
+        </button>
+      </td>
+      <td><button class="btn sm ghost" id="scrape-${rowId}" onclick="scrapeRow('${r.sku_id}',${r.competitor_id},this)" title="Re-scrape this competitor now"><i class="ti ti-refresh" style="font-size:13px"></i></button></td>
+    </tr>
+    <tr id="skurow-edit-${rowId}" style="display:none;background:var(--bb)">
+      <td colspan="10" style="padding:10px 12px">
+        <div style="font-size:11px;font-weight:500;margin-bottom:6px;color:var(--blu)">
+          <i class="ti ti-link" style="font-size:12px;margin-right:4px"></i>
+          Match URL for <strong>${r.competitor_name}</strong> — paste the exact product page URL
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input id="match-url-${rowId}" type="text" value="${r.competitor_url||''}" placeholder="https://competitor.com/product-page"
+            autocomplete="new-password" spellcheck="false"
+            style="flex:1;min-width:260px;padding:6px 10px;font-size:12px;border:1px solid var(--bbd);border-radius:var(--r);font-family:inherit;outline:none;background:var(--surface)"
+            onkeydown="if(event.key==='Enter')saveMatchUrl('${rowId}','${r.sku_id}',${r.competitor_id},this.closest('tr').previousElementSibling,event)">
+          <button class="btn sm prim" onclick="saveMatchUrl('${rowId}','${r.sku_id}',${r.competitor_id},this)">
+            <i class="ti ti-device-floppy"></i> Save &amp; scrape
+          </button>
+          <button class="btn sm ghost" onclick="cancelEditUrl('${rowId}')">Cancel</button>
+        </div>
+        <div id="match-url-msg-${rowId}" style="font-size:11px;margin-top:6px;display:none"></div>
+      </td>
     </tr>`;
   }).join('');
 }
 
-/* ════════════════════════════════════════
-   SKU panel lazy-load flag
-════════════════════════════════════════ */
+function editMatchUrl(rowId, skuId, competitorId, currentUrl, btn) {
+  /* Close any other open edit rows first */
+  document.querySelectorAll('[id^="skurow-edit-"]').forEach(r => r.style.display = 'none');
+  const editRow = $(`skurow-edit-${rowId}`);
+  if (editRow) {
+    editRow.style.display = '';
+    const input = $(`match-url-${rowId}`);
+    if (input) { input.value = currentUrl; input.focus(); input.select(); }
+  }
+}
+
+function cancelEditUrl(rowId) {
+  const editRow = $(`skurow-edit-${rowId}`);
+  if (editRow) editRow.style.display = 'none';
+}
+
+async function saveMatchUrl(rowId, skuId, competitorId, btn) {
+  const input = $(`match-url-${rowId}`);
+  const msgEl = $(`match-url-msg-${rowId}`);
+  const url   = (input?.value || '').trim();
+
+  if (!url || !url.startsWith('http')) {
+    input.style.borderColor = 'var(--red)';
+    if (msgEl) { msgEl.textContent = 'Must be a valid URL starting with https://'; msgEl.style.color = 'var(--red)'; msgEl.style.display = ''; }
+    return;
+  }
+
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Saving…';
+  if (msgEl) msgEl.style.display = 'none';
+
+  try {
+    /* Upsert into competitor_matches — sets status to matched so nightly scraper picks it up */
+    const { error } = await sb.from('competitor_matches').upsert({
+      sku_id:          skuId,
+      competitor_id:   competitorId,
+      competitor_url:  url,
+      match_status:    'matched',
+      human_reviewed:  true,
+      reviewed_at:     new Date().toISOString(),
+      updated_at:      new Date().toISOString(),
+    }, { onConflict: 'sku_id,competitor_id' });
+
+    if (error) throw new Error(error.message);
+
+    if (msgEl) { msgEl.textContent = '✓ Saved — triggering scrape…'; msgEl.style.color = 'var(--grn)'; msgEl.style.display = ''; }
+
+    /* Immediately trigger a scrape for this SKU so fresh price appears */
+    try {
+      await authFetch('/lookup', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ sku_id: skuId, competitor_id: competitorId }) });
+    } catch(e) { /* scrape is best-effort */ }
+
+    /* Reload the page data after a short pause */
+    setTimeout(async () => {
+      cancelEditUrl(rowId);
+      await loadSkuDetail({ skuId, fromPanel: drawerFromPanel });
+    }, 3000);
+
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    if (msgEl) { msgEl.textContent = 'Save failed: ' + e.message; msgEl.style.color = 'var(--red)'; msgEl.style.display = ''; }
+  }
+}
 let skusLoaded = false;
 
 /* ════════════════════════════════════════
