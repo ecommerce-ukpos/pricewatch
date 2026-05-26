@@ -508,7 +508,7 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
         </div>
         <div class="cmd-actions">
           <div class="filter-row" style="margin:0">
-            <input type="text" class="search" id="review-search" placeholder="Filter by SKU or competitor…" oninput="debounce(loadReview,400)()" style="min-width:200px">
+            <input type="text" class="search" id="review-search" placeholder="Filter by SKU or competitor…" oninput="filterReview()" style="min-width:200px" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
             <select id="review-comp-filter" onchange="loadReview()"><option value="">All competitors</option></select>
           </div>
         </div>
@@ -533,7 +533,7 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
         <div class="card-0p">
           <div style="padding:12px 14px;border-bottom:1px solid var(--border)">
             <div class="filter-row" style="margin:0">
-              <input type="text" class="search" id="skuQ" placeholder="Search SKU ID, product name, competitor…" oninput="debounce(filterSKUs,400)()">
+              <input type="text" class="search" id="skuQ" placeholder="Search SKU ID, product name, competitor…" oninput="debounce(filterSKUs,400)()" autocomplete="off" spellcheck="false">
               <select id="fDiff" onchange="filterSKUs()">
                 <option value="">All differentials</option>
                 <option value="crit">Critical — we're most expensive</option>
@@ -628,7 +628,7 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
             <button class="icon-tog active" id="tog-grid" onclick="setCompView('grid')" title="Card grid"><i class="ti ti-layout-grid" style="font-size:14px"></i></button>
             <button class="icon-tog" id="tog-list" onclick="setCompView('list')" title="List"><i class="ti ti-list" style="font-size:14px"></i></button>
           </div>
-          <input type="text" id="comp-filter-q" placeholder="Filter SKUs…" style="padding:5px 9px;border:1px solid var(--bm);border-radius:var(--r);font-size:12px;font-family:inherit;outline:none;width:170px" oninput="filterCompSKUs(this.value)">
+          <input type="text" id="comp-filter-q" placeholder="Filter SKUs…" style="padding:5px 9px;border:1px solid var(--bm);border-radius:var(--r);font-size:12px;font-family:inherit;outline:none;width:170px" oninput="filterCompSKUs(this.value)" autocomplete="off" spellcheck="false">
           <button class="btn sm"><i class="ti ti-download"></i> Export</button>
         </div>
       </div>
@@ -1481,84 +1481,114 @@ function filterSKUs() { skuPage = 1; loadSKUs(); }
 /* ════════════════════════════════════════
    REVIEW QUEUE
 ════════════════════════════════════════ */
+let reviewAllRows = [];
+
 async function loadReview() {
-  const q    = $('review-search')?.value || '';
-  const comp = $('review-comp-filter')?.value || '';
-  let url = `/review?page=${reviewPage}&limit=${reviewLimit}`;
-  if (q)    url += '&q='    + encodeURIComponent(q);
-  if (comp) url += '&comp=' + comp;
-
+  $('review-list').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
   try {
-    const d = await authFetch(url);
-    const rows = d.data || [];
-    const total = d.total || rows.length;
-    $('review-sub').textContent = `${total.toLocaleString()} matches awaiting confirmation`;
+    const d = await authFetch('/review?page=1&limit=500');
+    reviewAllRows = d.data || [];
 
-    /* Populate competitor filter if empty */
+    /* Build competitor dropdown from returned data */
     const cf = $('review-comp-filter');
-    if (cf && cf.options.length === 1) {
-      const { data: comps } = await sb.from('competitors').select('id,name').eq('active',true).order('name');
-      (comps||[]).forEach(c => {
-        const opt = document.createElement('option');
-        opt.value = c.id; opt.textContent = c.name;
-        cf.appendChild(opt);
+    if (cf && cf.options.length === 1 && reviewAllRows.length) {
+      const seen = new Set();
+      reviewAllRows.forEach(r => {
+        const c = r.competitors;
+        if (c && !seen.has(c.id)) {
+          seen.add(c.id);
+          const opt = document.createElement('option');
+          opt.value = c.id; opt.textContent = c.name;
+          cf.appendChild(opt);
+        }
       });
     }
-
-    if (!rows.length) {
-      $('review-list').innerHTML = '<div style="text-align:center;color:var(--t2);padding:40px;font-size:12px"><i class="ti ti-circle-check" style="font-size:24px;display:block;margin-bottom:8px;color:var(--grn)"></i>Queue is empty</div>';
-      $('review-pagination').innerHTML = '';
-      return;
-    }
-
-    $('review-list').innerHTML = rows.map(r => {
-      const sku  = r.skus || {};
-      const comp = r.competitors || {};
-      const ourUrl = sku.product_url || (sku.slug ? `https://www.ukpos.com/${sku.slug}?vat=0` : '#');
-      const confColor = (r.confidence||0) >= 80 ? 'var(--grn)' : (r.confidence||0) >= 60 ? 'var(--amb)' : 'var(--red)';
-      return `<div class="rev-card" id="rev-${r.id}">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <div><span style="font-family:'SF Mono',monospace;font-size:11px;color:var(--blu)">${r.sku_id}</span> <span style="font-size:13px;font-weight:500;margin-left:6px">${sku.short_title||r.sku_id}</span></div>
-          ${confWidget(r.confidence)}
-        </div>
-        <div class="rev-pair">
-          <div class="rev-side">
-            <div class="rs-label">Your product</div>
-            <div class="rs-name">${sku.short_title||r.sku_id}</div>
-            <a class="rs-url" href="${ourUrl}" target="_blank" rel="noopener">${ourUrl.replace('https://','').slice(0,45)}…</a>
-            <div class="rs-price">${fmtPrice(sku.price_ex_vat)} <span class="vat vex">ex</span></div>
-          </div>
-          <div class="rev-side">
-            <div class="rs-label">${comp.name||'Competitor'} — matched</div>
-            <div class="rs-name">${r.competitor_title||'—'}</div>
-            <a class="rs-url" href="${r.competitor_url||'#'}" target="_blank" rel="noopener">${(r.competitor_url||'No URL').replace('https://','').slice(0,45)}</a>
-            <div class="rs-price" style="margin-top:4px">${vatPill(comp.vat_status||'unknown')}</div>
-          </div>
-        </div>
-        ${r.notes ? `<div class="rev-notes"><i class="ti ti-info-circle" style="font-size:11px;margin-right:4px"></i>${r.notes}</div>` : ''}
-        <div style="display:flex;gap:7px;flex-wrap:wrap">
-          <button class="btn sm prim" onclick="reviewDecision(${r.id},'approve',this)"><i class="ti ti-check"></i> Confirm match</button>
-          <button class="btn sm danger" onclick="reviewDecision(${r.id},'reject',this)"><i class="ti ti-x"></i> Reject</button>
-          <button class="btn sm ghost" onclick="skipReview(${r.id})"><i class="ti ti-skip-forward"></i> Skip</button>
-        </div>
-      </div>`;
-    }).join('');
-
-    const from = (reviewPage-1)*reviewLimit+1, to = (reviewPage-1)*reviewLimit+rows.length;
-    $('review-pagination').innerHTML = `
-      <div style="display:flex;align-items:center;gap:10px">
-        <span>${from}–${to} of ${total}</span>
-        <select onchange="reviewLimit=+this.value;reviewPage=1;loadReview()" style="padding:3px 6px;border-radius:5px;border:1px solid var(--bm);background:var(--surface);font-size:11px">
-          <option value="50">50/page</option><option value="100">100/page</option><option value="250">250/page</option>
-        </select>
-      </div>
-      <div style="display:flex;gap:6px">
-        ${reviewPage>1?`<button class="btn sm" onclick="reviewPage--;loadReview()">← Prev</button>`:''}
-        ${rows.length===reviewLimit?`<button class="btn sm" onclick="reviewPage++;loadReview()">Next →</button>`:''}
-      </div>`;
+    filterReview();
   } catch (e) {
     $('review-list').innerHTML = `<div style="color:var(--red);padding:8px">${e.message}</div>`;
   }
+}
+
+function filterReview() {
+  const q    = ($('review-search')?.value || '').toLowerCase().trim();
+  const comp = $('review-comp-filter')?.value || '';
+
+  let rows = reviewAllRows;
+  if (q) {
+    rows = rows.filter(r =>
+      r.sku_id?.toLowerCase().includes(q) ||
+      (r.skus?.short_title||'').toLowerCase().includes(q) ||
+      (r.competitors?.name||'').toLowerCase().includes(q) ||
+      (r.competitor_title||'').toLowerCase().includes(q)
+    );
+  }
+  if (comp) rows = rows.filter(r => String(r.competitor_id) === String(comp));
+
+  const total   = reviewAllRows.length;
+  const showing = rows.length;
+  $('review-sub').textContent = (q || comp)
+    ? `${showing} of ${total} matches (filtered)`
+    : `${total} matches awaiting confirmation`;
+
+  if (!rows.length) {
+    $('review-list').innerHTML = '<div style="text-align:center;color:var(--t2);padding:40px;font-size:12px">'
+      + (q || comp
+          ? '<i class="ti ti-search" style="font-size:24px;display:block;margin-bottom:8px;opacity:.3"></i>No matches for that filter'
+          : '<i class="ti ti-circle-check" style="font-size:24px;display:block;margin-bottom:8px;color:var(--grn)"></i>Queue is empty')
+      + '</div>';
+    $('review-pagination').innerHTML = '';
+    return;
+  }
+
+  const lim   = reviewLimit === 999999 ? rows.length : reviewLimit;
+  const start = (reviewPage - 1) * lim;
+  const page  = rows.slice(start, start + lim);
+  const from  = start + 1;
+  const to    = start + page.length;
+
+  $('review-list').innerHTML = page.map(r => {
+    const sku  = r.skus || {};
+    const comp = r.competitors || {};
+    const ourUrl = sku.product_url || (sku.slug ? `https://www.ukpos.com/${sku.slug}?vat=0` : '#');
+    return `<div class="rev-card" id="rev-${r.id}">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div><span style="font-family:'SF Mono',monospace;font-size:11px;color:var(--blu)">${r.sku_id}</span> <span style="font-size:13px;font-weight:500;margin-left:6px">${sku.short_title||r.sku_id}</span></div>
+        ${confWidget(r.confidence)}
+      </div>
+      <div class="rev-pair">
+        <div class="rev-side">
+          <div class="rs-label">Your product</div>
+          <div class="rs-name">${sku.short_title||r.sku_id}</div>
+          <a class="rs-url" href="${ourUrl}" target="_blank" rel="noopener">${ourUrl.replace('https://','').slice(0,50)}</a>
+          <div class="rs-price">${fmtPrice(sku.price_ex_vat)} <span class="vat vex">ex</span></div>
+        </div>
+        <div class="rev-side">
+          <div class="rs-label">${comp.name||'Competitor'} — matched</div>
+          <div class="rs-name">${r.competitor_title||'—'}</div>
+          <a class="rs-url" href="${r.competitor_url||'#'}" target="_blank" rel="noopener">${(r.competitor_url||'No URL').replace('https://','').slice(0,50)}</a>
+          <div class="rs-price" style="margin-top:4px">${vatPill(comp.vat_status||'unknown')}</div>
+        </div>
+      </div>
+      ${r.notes ? `<div class="rev-notes"><i class="ti ti-info-circle" style="font-size:11px;margin-right:4px"></i>${r.notes}</div>` : ''}
+      <div style="display:flex;gap:7px;flex-wrap:wrap">
+        <button class="btn sm prim" onclick="reviewDecision(${r.id},'approve',this)"><i class="ti ti-check"></i> Confirm match</button>
+        <button class="btn sm danger" onclick="reviewDecision(${r.id},'reject',this)"><i class="ti ti-x"></i> Reject</button>
+        <button class="btn sm ghost" onclick="skipReview(${r.id})"><i class="ti ti-skip-forward"></i> Skip</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  $('review-pagination').innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span>${from}–${to} of ${showing}${q||comp?' (filtered)':''}</span>
+      <select onchange="reviewLimit=+this.value===0?999999:+this.value;reviewPage=1;filterReview()" style="padding:3px 6px;border-radius:5px;border:1px solid var(--bm);background:var(--surface);font-size:11px">
+        <option value="50">50/page</option><option value="100">100/page</option><option value="250">250/page</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:6px">
+      ${reviewPage>1?`<button class="btn sm" onclick="reviewPage--;filterReview()">← Prev</button>`:''}
+      ${to<showing?`<button class="btn sm" onclick="reviewPage++;filterReview()">Next →</button>`:''}
+    </div>`;
 }
 
 async function reviewDecision(matchId, decision, btn) {
