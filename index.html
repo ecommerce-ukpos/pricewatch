@@ -560,12 +560,13 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
             <th class="sortable" onclick="sortSkusTable('short_title')">Product</th>
             <th class="sortable" onclick="sortSkusTable('our_price')">Our price</th>
             <th class="sortable" onclick="sortSkusTable('competitor_name')">Best competitor</th>
+            <th class="sortable" onclick="sortSkusTable('their_price')">Their price</th>
             <th class="sortable" onclick="sortSkusTable('diff')">Gap</th>
             <th>Comps</th>
             <th class="sortable" onclick="sortSkusTable('availability')">Stock</th>
             <th class="sortable" onclick="sortSkusTable('scraped_at')">Scraped</th>
             <th></th>
-          </tr></thead><tbody id="sku-tbody"><tr><td colspan="9"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table></div>
+          </tr></thead><tbody id="sku-tbody"><tr><td colspan="10"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table></div>
           <div id="sku-pagination" style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-top:1px solid var(--border);font-size:11px;color:var(--t2)"></div>
         </div>
       </div>
@@ -2228,6 +2229,7 @@ function sortSkusTable(col) {
       if (col === 'short_title')   return (r.short_title||'').toLowerCase();
       if (col === 'our_price')     return parseFloat(r.our_price||0);
       if (col === 'competitor_name') return (r.competitor_name||'').toLowerCase();
+      if (col === 'their_price')   { const raw = r.competitor_price ? parseFloat(r.competitor_price) : null; const vat = r.competitor_vat || r.competitor_vat_default || 'unknown'; return raw ? normalisePrice(raw, vat) : 999999; }
       if (col === 'diff')          return parseFloat(r.diff_pct_normalised??r.diff_pct??0);
       if (col === 'availability')  return (r.availability||'').toLowerCase();
       if (col === 'scraped_at')    return r.scraped_at ? new Date(r.scraped_at).getTime() : 0;
@@ -2248,7 +2250,8 @@ function renderSkusRows(rows) {
       <td>${skuLink(r)}</td>
       <td style="font-size:11px;color:var(--t2);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.short_title||''}</td>
       <td style="font-weight:500">${fmtPrice(r.our_price)}</td>
-      <td style="font-size:11px">${r.competitor_name||'—'} <span style="color:var(--t3)">${ex?fmtPrice(ex):''}</span></td>
+      <td style="font-size:11px;color:var(--t2)">${r.competitor_name||'—'}</td>
+      <td style="font-weight:500">${ex ? fmtPrice(ex) : '—'}${ex ? ` <span style="font-size:9px;color:var(--t3)">${vatPill(vat)}</span>` : ''}</td>
       <td><span class="${diffClass(diff)}">${diffLabel(diff)}</span></td>
       <td style="color:var(--t2)">—</td>
       <td>${stockBadge(r.availability)}</td>
