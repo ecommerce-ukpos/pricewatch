@@ -1570,10 +1570,21 @@ function filterReview() {
         </div>
       </div>
       ${r.notes ? `<div class="rev-notes"><i class="ti ti-info-circle" style="font-size:11px;margin-right:4px"></i>${r.notes}</div>` : ''}
-      <div style="display:flex;gap:7px;flex-wrap:wrap">
+      <div id="rev-actions-${r.id}" style="display:flex;gap:7px;flex-wrap:wrap;align-items:center">
         <button class="btn sm prim" onclick="reviewDecision(${r.id},'approve',this)"><i class="ti ti-check"></i> Confirm match</button>
-        <button class="btn sm danger" onclick="reviewDecision(${r.id},'reject',this)"><i class="ti ti-x"></i> Reject</button>
+        <button class="btn sm danger" onclick="showCorrectUrl(${r.id})"><i class="ti ti-x"></i> Reject</button>
         <button class="btn sm ghost" onclick="skipReview(${r.id})"><i class="ti ti-skip-forward"></i> Skip</button>
+      </div>
+      <div id="rev-url-wrap-${r.id}" style="display:none;margin-top:8px">
+        <div style="font-size:11px;color:var(--t2);margin-bottom:6px">Paste the correct URL for this product (optional — leave blank to reject without one):</div>
+        <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+          <input id="rev-url-${r.id}" type="text" placeholder="https://competitor.com/correct-product-page"
+            autocomplete="off" spellcheck="false"
+            style="flex:1;min-width:200px;padding:6px 10px;font-size:11px;border:1px solid var(--bm);border-radius:var(--r);font-family:inherit;outline:none">
+          <button class="btn sm prim" onclick="saveCorrectUrl(${r.id},this)"><i class="ti ti-device-floppy"></i> Save URL &amp; reject</button>
+          <button class="btn sm danger" onclick="reviewDecision(${r.id},'reject',this)">Reject without URL</button>
+          <button class="btn sm ghost" onclick="cancelReject(${r.id})">Cancel</button>
+        </div>
       </div>
     </div>`;
   }).join('');
@@ -1604,6 +1615,52 @@ async function reviewDecision(matchId, decision, btn) {
 function skipReview(matchId) {
   const row = $(`rev-${matchId}`);
   if (row) row.style.display = 'none';
+}
+
+function showCorrectUrl(matchId) {
+  $(`rev-actions-${matchId}`).style.display = 'none';
+  $(`rev-url-wrap-${matchId}`).style.display = 'block';
+  const input = $(`rev-url-${matchId}`);
+  if (input) input.focus();
+}
+
+function cancelReject(matchId) {
+  $(`rev-actions-${matchId}`).style.display = 'flex';
+  $(`rev-url-wrap-${matchId}`).style.display = 'none';
+}
+
+async function saveCorrectUrl(matchId, btn) {
+  const input  = $(`rev-url-${matchId}`);
+  const newUrl = (input?.value || '').trim();
+  if (!newUrl || !newUrl.startsWith('http')) {
+    input.style.borderColor = 'var(--red)';
+    input.placeholder = 'Must be a valid URL starting with https://…';
+    return;
+  }
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Saving…';
+  try {
+    /* Update the competitor_matches URL then reject */
+    const { error } = await sb.from('competitor_matches')
+      .update({ competitor_url: newUrl, match_status: 'rejected', human_reviewed: true, reviewed_at: new Date().toISOString() })
+      .eq('id', matchId);
+    if (error) throw new Error(error.message);
+    const row = $(`rev-${matchId}`);
+    if (row) {
+      row.style.opacity = '.45';
+      row.style.pointerEvents = 'none';
+      $(`rev-url-wrap-${matchId}`).innerHTML =
+        `<div style="color:var(--grn);font-size:11px;padding:4px 0"><i class="ti ti-check"></i> URL saved — will be scraped on next run</div>`;
+    }
+    /* Refresh local dataset */
+    reviewAllRows = reviewAllRows.filter(r => r.id !== matchId);
+    loadDashboard();
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    alert('Save failed: ' + e.message);
+  }
 }
 
 /* ════════════════════════════════════════
