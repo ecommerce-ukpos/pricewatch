@@ -1734,11 +1734,39 @@ function selectCat5(name) { catL5 = name; renderCategoryLevel(); }
 ════════════════════════════════════════ */
 async function loadByCompetitor() {
   try {
-    const { data: comps } = await sb.from('competitors').select('id,name,domain,vat_status,active').eq('active',true).order('name');
-    if (!comps?.length) { $('bycomp-tbody').innerHTML = '<tr><td colspan="8" style="padding:20px;text-align:center;color:var(--t2)">No competitors found</td></tr>'; return; }
+    /* Fetch competitors and snapshot stats in parallel */
+    const [{ data: comps }, { data: snaps }] = await Promise.all([
+      sb.from('competitors').select('id,name,domain,vat_status,active').eq('active',true).order('name'),
+      sb.from('latest_snapshots').select('competitor_id,diff_pct_normalised,diff_pct,competitor_price').not('competitor_price','is',null)
+    ]);
 
-    /* Store with placeholder stats — stats cols show — until we add snapshot counts */
-    bycompData = comps.map(c => ({ ...c, _matched: null, _critical: null, _warning: null, _cheaper: null, _parity: null }));
+    if (!comps?.length) {
+      $('bycomp-tbody').innerHTML = '<tr><td colspan="8" style="padding:20px;text-align:center;color:var(--t2)">No competitors found</td></tr>';
+      return;
+    }
+
+    /* Aggregate stats per competitor using live thresholds */
+    const stats = {};
+    (snaps || []).forEach(s => {
+      const cid  = s.competitor_id;
+      const diff = s.diff_pct_normalised ?? s.diff_pct ?? 0;
+      if (!stats[cid]) stats[cid] = { matched:0, critical:0, warning:0, cheaper:0, parity:0 };
+      stats[cid].matched++;
+      if      (diff <= -T.red)               stats[cid].critical++;
+      else if (diff <= -T.amb)               stats[cid].warning++;
+      else if (diff >=  T.par)               stats[cid].cheaper++;
+      else                                   stats[cid].parity++;
+    });
+
+    bycompData = comps.map(c => ({
+      ...c,
+      _matched:  stats[c.id]?.matched  ?? 0,
+      _critical: stats[c.id]?.critical ?? 0,
+      _warning:  stats[c.id]?.warning  ?? 0,
+      _cheaper:  stats[c.id]?.cheaper  ?? 0,
+      _parity:   stats[c.id]?.parity   ?? 0,
+    }));
+
     sortState.bycomp = { col: null, dir: 1 };
     renderByCompRows(bycompData);
     updateSortHeaders('bycomp-table', 'bycomp', null);
@@ -2330,15 +2358,16 @@ function sortByCompTable(col) {
 function renderByCompRows(comps) {
   $('bycomp-tbody').innerHTML = comps.map(c => {
     const slug = slugify(c.name);
+    const noData = c._matched === 0;
     return `<tr class="tr-link" onclick="go('comp-detail',{compId:${c.id},compName:'${c.name.replace(/'/g,"\\'")}',compSlug:'${slug}',compDomain:'${c.domain}',compVat:'${c.vat_status}'})">
       <td style="font-weight:500">${c.name}</td>
       <td style="font-size:11px;color:var(--t2)">${c.domain}</td>
       <td>${vatPill(c.vat_status)}</td>
-      <td style="color:var(--t2)">${c._matched  ?? '—'}</td>
-      <td style="color:var(--red);font-weight:600">${c._critical ?? '—'}</td>
-      <td style="color:var(--amb)">${c._warning  ?? '—'}</td>
-      <td style="color:var(--grn)">${c._cheaper  ?? '—'}</td>
-      <td style="color:var(--t2)">${c._parity   ?? '—'}</td>
+      <td style="color:var(--t2)">${noData ? '<span style="color:var(--t3)">—</span>' : c._matched}</td>
+      <td style="font-weight:600">${noData ? '<span style="color:var(--t3)">—</span>' : (c._critical > 0 ? `<span style="color:var(--red)">${c._critical}</span>` : '<span style="color:var(--t3)">0</span>')}</td>
+      <td>${noData ? '<span style="color:var(--t3)">—</span>' : (c._warning > 0 ? `<span style="color:var(--amb);font-weight:500">${c._warning}</span>` : '<span style="color:var(--t3)">0</span>')}</td>
+      <td>${noData ? '<span style="color:var(--t3)">—</span>' : (c._cheaper > 0 ? `<span style="color:var(--grn)">${c._cheaper}</span>` : '<span style="color:var(--t3)">0</span>')}</td>
+      <td style="color:var(--t2)">${noData ? '<span style="color:var(--t3)">—</span>' : c._parity}</td>
     </tr>`;
   }).join('');
 }
