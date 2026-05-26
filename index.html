@@ -529,47 +529,48 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
         <div class="cmd-title">All SKUs</div>
         <div class="cmd-actions"><span style="font-size:11px;color:var(--t2)" id="skus-sub"></span></div>
       </div>
-      <div class="content">
-        <div class="card-0p">
-          <div style="padding:12px 14px;border-bottom:1px solid var(--border)">
-            <div class="filter-row" style="margin:0">
-              <input type="text" class="search" id="skuQ" placeholder="Search SKU ID, product name, competitor…" oninput="debounce(filterSKUs,400)()" autocomplete="new-password" spellcheck="false">
-              <select id="fDiff" onchange="filterSKUs()">
-                <option value="">All differentials</option>
-                <option value="crit">Critical — we're most expensive</option>
-                <option value="warn">Warning — 5–10% more expensive</option>
-                <option value="par">At parity</option>
-                <option value="cheap">We're cheaper</option>
-              </select>
-              <select id="fVat" onchange="filterSKUs()">
-                <option value="">All VAT statuses</option>
-                <option value="ex">Ex-VAT confirmed</option>
-                <option value="inc">Inc-VAT confirmed</option>
-                <option value="unknown">VAT unknown</option>
-              </select>
-              <select id="fStock" onchange="filterSKUs()">
-                <option value="">All stock</option>
-                <option value="in">In stock</option>
-                <option value="oos">Out of stock</option>
-                <option value="unavail">Unavailable</option>
-              </select>
-            </div>
-          </div>
-          <div class="tw"><table id="skus-table"><thead><tr>
-            <th class="sortable" style="border-left:3px solid transparent" onclick="sortSkusTable('sku_id')">SKU ID</th>
-            <th class="sortable" onclick="sortSkusTable('short_title')">Product</th>
-            <th class="sortable" onclick="sortSkusTable('our_price')">Our price</th>
-            <th class="sortable" onclick="sortSkusTable('competitor_name')">Best competitor</th>
-            <th class="sortable" onclick="sortSkusTable('their_price')">Their price</th>
-            <th class="sortable" onclick="sortSkusTable('diff')">Gap</th>
-            <th>Comps</th>
-            <th class="sortable" onclick="sortSkusTable('availability')">Stock</th>
-            <th class="sortable" onclick="sortSkusTable('scraped_at')">Scraped</th>
-            <th></th>
-          </tr></thead><tbody id="sku-tbody"><tr><td colspan="10"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table></div>
-          <div id="sku-pagination" style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-top:1px solid var(--border);font-size:11px;color:var(--t2)"></div>
+      <!-- filters — fixed, never scrolls away -->
+      <div style="background:var(--surface);border-bottom:1px solid var(--border);padding:10px 14px;flex-shrink:0">
+        <div class="filter-row" style="margin:0">
+          <input type="text" class="search" id="skuQ" placeholder="Search SKU ID, product name, competitor…" oninput="debounce(filterSKUs,400)()" autocomplete="new-password" spellcheck="false">
+          <select id="fDiff" onchange="filterSKUs()">
+            <option value="">All differentials</option>
+            <option value="crit">Critical — we're most expensive</option>
+            <option value="warn">Warning — 5–10% more expensive</option>
+            <option value="par">At parity</option>
+            <option value="cheap">We're cheaper</option>
+          </select>
+          <select id="fVat" onchange="filterSKUs()">
+            <option value="">All VAT statuses</option>
+            <option value="ex">Ex-VAT confirmed</option>
+            <option value="inc">Inc-VAT confirmed</option>
+            <option value="unknown">VAT unknown</option>
+          </select>
+          <select id="fStock" onchange="filterSKUs()">
+            <option value="">All stock</option>
+            <option value="in">In stock</option>
+            <option value="oos">Out of stock</option>
+            <option value="unavail">Unavailable</option>
+          </select>
         </div>
       </div>
+      <!-- table — scrollable middle -->
+      <div style="flex:1;overflow-y:auto;overflow-x:auto;min-height:0">
+        <table id="skus-table" style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>
+          <th class="sortable" style="border-left:3px solid transparent;position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('sku_id')">SKU ID</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('short_title')">Product</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('our_price')">Our price</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('competitor_name')">Best competitor</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('their_price')">Their price</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('diff')">Gap</th>
+          <th style="position:sticky;top:0;z-index:2;background:var(--surface)">Comps</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('availability')">Stock</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('scraped_at')">Scraped</th>
+          <th style="position:sticky;top:0;z-index:2;background:var(--surface)"></th>
+        </tr></thead><tbody id="sku-tbody"><tr><td colspan="10"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table>
+      </div>
+      <!-- pagination — fixed at bottom, never scrolls away -->
+      <div id="sku-pagination" style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-top:1px solid var(--border);font-size:11px;color:var(--t2);background:var(--surface);flex-shrink:0"></div>
     </div>
 
     <!-- ── BY CATEGORY ── -->
@@ -1125,7 +1126,10 @@ function goSett(tab) {
 function showView(v) {
   ['view-loading','view-login','view-pending','view-rejected','view-app'].forEach(id => {
     const el = $(id);
-    if (el) el.style.display = (id === v) ? '' : 'none';
+    if (!el) return;
+    if (id !== v) { el.style.display = 'none'; return; }
+    /* view-app is .shell which needs display:grid, auth screens are block */
+    el.style.display = (id === 'view-app') ? 'grid' : '';
   });
 }
 
