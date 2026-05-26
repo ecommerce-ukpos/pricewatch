@@ -808,7 +808,7 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
         <button class="drawer-close" onclick="closeDrawer()"><i class="ti ti-x"></i></button>
       </div>
       <div class="drawer-body">
-        <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-bottom:8px">All competitors — ex-VAT equivalent · worst to best</div>
+        <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-bottom:8px">Price league table — all prices ex-VAT · rank 1 = cheapest</div>
         <div id="dr-rows"><div class="loading"><span class="spinner"></span></div></div>
         <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
           <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-bottom:8px">Quick actions</div>
@@ -1587,13 +1587,13 @@ function renderCategoryLevel() {
     const skus = allSkus.filter(s => s.cat_l4===catL4 && (s.cat_l5||'(other)')===catL5);
     sub.innerHTML = `<button class="btn sm ghost" onclick="catL4=null;catL5=null;renderCategoryLevel()" style="font-size:11px;color:var(--t2)"><i class="ti ti-arrow-left"></i> All categories</button> <span style="color:var(--t3);margin:0 4px">/</span> <span onclick="catL5=null;renderCategoryLevel()" style="cursor:pointer;color:var(--t2)">${catL4}</span> <span style="color:var(--t3);margin:0 4px">/</span> ${catL5}`;
     content.innerHTML = `<div class="card-0p"><table><thead><tr>
-      <th>SKU ID</th><th>Product</th><th>Our price</th><th>Stock</th><th></th>
+      <th>SKU ID</th><th>Product</th><th>Our price</th><th>Stock</th><th style="width:60px"></th>
     </tr></thead><tbody>${skus.map(s => `<tr class="tr-link" onclick="openDrawer('${s.sku_id}','${(s.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(s.price_ex_vat)}','bycat')">
       <td><span style="font-family:'SF Mono',monospace;font-size:11px;color:var(--blu)">${s.sku_id}</span></td>
-      <td style="font-size:11px;color:var(--t2)">${s.short_title||''}</td>
-      <td style="font-weight:500">${fmtPrice(s.price_ex_vat)}</td>
+      <td style="font-size:12px;color:var(--text)">${s.short_title||''}</td>
+      <td style="font-weight:500">${fmtPrice(s.price_ex_vat)} <span class="vat vex" style="font-size:9px">ex</span></td>
       <td>${stockBadge(s.availability)}</td>
-      <td><button class="btn sm ghost" onclick="event.stopPropagation();openDrawer('${s.sku_id}','${(s.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(s.price_ex_vat)}','bycat')"><i class="ti ti-layout-sidebar-right"></i></button></td>
+      <td><button class="btn ghost" onclick="event.stopPropagation();openDrawer('${s.sku_id}','${(s.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(s.price_ex_vat)}','bycat')" style="padding:6px 10px;color:var(--blu);font-size:12px" title="View all competitor prices"><i class="ti ti-layout-sidebar-right" style="font-size:16px"></i></button></td>
     </tr>`).join('')}</tbody></table></div>`;
   }
 }
@@ -1842,21 +1842,60 @@ async function openDrawer(skuId, name, price, fromPanel) {
     const { data: snaps } = await sb.from('latest_snapshots').select('*').eq('sku_id', skuId).order('diff_pct_normalised', {ascending:true, nullsFirst:false});
     const rows = snaps || [];
     if (!rows.length) {
-      $('dr-rows').innerHTML = '<div style="color:var(--t2);font-size:12px;padding:8px">No competitor data yet</div>';
+      $('dr-rows').innerHTML = '<div style="color:var(--t2);font-size:12px;padding:8px">No competitor data yet — run a scrape first.</div>';
       return;
     }
-    $('dr-rows').innerHTML = rows.map(r => {
-      const diff = r.diff_pct_normalised ?? r.diff_pct;
-      const raw  = r.competitor_price ? parseFloat(r.competitor_price) : null;
-      const vat  = r.competitor_vat || r.competitor_vat_default || 'unknown';
-      const ex   = raw ? normalisePrice(raw, vat) : null;
-      const tier = getTier(diff);
-      return `<div class="dr-comp-row tier-${tier}">
-        <div><div class="drc-name">${r.competitor_name||'—'}</div><div class="drc-domain">${r.competitor_domain||''} ${vatPill(vat)}</div></div>
-        <div class="drc-price">${ex ? fmtPrice(ex) : (r.availability==='out_of_stock'?'OOS':'—')}</div>
-        <div class="drc-diff ${diffClass(diff)}">${diffLabel(diff)}</div>
+
+    // Build league table: insert UKPOS among competitors ranked by ex-VAT price ascending
+    const ourPriceEx = rows[0]?.our_price ? parseFloat(rows[0].our_price) : null;
+
+    const entries = rows
+      .filter(r => r.competitor_price)
+      .map(r => {
+        const raw = parseFloat(r.competitor_price);
+        const vat = r.competitor_vat || r.competitor_vat_default || 'unknown';
+        const ex  = normalisePrice(raw, vat);
+        return { name: r.competitor_name||'—', domain: r.competitor_domain||'', vat, ex, raw, diff: r.diff_pct_normalised??r.diff_pct, avail: r.availability, isUs: false };
+      });
+
+    if (ourPriceEx) {
+      entries.push({ name: 'UKPOS', domain: 'ukpos.com', vat: 'ex', ex: ourPriceEx, raw: ourPriceEx, diff: 0, avail: 'in_stock', isUs: true });
+    }
+
+    // Sort by ex-VAT price ascending (cheapest first = rank 1)
+    entries.sort((a, b) => (a.ex||999999) - (b.ex||999999));
+
+    $('dr-rows').innerHTML = entries.map((e, i) => {
+      const rank = i + 1;
+      const tier = e.isUs ? 'us' : getTier(e.diff);
+      const tierColors = {
+        r: { bg: 'var(--rb)', border: 'var(--rbd)', txt: 'var(--red)' },
+        a: { bg: 'var(--ab)', border: 'var(--abd)', txt: 'var(--amb)' },
+        g: { bg: 'var(--gb)', border: 'var(--gbd)', txt: 'var(--grn)' },
+        p: { bg: 'var(--bg)', border: 'var(--border)', txt: 'var(--t2)' },
+        us:{ bg: '#111110',   border: 'var(--orange)', txt: '#fff' },
+      };
+      const c = tierColors[tier] || tierColors.p;
+      const rankColor = rank === 1 ? '#f59e0b' : e.isUs ? 'rgba(255,255,255,.5)' : 'var(--t3)';
+      const diffHtml = e.isUs
+        ? `<span style="font-size:10px;color:rgba(255,255,255,.4)">our price</span>`
+        : `<span class="${diffClass(e.diff)}" style="${tier==='us'?'color:#fff':''}">${diffLabel(e.diff)}</span>`;
+      const oosHtml = e.avail === 'out_of_stock' ? `<span style="font-size:10px;opacity:.55;margin-top:2px;display:block">OOS</span>` : '';
+
+      return `<div style="display:grid;grid-template-columns:28px 1fr auto;align-items:center;gap:10px;padding:9px 12px;border-radius:var(--r);border:1px solid ${c.border};background:${c.bg};margin-bottom:6px${e.isUs?';box-shadow:0 0 0 2px var(--orange)':''}">
+        <div style="font-size:13px;font-weight:700;color:${rankColor};text-align:center;line-height:1">${rank}</div>
+        <div>
+          <div style="font-weight:${e.isUs?'700':'500'};font-size:12px;color:${e.isUs?'#fff':'var(--text)'}">${e.name}</div>
+          <div style="font-size:10px;color:${e.isUs?'rgba(255,255,255,.45)':'var(--t2)'}">${e.domain} ${e.isUs?'':vatPill(e.vat)}</div>
+          ${oosHtml}
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:16px;font-weight:600;color:${e.isUs?'#fff':'var(--text)'}">${e.ex ? fmtPrice(e.ex) : '—'}</div>
+          <div style="margin-top:2px">${diffHtml}</div>
+        </div>
       </div>`;
     }).join('');
+
   } catch (e) {
     $('dr-rows').innerHTML = `<div style="color:var(--red);font-size:12px;padding:8px">${e.message}</div>`;
   }
@@ -1926,22 +1965,25 @@ async function loadCompetitorSettings() {
 
 async function setVatStatus(compId, val) {
   try {
-    await authPost(`/competitors/${compId}`, { vat_status: val }, 'PATCH');
+    const { error } = await sb.from('competitors').update({ vat_status: val }).eq('id', compId);
+    if (error) throw new Error(error.message);
     const tog = $('vtog-'+compId);
     if (tog) {
       tog.querySelectorAll('.vt-opt').forEach(b => {
         b.className = 'vt-opt';
-        if (b.textContent.trim()==='ex'&&val==='ex')     b.className='vt-opt s-ex';
-        if (b.textContent.trim()==='inc'&&val==='inc')   b.className='vt-opt s-inc';
-        if (b.textContent.trim()==='?'&&val==='unknown') b.className='vt-opt s-unk';
+        if (b.textContent.trim()==='ex'  && val==='ex')      b.className='vt-opt s-ex';
+        if (b.textContent.trim()==='inc' && val==='inc')     b.className='vt-opt s-inc';
+        if (b.textContent.trim()==='?'   && val==='unknown') b.className='vt-opt s-unk';
       });
     }
-  } catch (e) { alert('Update failed: '+e.message); }
+  } catch (e) { alert('VAT update failed: '+e.message); }
 }
 
 async function setCompActive(compId, active) {
-  try { await authPost(`/competitors/${compId}`, { active }, 'PATCH'); }
-  catch (e) { alert('Update failed: '+e.message); }
+  try {
+    const { error } = await sb.from('competitors').update({ active }).eq('id', compId);
+    if (error) throw new Error(error.message);
+  } catch (e) { alert('Update failed: '+e.message); }
 }
 
 /* ════════════════════════════════════════
