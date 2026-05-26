@@ -16,13 +16,23 @@ Per-competitor special handling:
 Environment variables:
     SUPABASE_URL
     SUPABASE_SERVICE_KEY
-    SCRAPER_WORKERS          (default: 2)
+    SCRAPER_MODE             (default: matched) — matched | full | skus
+    SCRAPER_WORKERS          (default: 5)
     SCRAPER_PAGE_TIMEOUT_MS  (default: 30000)
-    SCRAPER_DELAY_MIN        (default: 8)
-    SCRAPER_DELAY_MAX        (default: 15)
-    SCRAPER_SKU_LIMIT        (default: 250)
+    SCRAPER_DELAY_MIN        (default: 3)
+    SCRAPER_DELAY_MAX        (default: 7)
+    SCRAPER_SKU_LIMIT        (default: 500)
     SCRAPER_COMPETITOR_LIMIT (default: 23)
+    SCRAPER_SKUS             comma-separated SKU IDs (mode=skus only)
     LOG_LEVEL                (default: INFO)
+
+Modes:
+    matched  Re-scrape confirmed URL pairs only. No search phase. Fast (~30–60 min).
+             Use for nightly cron.
+    full     All SKUs × all competitors, full search + scrape. Slow (4–6 h).
+             Use weekly or when adding new competitors.
+    skus     Specific SKUs only (set SCRAPER_SKUS). Full search + scrape per SKU.
+             Use for ad-hoc spot checks.
 """
 
 import asyncio
@@ -47,12 +57,13 @@ log = logging.getLogger("pricewatch")
 
 SUPABASE_URL       = os.environ["SUPABASE_URL"]
 SUPABASE_KEY       = os.environ["SUPABASE_SERVICE_KEY"]
-WORKERS            = int(os.getenv("SCRAPER_WORKERS", "2"))
+WORKERS            = int(os.getenv("SCRAPER_WORKERS", "5"))
 TIMEOUT_MS         = int(os.getenv("SCRAPER_PAGE_TIMEOUT_MS", "30000"))
-DELAY_MIN          = float(os.getenv("SCRAPER_DELAY_MIN", "8"))
-DELAY_MAX          = float(os.getenv("SCRAPER_DELAY_MAX", "15"))
-SKU_LIMIT          = int(os.getenv("SCRAPER_SKU_LIMIT", "250"))
+DELAY_MIN          = float(os.getenv("SCRAPER_DELAY_MIN", "3"))
+DELAY_MAX          = float(os.getenv("SCRAPER_DELAY_MAX", "7"))
+SKU_LIMIT          = int(os.getenv("SCRAPER_SKU_LIMIT", "500"))
 COMPETITOR_LIMIT   = int(os.getenv("SCRAPER_COMPETITOR_LIMIT", "23"))
+SCRAPER_MODE       = os.getenv("SCRAPER_MODE", "matched")  # matched | full | skus
 
 # Competitor domains with special handling
 BIGCOMMERCE_DOMAINS = {"harrisonproducts.com"}
@@ -1013,53 +1024,159 @@ async def run_scraper(trigger: str = "scheduled"):
         "status": "running", "started_at": datetime.now(timezone.utc).isoformat(),
     }).execute()
 
-    log.info(f"Starting sync run {run_id} | workers={WORKERS} delay={DELAY_MIN}–{DELAY_MAX}s | SKUs={SKU_LIMIT} competitors={COMPETITOR_LIMIT}")
-
+    mode          = SCRAPER_MODE
     specific_skus = [s.strip() for s in os.getenv("SCRAPER_SKUS", "").split(",") if s.strip()]
     if specific_skus:
-        log.info(f"Running targeted scrape for: {specific_skus}")
+        mode = "skus"
+
+    log.info(f"Starting sync run {run_id} | mode={mode} | workers={WORKERS} | delay={DELAY_MIN}–{DELAY_MAX}s")
+
+    comps = (
+        sb.table("competitors")
+        .select("*")
+        .eq("active", True)
+        .order("id")
+        .limit(COMPETITOR_LIMIT)
+        .execute()
+        .data
+    )
+
+    # ── Build work list ────────────────────────────────────────────────────────
+
+    if mode == "matched":
+        # Only re-scrape pairs that already have a confirmed URL — no search phase
+        log.info("Mode: matched — re-scraping confirmed URLs only")
+        matched_rows = (
+            sb.table("competitor_matches")
+            .select("sku_id, competitor_id, competitor_url, competitor_title, confidence, match_status, match_method, human_reviewed, notes")
+            .eq("match_status", "matched")
+            .not_.is_("competitor_url", "null")
+            .execute()
+            .data
+        )
+        if not matched_rows:
+            log.info("No confirmed matches found — nothing to scrape. Run mode=full first.")
+            sb.table("sync_runs").update({
+                "status": "complete", "completed_at": datetime.now(timezone.utc).isoformat(),
+                "skus_attempted": 0, "skus_succeeded": 0, "skus_failed": 0, "oos_flagged": 0,
+            }).eq("id", str(run_id)).execute()
+            return
+
+        log.info(f"  {len(matched_rows)} confirmed matches to re-scrape")
+
+        match_lookup = {(r["sku_id"], r["competitor_id"]): r for r in matched_rows}
+        matched_sku_ids = list({r["sku_id"] for r in matched_rows})
+
+        # Fetch SKUs in batches to avoid URL-length limits
+        skus = []
+        batch = 200
+        for i in range(0, len(matched_sku_ids), batch):
+            chunk = matched_sku_ids[i:i + batch]
+            rows  = sb.table("skus").select("*").in_("sku_id", chunk).execute().data
+            skus.extend(rows or [])
+
+        comp_map = {c["id"]: c for c in comps}
+
+        # Only pair SKUs with competitors where a confirmed match exists
+        from collections import defaultdict
+        sku_work: dict = defaultdict(list)
+        for sku in skus:
+            for comp_id, comp in comp_map.items():
+                key = (sku["sku_id"], comp_id)
+                if key in match_lookup:
+                    sku_work[sku["sku_id"]].append((sku, comp, match_lookup[key]))
+
+        log.info(f"  {sum(len(v) for v in sku_work.values())} work items across {len(sku_work)} SKUs")
+
+    elif mode == "skus":
+        # Specific SKUs, full search + scrape per competitor
+        log.info(f"Mode: skus — targeting {specific_skus}")
         skus = sb.table("skus").select("*").in_("sku_id", specific_skus).execute().data
+        all_matches = sb.table("competitor_matches").select("*").execute().data
+        match_lookup = {(m["sku_id"], m["competitor_id"]): m for m in all_matches}
+        from collections import defaultdict
+        sku_work: dict = defaultdict(list)
+        for sku in skus:
+            for comp in comps:
+                existing = match_lookup.get((sku["sku_id"], comp["id"]))
+                sku_work[sku["sku_id"]].append((sku, comp, existing))
+        log.info(f"  {sum(len(v) for v in sku_work.values())} work items across {len(sku_work)} SKUs")
+
     else:
-        skus = sb.table("skus").select("*").eq("active", True).limit(SKU_LIMIT).execute().data
+        # full — all SKUs × all competitors, search + scrape
+        log.info("Mode: full — all SKUs × all competitors")
+        skus = (
+            sb.table("skus")
+            .select("*")
+            .eq("active", True)
+            .limit(SKU_LIMIT)
+            .execute()
+            .data
+        )
+        all_matches = sb.table("competitor_matches").select("*").execute().data
+        match_lookup = {(m["sku_id"], m["competitor_id"]): m for m in all_matches}
+        from collections import defaultdict
+        sku_work: dict = defaultdict(list)
+        for sku in skus:
+            for comp in comps:
+                existing = match_lookup.get((sku["sku_id"], comp["id"]))
+                sku_work[sku["sku_id"]].append((sku, comp, existing))
+        log.info(f"  {sum(len(v) for v in sku_work.values())} work items across {len(sku_work)} SKUs")
 
-    comps = sb.table("competitors").select("*").eq("active", True).order("id").limit(COMPETITOR_LIMIT).execute().data
-    log.info(f"Loaded {len(skus)} SKUs, {len(comps)} competitors")
-
-    match_map = {(m["sku_id"], m["competitor_id"]): m for m in sb.table("competitor_matches").select("*").execute().data}
+    # ── Execute ────────────────────────────────────────────────────────────────
 
     scraper = PriceScraper(sb, run_id)
     stats   = {"attempted": 0, "succeeded": 0, "failed": 0, "oos": 0}
     sem     = asyncio.Semaphore(WORKERS)
 
-    async def process_sku(sku: dict):
+    async def process_sku_group(sku_id: str, items: list):
         async with sem:
-            log.info(f"\n{'='*60}\n{sku['sku_id']} — {sku['short_title']}\nQuery: '{build_search_query(sku)}'\n{'='*60}")
+            sku = items[0][0]
+            log.info(f"\n{'='*60}\n{sku['sku_id']} — {sku['short_title']}")
+            if mode != "matched":
+                log.info(f"Query: '{build_search_query(sku)}'")
+            log.info('='*60)
+
             sku_snapshots = []
-            for comp in comps:
-                existing = match_map.get((sku["sku_id"], comp["id"]))
+            for (_, comp, existing) in items:
                 stats["attempted"] += 1
                 try:
                     snap = await scraper.process_sku_competitor(browser, sku, comp, existing)
                     await scraper.write_snapshot(snap)
                     await scraper.create_alerts(snap, sku, comp)
                     sku_snapshots.append(snap)
-                    if snap["availability"] == "error": stats["failed"] += 1
+                    if snap["availability"] == "error":
+                        stats["failed"] += 1
                     else:
                         stats["succeeded"] += 1
-                        if snap["availability"] == "out_of_stock": stats["oos"] += 1
+                        if snap["availability"] == "out_of_stock":
+                            stats["oos"] += 1
                 except Exception as e:
                     stats["failed"] += 1
                     log.error(f"Unhandled: {sku['sku_id']} × {comp['domain']}: {e}")
                 finally:
                     await asyncio.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
-            await scraper.flush_matches_for_sku(sku, sku_snapshots, comps)
+
+            # Only update match records in full/skus mode — in matched mode the
+            # URLs are already confirmed and we don't want to overwrite confidence
+            if mode != "matched":
+                await scraper.flush_matches_for_sku(sku, sku_snapshots, comps)
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(
             headless=True,
-            args=["--no-sandbox","--disable-blink-features=AutomationControlled","--disable-dev-shm-usage","--disable-infobars","--window-size=1280,800"],
+            args=[
+                "--no-sandbox",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-dev-shm-usage",
+                "--disable-infobars",
+                "--window-size=1280,800",
+            ],
         )
-        await asyncio.gather(*[process_sku(sku) for sku in skus])
+        await asyncio.gather(*[
+            process_sku_group(sku_id, items)
+            for sku_id, items in sku_work.items()
+        ])
         await browser.close()
 
     sb.table("sync_runs").update({
@@ -1067,7 +1184,7 @@ async def run_scraper(trigger: str = "scheduled"):
         "skus_attempted": stats["attempted"], "skus_succeeded": stats["succeeded"],
         "skus_failed": stats["failed"], "oos_flagged": stats["oos"],
     }).eq("id", str(run_id)).execute()
-    log.info(f"Run {run_id} complete — {stats}")
+    log.info(f"Run {run_id} complete — mode={mode} — {stats}")
 
 
 if __name__ == "__main__":
