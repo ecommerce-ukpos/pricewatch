@@ -717,8 +717,10 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
         <div style="display:grid;grid-template-columns:340px 1fr;gap:14px;align-items:start">
           <div class="card">
             <div class="card-hd"><div class="card-title">Nightly configuration</div></div>
-            <div class="sched-row"><div class="sched-ico"><i class="ti ti-clock" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">Run time</div><div style="color:var(--t2)">Nightly via GitHub Actions cron</div></div><strong>01:00 am</strong></div>
+            <div class="sched-row"><div class="sched-ico"><i class="ti ti-clock" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">Matched run</div><div style="color:var(--t2)">Re-scrapes all confirmed URLs in one go — every 3 days</div></div><strong>Mon/Thu/Sun 1am</strong></div>
+            <div class="sched-row"><div class="sched-ico"><i class="ti ti-search" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">Batch search run</div><div style="color:var(--t2)">Finds new matches — Mon–Fri, 570 SKUs/day</div></div><strong>03:00 am</strong></div>
             <div class="sched-row"><div class="sched-ico"><i class="ti ti-cpu" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">Parallel workers</div><div style="color:var(--t2)">Concurrent browser contexts</div></div><strong>5</strong></div>
+            <div class="sched-row"><div class="sched-ico"><i class="ti ti-trending-up" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">Throughput</div><div style="color:var(--t2)">~20k pairs/week · full pass in ~5 days</div></div><span class="badge b-g">Weekly</span></div>
             <div class="sched-row"><div class="sched-ico"><i class="ti ti-device-mobile" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">User-agent rotation</div><div style="color:var(--t2)">Chrome, Safari, Firefox</div></div><span class="badge b-g">On</span></div>
             <div class="sched-row"><div class="sched-ico"><i class="ti ti-hourglass" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">Page timeout</div></div><strong>30s</strong></div>
             <div class="sched-row"><div class="sched-ico"><i class="ti ti-photo" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">Image refresh</div><div style="color:var(--t2)">Competitor OG images re-fetched</div></div><strong>Quarterly</strong></div>
@@ -2211,10 +2213,38 @@ function closeDrawer() {
 ════════════════════════════════════════ */
 async function loadRuns() {
   try {
-    const { data: rows } = await sb.from('sync_runs')
-      .select('*')
-      .order('started_at', {ascending: false})
-      .limit(20);
+    const [{ data: rows }, { data: progress }] = await Promise.all([
+      sb.from('sync_runs').select('*').order('started_at', {ascending: false}).limit(20),
+      sb.from('scrape_progress').select('batch_id,sku_id').order('attempted_at', {ascending: false}).limit(5000),
+    ]);
+
+    /* ── Batch progress summary ── */
+    const totalSkus = 2634; // known active SKU count
+    if (progress?.length) {
+      const batches = {};
+      progress.forEach(p => { batches[p.batch_id] = (batches[p.batch_id]||0) + 1; });
+      const batchLines = Object.entries(batches).map(([id, done]) => {
+        const pct  = Math.round(done / totalSkus * 100);
+        const remaining = totalSkus - done;
+        const weeksLeft = Math.ceil(remaining / 570 / 5 * 10) / 10; // 570 SKUs/day Mon–Fri
+        const estDate   = new Date(Date.now() + (remaining/570)*24*60*60*1000);
+        const estStr    = estDate.toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+        return `<div style="margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <span style="font-weight:500">Batch: ${id}</span>
+            <span style="color:var(--t2)">${done.toLocaleString()} / ${totalSkus.toLocaleString()} SKUs · ${pct}% · ~${weeksLeft} weeks · est. complete ${estStr}</span>
+          </div>
+          <div style="height:8px;background:var(--bb);border-radius:4px;overflow:hidden">
+            <div style="height:100%;width:${pct}%;background:var(--blu);border-radius:4px;transition:width .3s"></div>
+          </div>
+        </div>`;
+      }).join('');
+      $('run-summary-cards').insertAdjacentHTML('beforebegin', `
+        <div class="card" style="margin-bottom:14px;padding:14px 16px">
+          <div class="card-hd" style="padding:0 0 10px"><div class="card-title">Full crawl progress</div></div>
+          ${batchLines}
+        </div>`);
+    }
 
     if (!rows?.length) {
       $('run-history').innerHTML = '<div style="color:var(--t2);padding:8px">No runs yet.</div>';
