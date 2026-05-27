@@ -34,10 +34,11 @@ import os
 import random
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from urllib.parse import quote_plus
 
+import httpx
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 from supabase import create_client, Client
 
@@ -805,7 +806,7 @@ class PriceScraper:
     async def scrape_product_page(self, context: BrowserContext, url: str, competitor_domain: str = "") -> dict:
         result = {
             "price": None, "vat": "unknown", "availability": "in_stock",
-            "title": "", "url": url, "error": None,
+            "title": "", "url": url, "error": None, "og_image": None,
         }
 
         # ── Skip category/listing pages early ─────────────────────────────────
@@ -827,6 +828,20 @@ class PriceScraper:
             result["vat"]          = detect_vat(full_text)
             result["availability"] = "out_of_stock" if detect_oos(full_text) else "in_stock"
             result["title"]        = (await page.title()).strip()
+
+            # ── OG image — free since we already have the page loaded ──────────
+            try:
+                og_image = await page.evaluate("""
+                    () => {
+                        const og  = document.querySelector('meta[property="og:image"]');
+                        const twi = document.querySelector('meta[name="twitter:image"]');
+                        return (og?.content || twi?.content || '').trim() || null;
+                    }
+                """)
+                if og_image and og_image.startswith('http'):
+                    result["og_image"] = og_image
+            except Exception:
+                pass
 
             price = shopify_price
 
@@ -901,8 +916,9 @@ class PriceScraper:
                 comp_title = result["title"]
                 vat_hint   = result["vat"]
                 confidence = fuzzy_confidence(sku, comp_title, url)
-                snapshot["availability"]  = result["availability"]
-                snapshot["error_message"] = result["error"]
+                snapshot["availability"]    = result["availability"]
+                snapshot["error_message"]   = result["error"]
+                snapshot["_og_image"]       = result.get("og_image")
 
             else:
                 # ── Path B: BigCommerce SKU lookup (Harrison Products) ─────────
@@ -936,6 +952,7 @@ class PriceScraper:
                             confidence = max(confidence, fuzzy_confidence(sku, comp_title, url))
                             snapshot["availability"]  = result["availability"]
                             snapshot["error_message"] = result["error"]
+                            snapshot["_og_image"]     = result.get("og_image")
 
                 # ── Path D: Site web search fallback ───────────────────────────
                 if not url:
@@ -948,6 +965,7 @@ class PriceScraper:
                         confidence = fuzzy_confidence(sku, comp_title, url)
                         snapshot["availability"]  = result["availability"]
                         snapshot["error_message"] = result["error"]
+                        snapshot["_og_image"]     = result.get("og_image")
                     else:
                         snapshot["error_message"] = "No URL found via any method"
                         return snapshot
@@ -1023,16 +1041,21 @@ class PriceScraper:
             if not snap.get("competitor_url"): continue
             conf         = snap.get("confidence") or 0
             match_status = "matched" if conf >= 80 else "review"
-            rows.append({
-                "sku_id":           sku["sku_id"],
-                "competitor_id":    snap["competitor_id"],
-                "competitor_url":   snap["competitor_url"],
-                "competitor_title": snap.get("_comp_title"),
-                "match_status":     match_status,
-                "confidence":       conf,
-                "match_method":     "scrape",
-                "updated_at":       datetime.now(timezone.utc).isoformat(),
-            })
+            row = {
+                "sku_id":                sku["sku_id"],
+                "competitor_id":         snap["competitor_id"],
+                "competitor_url":        snap["competitor_url"],
+                "competitor_title":      snap.get("_comp_title"),
+                "match_status":          match_status,
+                "confidence":            conf,
+                "match_method":          "scrape",
+                "updated_at":            datetime.now(timezone.utc).isoformat(),
+            }
+            # Only update competitor_image_url if we got one — don't overwrite
+            # a previously saved image with None just because this run didn't find one
+            if snap.get("_og_image"):
+                row["competitor_image_url"] = snap["_og_image"]
+            rows.append(row)
         if rows:
             self.sb.table("competitor_matches").upsert(rows, on_conflict="sku_id,competitor_id").execute()
             matched = sum(1 for r in rows if r["match_status"] == "matched")
