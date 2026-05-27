@@ -512,7 +512,7 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
         </div>
         <div class="cmd-actions">
           <div class="filter-row" style="margin:0">
-            <input type="text" class="search" id="review-search" placeholder="Filter by SKU or competitor…" oninput="filterReview()" style="min-width:200px" autocomplete="new-password" autocorrect="off" autocapitalize="off" spellcheck="false">
+            <input type="search" class="search" id="review-search" placeholder="Filter by SKU or competitor…" oninput="filterReview()" style="min-width:200px" autocomplete="new-password" autocorrect="off" autocapitalize="off" spellcheck="false">
             <select id="review-comp-filter" onchange="filterReview()"><option value="">All competitors</option></select>
           </div>
         </div>
@@ -536,7 +536,7 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
       <!-- filters — fixed, never scrolls away -->
       <div style="background:var(--surface);border-bottom:1px solid var(--border);padding:10px 14px;flex-shrink:0">
         <div class="filter-row" style="margin:0">
-          <input type="text" class="search" id="skuQ" placeholder="Search SKU ID, product name, competitor…" oninput="debounce(filterSKUs,400)()" autocomplete="new-password" data-lpignore="true" data-form-type="other" spellcheck="false">
+          <input type="search" class="search" id="skuQ" placeholder="Search SKU ID, product name, competitor…" oninput="debounce(filterSKUs,400)()" autocomplete="off" spellcheck="false">
           <select id="fDiff" onchange="filterSKUs()">
             <option value="">All differentials</option>
             <option value="crit">Critical — we're most expensive</option>
@@ -1085,7 +1085,7 @@ function go(name, opts = {}) {
   if (navKey && $('nav-' + navKey)) $('nav-' + navKey).classList.add('active');
 
   /* Panel-specific init */
-  if (name === 'skus' && !skusLoaded) { skusLoaded = true; loadSKUs(); }
+  if (name === 'skus') { const q = $('skuQ'); if (q && q.value === (currentUser?.email||'')) q.value = ''; if (!skusLoaded) { skusLoaded = true; loadSKUs(); } }
   if (name === 'review')      loadReview();
   if (name === 'bycat')       loadByCategory();
   if (name === 'bycomp')      loadByCompetitor();
@@ -1605,7 +1605,9 @@ function filterReview() {
     const snap     = r._snap || {};
     const ourUrl   = sku.product_url || (sku.slug ? `https://www.ukpos.com/${sku.slug}?vat=0` : '#');
     const ourImg   = sku.image_url || '';
-    const compImg  = `https://www.google.com/s2/favicons?domain=${comp.domain||''}&sz=64`;
+    const compImg  = r.competitor_image_url
+      ? r.competitor_image_url
+      : `https://www.google.com/s2/favicons?domain=${comp.domain||''}&sz=64`;
     const ourPrice = sku.price_ex_vat ? parseFloat(sku.price_ex_vat) : null;
     const theirRaw = snap.competitor_price ? parseFloat(snap.competitor_price) : null;
     const theirEx  = theirRaw ? normalisePrice(theirRaw, snap.competitor_vat || comp.vat_status || 'unknown') : null;
@@ -1652,7 +1654,9 @@ function filterReview() {
           <div class="rs-label" style="color:var(--amb)">${comp.name||'Competitor'}</div>
           <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px">
             <div style="width:56px;height:56px;border:1px solid var(--border);border-radius:6px;overflow:hidden;flex-shrink:0;background:var(--bb);display:flex;align-items:center;justify-content:center">
-              <img src="${compImg}" style="width:32px;height:32px;object-fit:contain" onerror="this.style.display='none'">
+              ${r.competitor_image_url
+                ? `<img src="${r.competitor_image_url}" style="width:100%;height:100%;object-fit:contain" onerror="this.src='https://www.google.com/s2/favicons?domain=${comp.domain||''}&sz=64';this.style.width='32px';this.style.height='32px'">`
+                : `<img src="${compImg}" style="width:32px;height:32px;object-fit:contain" onerror="this.style.display='none'">`}
             </div>
             <div style="flex:1;min-width:0">
               <div style="font-size:11px;color:var(--t2)">${comp.domain||''}</div>
