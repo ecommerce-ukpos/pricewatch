@@ -1,1251 +1,2841 @@
-"""
-scraper/scraper.py
-──────────────────
-Nightly price comparison scraper for PriceWatch Pro.
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PriceWatch Pro — UKPOS</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><text y='20' font-size='20'>📊</text></svg>">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.0.0/dist/tabler-icons.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+/* ── Reset ── */
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --orange:#E8481C;--os:rgba(232,72,28,.08);--om:rgba(232,72,28,.18);
+  --bg:#f5f4f0;--surface:#fff;--border:rgba(0,0,0,.08);--bm:rgba(0,0,0,.13);
+  --text:#1a1a18;--t2:#6b6a64;--t3:#9e9c96;
+  --red:#A32D2D;--rb:#fcebeb;--rbd:#f7c1c1;
+  --amb:#854F0B;--ab:#faeeda;--abd:#fac775;
+  --grn:#3B6D11;--gb:#eaf3de;--gbd:#c0dd97;
+  --blu:#185FA5;--bb:#e6f1fb;--bbd:#b5d4f4;
+  --r:8px;--rl:12px;
+  /* configurable thresholds — updated by JS */
+  --thresh-red:10;--thresh-amb:5;--thresh-par:2;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);font-size:13px;line-height:1.5;height:100vh;overflow:hidden}
+a{color:var(--blu);text-decoration:underline;text-decoration-color:rgba(24,95,165,.3);text-underline-offset:2px}
+a:hover{text-decoration-color:var(--blu)}
 
-Matching strategy (in priority order per SKU × competitor):
-  1. Existing confirmed URL in competitor_matches → scrape directly
-  2. Google Shopping search → find competitor's listing, extract price + URL
-  3. Google Web search (site:competitor.com product name) → scrape that page
-  4. Bing Web search fallback if Google blocks
+/* ── Shell ── */
+.shell{display:grid;grid-template-columns:220px 1fr;grid-template-rows:48px 1fr;height:100vh;overflow:hidden}
 
-Per-competitor special handling:
-  - harrisonproducts.com  → BigCommerce SKU lookup via ?sku= parameter
-  - discountdisplays.co.uk → x-html="getFormattedBasePrice()" span selector
+/* ── Topbar ── */
+.topbar{grid-column:1/-1;background:#111110;display:flex;align-items:center;padding:0 20px;gap:14px;border-bottom:2px solid var(--orange);z-index:20}
+.logo{background:var(--orange);border-radius:4px;padding:3px 8px;display:inline-flex;align-items:center;gap:0;flex-shrink:0}
+.logo .uk{color:#fff;font-weight:800;font-size:13px;border-right:1.5px solid rgba(255,255,255,.35);padding-right:5px;margin-right:4px}
+.logo .pos{color:#fff;font-weight:800;font-size:13px}
+.topbar-product{color:rgba(255,255,255,.4);font-size:14px;letter-spacing:.1em;text-transform:uppercase}
+.topbar-r{margin-left:auto;display:flex;align-items:center;gap:10px}
+.pulse{width:6px;height:6px;border-radius:50%;background:#4ade80;flex-shrink:0;animation:blink 2.4s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.topbar-status{color:rgba(255,255,255,.4);font-size:14px}
+.topbar-status strong{color:rgba(255,255,255,.65)}
+.tbtn{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);color:rgba(255,255,255,.65);border-radius:6px;padding:4px 10px;font-size:14px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;transition:background .1s}
+.tbtn:hover{background:rgba(255,255,255,.16)}
+#header-email{color:rgba(255,255,255,.5);font-size:14px}
 
-Environment variables:
-    SUPABASE_URL
-    SUPABASE_SERVICE_KEY
-    SCRAPER_WORKERS          (default: 2)
-    SCRAPER_PAGE_TIMEOUT_MS  (default: 30000)
-    SCRAPER_DELAY_MIN        (default: 8)
-    SCRAPER_DELAY_MAX        (default: 15)
-    SCRAPER_SKU_LIMIT        (default: 250)
-    SCRAPER_COMPETITOR_LIMIT (default: 23)
-    SCRAPER_MODE             (default: matched) — matched | full | skus
-    SCRAPER_SKUS             comma-separated SKU IDs (mode=skus only)
-    LOG_LEVEL                (default: INFO)
-"""
+/* ── Sidebar ── */
+.sidebar{background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;z-index:10}
+.nav-sect{padding:14px 12px 3px;font-size:12px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.08em}
+.nav-item{display:flex;align-items:center;gap:8px;padding:7px 12px;border-radius:var(--r);margin:1px 8px;font-size:12px;color:var(--t2);cursor:pointer;user-select:none;border:1px solid transparent;transition:all .1s}
+.nav-item:hover{background:var(--bg);color:var(--text)}
+.nav-item.active{background:var(--os);color:var(--orange);border-color:var(--om);font-weight:500}
+.nav-item i{font-size:15px;flex-shrink:0}
+.nbadge{margin-left:auto;border-radius:99px;padding:1px 6px;font-size:12px;font-weight:700}
+.nb-r{background:var(--rb);color:var(--red)}
+.nb-a{background:var(--ab);color:var(--amb)}
+.sidebar-foot{margin-top:auto;padding:12px;border-top:1px solid var(--border);font-size:12px;color:var(--t3)}
+.sidebar-foot strong{color:var(--t2);font-weight:500}
 
-import asyncio
-import json
-import logging
-import os
-import random
-import re
-import uuid
-from datetime import datetime, timezone, timedelta
-from typing import Optional
-from urllib.parse import quote_plus
+/* ── Main area ── */
+.main{overflow:hidden;display:flex;flex-direction:column;position:relative;min-height:0}
+.panel{display:none;flex-direction:column;min-height:0;overflow:hidden}
+.panel.active{display:flex;height:100%}
 
-import httpx
-from playwright.async_api import async_playwright, Browser, BrowserContext, Page
-from supabase import create_client, Client
+/* ── URL bar (permalink indicator) ── */
+.url-bar{background:var(--bg);border-bottom:1px solid var(--border);padding:5px 18px;display:flex;align-items:center;gap:8px;font-size:14px;color:var(--t3);flex-shrink:0}
+.url-path{font-family:'SF Mono',monospace;color:var(--t2);font-size:14px}
+.url-copy-btn{background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;font-size:12px;cursor:pointer;color:var(--t2);font-family:inherit;transition:background .1s}
+.url-copy-btn:hover{background:var(--surface)}
 
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
-    format="%(asctime)s %(levelname)s %(name)s — %(message)s",
-)
-log = logging.getLogger("pricewatch")
+/* ── Command bar ── */
+.cmdbar{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 18px;display:flex;align-items:center;gap:10px;flex-shrink:0}
+.cmdbar-back{background:none;border:none;cursor:pointer;color:var(--t2);font-size:12px;font-family:inherit;display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:var(--r);transition:background .1s}
+.cmdbar-back:hover{background:var(--bg);color:var(--text)}
+.cmdbar-divider{width:1px;height:16px;background:var(--border)}
+.cmd-title{font-size:15px;font-weight:500;color:var(--text)}
+.cmd-sub{font-size:14px;color:var(--t2);margin-top:1px}
+.cmd-actions{margin-left:auto;display:flex;gap:8px;align-items:center}
 
-SUPABASE_URL       = os.environ["SUPABASE_URL"]
-SUPABASE_KEY       = os.environ["SUPABASE_SERVICE_KEY"]
-WORKERS            = int(os.getenv("SCRAPER_WORKERS", "2"))
-TIMEOUT_MS         = int(os.getenv("SCRAPER_PAGE_TIMEOUT_MS", "30000"))
-DELAY_MIN          = float(os.getenv("SCRAPER_DELAY_MIN", "8"))
-DELAY_MAX          = float(os.getenv("SCRAPER_DELAY_MAX", "15"))
-SKU_LIMIT          = int(os.getenv("SCRAPER_SKU_LIMIT", "250"))
-COMPETITOR_LIMIT   = int(os.getenv("SCRAPER_COMPETITOR_LIMIT", "23"))
-SCRAPER_MODE       = os.getenv("SCRAPER_MODE", "matched")  # matched | full | skus
+/* ── Priority strip ── */
+.priority-strip{background:#111110;border-bottom:1px solid rgba(255,255,255,.06);padding:10px 18px;display:flex;align-items:center;gap:10px;flex-shrink:0;overflow-x:auto}
+.strip-label{color:rgba(255,255,255,.35);font-size:12px;letter-spacing:.09em;text-transform:uppercase;flex-shrink:0}
+.strip-items{display:flex;gap:6px}
+.strip-item{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);border-radius:6px;padding:5px 10px;cursor:pointer;flex-shrink:0;transition:background .1s}
+.strip-item:hover{background:rgba(255,255,255,.1)}
+.si-name{font-size:12px;color:rgba(255,255,255,.4);margin-bottom:1px}
+.si-val{font-size:15px;font-weight:600;color:var(--orange)}
+.si-diff{font-size:12px;font-weight:600;color:#f87171}
+.si-diff.warn{color:#fbbf24}
 
-# Competitor domains with special handling
-BIGCOMMERCE_DOMAINS = {"harrisonproducts.com"}
-DISCOUNT_DISPLAYS_DOMAIN = "discountdisplays.co.uk"
+/* ── Scrollable content ── */
+.content{flex:1;overflow-y:auto;padding:14px 18px;display:flex;flex-direction:column;gap:12px}
 
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
-    "Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
-]
+/* ── Cards ── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--rl);padding:14px 16px}
+.card-0p{background:var(--surface);border:1px solid var(--border);border-radius:var(--rl);overflow:hidden}
+.card-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.card-title{font-size:13px;font-weight:500}
+.card-sub{font-size:14px;color:var(--t2);margin-top:1px}
 
-VAT_INC_PATTERNS = [
-    r"inc(?:l(?:uding)?)?\s*\.?\s*vat",
-    r"inc\s+vat",
-    r"including\s+vat",
-    r"prices?\s+include\s+vat",
-    r"vat\s+included",
-]
-VAT_EX_PATTERNS = [
-    r"ex(?:cl(?:uding)?)?\s*\.?\s*vat",
-    r"excl\s+vat",
-    r"excluding\s+vat",
-    r"\+\s*vat",
-    r"prices?\s+exclude\s+vat",
-    r"before\s+vat",
-    r"nett\s+price",
-]
+/* ── Metrics ── */
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.metric{border-radius:var(--r);padding:12px 14px;border:1px solid transparent}
+.metric .ml{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;display:block;margin-bottom:4px}
+.metric .mv{font-size:26px;font-weight:500;line-height:1;display:block}
+.metric .ms{font-size:14px;margin-top:3px;display:block}
+.m-r{background:var(--rb);border-color:var(--rbd)}.m-r .ml,.m-r .ms,.m-r .mv{color:var(--red)}
+.m-a{background:var(--ab);border-color:var(--abd)}.m-a .ml,.m-a .ms,.m-a .mv{color:var(--amb)}
+.m-g{background:var(--gb);border-color:var(--gbd)}.m-g .ml,.m-g .ms,.m-g .mv{color:var(--grn)}
+.m-gray{background:var(--bg)}.m-gray .mv{color:var(--t2)}.m-gray .ml{color:var(--t3)}.m-gray .ms{color:var(--t3)}
 
-PRICE_SELECTORS = [
-    "[itemprop='price']",
-    ".price",
-    ".product-price",
-    ".our-price",
-    ".sale-price",
-    "#product-price",
-    "[class*='price']",
-    "[data-price]",
-    ".offer-price",
-    "span.amount",
-    ".woocommerce-Price-amount",
-    "p.price",
-    ".product__price",
-]
+/* ── Badges / pills ── */
+.badge{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:99px;font-size:12px;font-weight:600;white-space:nowrap}
+.b-r{background:var(--rb);color:var(--red)}
+.b-a{background:var(--ab);color:var(--amb)}
+.b-g{background:var(--gb);color:var(--grn)}
+.b-gray{background:var(--bg);color:var(--t2)}
+.b-blu{background:var(--bb);color:var(--blu)}
+.b-oos{background:var(--bg);color:var(--t2);border:1px dashed var(--t3)}
+.vat{display:inline-flex;padding:1px 5px;border-radius:3px;font-size:12px;font-weight:600}
+.vex{background:var(--gb);color:var(--grn)}
+.vinc{background:var(--bb);color:var(--blu)}
+.vunk{background:var(--ab);color:var(--amb)}
 
-OOS_PATTERNS = [
-    r"out\s+of\s+stock",
-    r"currently\s+unavailable",
-    r"temporarily\s+out",
-    r"sold\s+out",
-    r"no\s+stock",
-    r"backordered?",
-    r"not\s+available",
-]
+/* ── Buttons ── */
+.btn{display:inline-flex;align-items:center;gap:5px;padding:6px 12px;font-size:12px;border:1px solid var(--bm);border-radius:var(--r);cursor:pointer;background:var(--surface);color:var(--text);font-family:inherit;transition:background .1s;white-space:nowrap}
+.btn:hover{background:var(--bg)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.prim{background:var(--orange);color:#fff;border-color:var(--orange)}
+.btn.prim:hover{background:#c73d16}
+.btn.sm{padding:4px 9px;font-size:14px}
+.btn.ghost{border-color:transparent;background:transparent}
+.btn.ghost:hover{background:var(--bg)}
+.btn.danger{background:var(--rb);color:var(--red);border-color:var(--rbd)}
+.btn.danger:hover{background:#f7c1c1}
+.icon-tog{padding:5px 9px;border:1px solid var(--bm);border-radius:var(--r);cursor:pointer;background:var(--surface);color:var(--t2);transition:all .1s}
+.icon-tog:hover{background:var(--bg)}
+.icon-tog.active{background:var(--text);color:var(--surface);border-color:var(--text)}
+.icon-tog-wrap{display:flex;border:1px solid var(--bm);border-radius:var(--r);overflow:hidden}
+.icon-tog-wrap .icon-tog{border:none;border-radius:0}
+.icon-tog-wrap .icon-tog+.icon-tog{border-left:1px solid var(--bm)}
 
-STOP_WORDS = {
-    "the","a","an","and","of","for","with","in","to","self","adhesive",
-    "pack","set","lot","box","bag","new","uk","free","delivery","shipping",
-    "holders","holder","signs","sign","displays","display",
+/* ── Tables ── */
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;padding:7px 10px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--t3);border-bottom:1px solid var(--border);white-space:nowrap;background:var(--surface);position:sticky;top:0;z-index:2}
+th.sortable{cursor:pointer;user-select:none}
+th.sortable:hover{color:var(--text)}
+th.sort-asc::after{content:' ↑';color:var(--orange)}
+th.sort-desc::after{content:' ↓';color:var(--orange)}
+td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--bg)}
+tr.tr-link{cursor:pointer}
+
+/* coloured table rows */
+tr.row-r td{background:rgba(163,45,45,.04)}
+tr.row-r td:first-child{border-left:3px solid var(--red);padding-left:8px}
+tr.row-a td{background:rgba(133,79,11,.03)}
+tr.row-a td:first-child{border-left:3px solid var(--amb);padding-left:8px}
+tr.row-g td{background:rgba(59,109,17,.03)}
+tr.row-g td:first-child{border-left:3px solid var(--grn);padding-left:8px}
+tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
+
+/* ── Diff text ── */
+.d-r{font-weight:600;color:var(--red)}
+.d-a{font-weight:600;color:var(--amb)}
+.d-g{font-weight:500;color:var(--grn)}
+.d-p{color:var(--t2)}
+
+/* ── Confidence bar ── */
+.cbar{display:flex;align-items:center;gap:5px}
+.ctrack{width:44px;height:4px;border-radius:2px;background:var(--border);overflow:hidden;flex-shrink:0}
+.cfill{height:100%;border-radius:2px}
+
+/* ── Notes ── */
+.note{border-radius:var(--r);padding:9px 12px;font-size:12px;display:flex;gap:8px;align-items:flex-start;line-height:1.5}
+.note i{flex-shrink:0;margin-top:1px;font-size:14px}
+.note-warn{background:var(--ab);color:#412402;border:1px solid var(--abd)}
+.note-crit{background:var(--rb);color:#501313;border:1px solid var(--rbd)}
+.note-info{background:var(--bb);color:#042c53;border:1px solid var(--bbd)}
+
+/* ── Filter row ── */
+.filter-row{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px}
+.filter-row input,.filter-row select{padding:6px 10px;font-size:12px;border:1px solid var(--bm);border-radius:var(--r);background:var(--surface);color:var(--text);font-family:inherit;outline:none}
+.filter-row input:focus,.filter-row select:focus{border-color:var(--orange)}
+.filter-row input.search{flex:1;min-width:200px}
+
+/* ── SKU grid (competitor detail / card view) ── */
+.sku-card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(176px,1fr));gap:10px}
+.sku-card{border-radius:var(--rl);border:1px solid var(--border);padding:12px;cursor:pointer;transition:opacity .12s;display:flex;flex-direction:column;gap:6px}
+.sku-card:hover{opacity:.82}
+.sc-id{font-family:'SF Mono',monospace;font-size:12px}
+.sc-name{font-size:14px;font-weight:500;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.sc-prices{display:flex;justify-content:space-between;font-size:14px;color:var(--t2)}
+.sc-diff{font-size:16px;font-weight:500}
+.sc-oos{font-size:12px;opacity:.6}
+
+/* tier colouring for cards */
+.tier-r{background:var(--rb);border-color:var(--rbd)}.tier-r .sc-id{color:var(--red)}.tier-r .sc-diff{color:var(--red)}
+.tier-a{background:var(--ab);border-color:var(--abd)}.tier-a .sc-id{color:var(--amb)}.tier-a .sc-diff{color:var(--amb)}
+.tier-g{background:var(--gb);border-color:var(--gbd)}.tier-g .sc-id{color:var(--grn)}.tier-g .sc-diff{color:var(--grn)}
+.tier-p{background:var(--bg);border-color:var(--border)}.tier-p .sc-id{color:var(--t2)}.tier-p .sc-diff{color:var(--t2)}
+
+/* ── Legend ── */
+.legend{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.leg-item{display:flex;align-items:center;gap:4px;font-size:14px;color:var(--t2)}
+.leg-sw{width:10px;height:10px;border-radius:2px;flex-shrink:0}
+
+/* ── Competitor hero stats ── */
+.comp-stats-bar{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 18px;display:flex;gap:0;flex-shrink:0;overflow-x:auto}
+.comp-stat{padding:0 20px;border-right:1px solid var(--border);flex-shrink:0}
+.comp-stat:first-child{padding-left:0}
+.comp-stat:last-child{border-right:none}
+.cs-val{font-size:20px;font-weight:500;line-height:1}
+.cs-label{font-size:12px;color:var(--t3);text-transform:uppercase;letter-spacing:.06em;margin-top:2px}
+
+/* ── SKU hero ── */
+.sku-hero{display:flex;gap:16px;align-items:flex-start}
+.sku-img{width:72px;height:72px;border-radius:var(--r);border:1px solid var(--border);background:var(--bg);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--t3)}
+.sku-id-badge{font-family:'SF Mono',monospace;font-size:14px;color:var(--blu);margin-bottom:3px}
+.sku-name{font-size:17px;font-weight:500;margin-bottom:5px}
+.sku-price-main{font-size:22px;font-weight:500}
+.sku-attrs{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.sku-attr{font-size:14px;color:var(--t2);background:var(--bg);border-radius:4px;padding:2px 7px;border:1px solid var(--border)}
+
+/* ── Diff bar (mini) ── */
+.dbar-wrap{display:flex;align-items:center;gap:6px}
+.dbar-track{flex:1;height:5px;border-radius:3px;background:var(--border);overflow:hidden;max-width:60px}
+.dbar-fill{height:100%;border-radius:3px}
+
+/* ── Review queue cards ── */
+.rev-card{border:1px solid var(--border);border-radius:var(--rl);padding:14px;margin-bottom:10px}
+.rev-pair{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;margin:10px 0;align-items:start}
+.rev-side{background:var(--bg);border-radius:var(--r);padding:10px 12px;font-size:14px}
+.rev-side .rs-label{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--t3);margin-bottom:4px}
+.rev-side .rs-name{font-weight:500;margin-bottom:3px}
+.rev-side .rs-url{font-size:14px;color:var(--blu);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:none}
+.rev-side .rs-url:hover{text-decoration:underline}
+.rev-side .rs-price{font-size:15px;font-weight:500;margin-top:4px}
+.rev-notes{font-size:14px;color:var(--t2);background:var(--bg);border-radius:var(--r);padding:7px 10px;margin-bottom:10px}
+
+/* ── By-category grid ── */
+.cat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}
+.cat-tile{border:1px solid var(--border);border-radius:var(--rl);padding:14px 16px;cursor:pointer;background:var(--surface);transition:border-color .12s,background .12s}
+.cat-tile:hover{border-color:var(--orange);background:var(--os)}
+.ct-count{font-size:14px;color:var(--t2);margin-bottom:6px}
+.ct-alerts{font-size:14px;margin-top:6px}
+
+/* ── Settings ── */
+.sett-shell{display:flex;flex:1;overflow:hidden}
+.sett-nav{width:180px;border-right:1px solid var(--border);padding:14px 0;flex-shrink:0}
+.sn-item{display:flex;align-items:center;gap:8px;padding:8px 16px;font-size:12px;color:var(--t2);cursor:pointer;user-select:none;border-right:2px solid transparent;margin-right:-1px;transition:all .1s}
+.sn-item:hover{color:var(--text);background:var(--bg)}
+.sn-item.active{color:var(--orange);font-weight:500;border-right-color:var(--orange);background:var(--os)}
+.sn-item i{font-size:14px;flex-shrink:0}
+.sett-body{flex:1;overflow-y:auto;padding:20px}
+.stab{display:none;flex-direction:column;gap:16px}
+.stab.active{display:flex}
+
+/* threshold configurables */
+.thresh-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.tc{border-radius:var(--rl);border:1px solid var(--border);padding:14px;display:flex;flex-direction:column;gap:8px}
+.tc.tc-r{border-color:var(--rbd);background:var(--rb)}
+.tc.tc-a{border-color:var(--abd);background:var(--ab)}
+.tc.tc-p{border-color:var(--border);background:var(--bg)}
+.tc.tc-g{border-color:var(--gbd);background:var(--gb)}
+.tc-label{font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:.07em}
+.tc-r .tc-label{color:var(--red)}.tc-a .tc-label{color:var(--amb)}.tc-p .tc-label{color:var(--t2)}.tc-g .tc-label{color:var(--grn)}
+.tc-desc{font-size:14px;color:var(--t2);line-height:1.4}
+.tc-input-row{display:flex;align-items:center;gap:8px}
+.tc-input-row input[type=number]{width:68px;padding:5px 8px;border:1px solid var(--bm);border-radius:var(--r);font-size:13px;font-weight:500;font-family:inherit;background:var(--surface);color:var(--text);outline:none}
+.tc-input-row input[type=number]:focus{border-color:var(--orange)}
+.tc-input-row span{font-size:12px;color:var(--t2)}
+.tc-preview{display:flex;align-items:center;gap:6px;font-size:14px}
+.tc-swatch{border-radius:4px;padding:2px 8px;font-size:14px;font-weight:600}
+.thresh-live{margin-top:4px;padding:10px 12px;background:var(--surface);border-radius:var(--r);border:1px solid var(--border);font-size:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
+/* VAT toggle */
+.vat-toggle{display:inline-flex;border:1px solid var(--bm);border-radius:6px;overflow:hidden}
+.vt-opt{padding:3px 8px;font-size:12px;font-weight:600;cursor:pointer;background:none;border:none;font-family:inherit;color:var(--t2);transition:all .1s}
+.vt-opt:hover{background:var(--bg)}
+.vt-opt.s-ex{background:var(--gb);color:var(--grn)}
+.vt-opt.s-inc{background:var(--bb);color:var(--blu)}
+.vt-opt.s-unk{background:var(--ab);color:var(--amb)}
+
+/* user rows */
+.user-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)}
+.user-row:last-child{border-bottom:none}
+.avatar{width:30px;height:30px;border-radius:50%;background:var(--bb);color:var(--blu);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;flex-shrink:0}
+
+/* schedule */
+.sched-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);font-size:12px}
+.sched-row:last-child{border-bottom:none}
+.sched-ico{width:28px;height:28px;border-radius:var(--r);background:var(--bg);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+
+/* run table */
+.run-table th{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--t3);padding:6px 8px;border-bottom:1px solid var(--border)}
+.run-table td{padding:7px 8px;border-bottom:1px solid var(--border);font-size:14px;color:var(--t2)}
+.run-table tr:last-child td{border-bottom:none}
+
+/* ── Drawer ── */
+.drawer-overlay{display:none;position:absolute;inset:0;background:rgba(0,0,0,.22);z-index:100}
+.drawer-overlay.open{display:block}
+.drawer{position:absolute;top:0;right:0;width:460px;height:100%;background:var(--surface);border-left:1px solid var(--bm);display:flex;flex-direction:column;z-index:101;transform:translateX(100%);transition:transform .2s cubic-bezier(.4,0,.2,1)}
+.drawer.open{transform:none}
+.drawer-hd{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:10px;flex-shrink:0}
+.drawer-close{background:none;border:none;cursor:pointer;color:var(--t3);font-size:16px;padding:2px;border-radius:4px;margin-left:auto;flex-shrink:0;line-height:1;transition:color .1s}
+.drawer-close:hover{color:var(--text);background:var(--bg)}
+.drawer-body{flex:1;overflow-y:auto;padding:14px 16px}
+.dr-comp-row{border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;margin-bottom:7px;display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:10px}
+.dr-comp-row.tier-r{background:rgba(163,45,45,.05);border-color:var(--rbd)}
+.dr-comp-row.tier-a{background:rgba(133,79,11,.04);border-color:var(--abd)}
+.dr-comp-row.tier-g{background:rgba(59,109,17,.04);border-color:var(--gbd)}
+.drc-name{font-weight:500;font-size:12px}
+.drc-domain{font-size:12px;color:var(--t2)}
+.drc-price{font-size:14px;font-weight:500;text-align:right}
+.drc-diff{font-size:12px;font-weight:600;text-align:right;min-width:46px}
+
+/* ── Auth screens ── */
+.auth-shell{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:999}
+.auth-card{width:100%;max-width:420px;background:var(--surface);border:1px solid var(--border);border-radius:var(--rl);padding:28px 32px}
+.auth-logo{text-align:center;margin-bottom:20px}
+.auth-tabs{display:flex;gap:2px;background:var(--bg);padding:3px;border-radius:var(--r);margin-bottom:18px}
+.auth-tab{flex:1;padding:7px 10px;border:none;background:transparent;color:var(--t2);cursor:pointer;border-radius:5px;font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;font-family:inherit;transition:all .1s}
+.auth-tab.active{background:var(--surface);color:var(--text)}
+.auth-field{margin-bottom:12px}
+.auth-field label{display:block;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--t2);margin-bottom:5px}
+.auth-field input{width:100%;padding:9px 11px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);color:var(--text);font-size:13px;font-family:inherit;outline:none;transition:border-color .1s}
+.auth-field input:focus{border-color:var(--orange)}
+.auth-submit{width:100%;padding:10px;background:var(--orange);color:#fff;border:none;border-radius:var(--r);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;cursor:pointer;font-family:inherit;margin-top:4px;transition:background .1s}
+.auth-submit:hover{background:#c73d16}
+.auth-submit:disabled{opacity:.5;cursor:not-allowed}
+.auth-msg{padding:8px 11px;border-radius:var(--r);font-size:14px;margin-top:10px;line-height:1.4}
+.auth-msg.err{background:var(--rb);color:var(--red);border:1px solid var(--rbd)}
+.auth-msg.ok{background:var(--gb);color:var(--grn);border:1px solid var(--gbd)}
+.auth-msg.info{background:var(--bb);color:#042c53;border:1px solid var(--bbd)}
+.auth-link{background:none;border:none;color:var(--blu);cursor:pointer;font-size:14px;font-family:inherit;text-decoration:underline;text-decoration-color:rgba(24,95,165,.3);margin-top:8px;display:block}
+
+/* ── Loading ── */
+.loading{display:flex;align-items:center;justify-content:center;padding:40px;color:var(--t2);gap:8px;font-size:12px}
+.spinner{width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--orange);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Two-col ── */
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+
+/* ── Chart ── */
+.chart-wrap{position:relative;height:180px}
+</style>
+</head>
+<body>
+
+<!-- ════════════════ AUTH VIEWS ════════════════ -->
+<div id="view-loading" class="auth-shell">
+  <div class="auth-card" style="text-align:center">
+    <div class="auth-logo">
+      <div class="logo" style="display:inline-flex;margin-bottom:10px"><span class="uk">UK</span><span class="pos">POS</span></div>
+      <div style="font-size:17px;font-weight:500">PriceWatch Pro</div>
+      <div style="font-size:11px;color:var(--t2);text-transform:uppercase;letter-spacing:.08em;margin-top:2px">Competitive price intelligence</div>
+    </div>
+    <div class="loading"><span class="spinner"></span> Loading…</div>
+  </div>
+</div>
+
+<div id="view-login" class="auth-shell" style="display:none">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <div class="logo" style="display:inline-flex;margin-bottom:10px"><span class="uk">UK</span><span class="pos">POS</span></div>
+      <div style="font-size:17px;font-weight:500">PriceWatch Pro</div>
+      <div style="font-size:11px;color:var(--t2);text-transform:uppercase;letter-spacing:.08em;margin-top:2px">Competitive price intelligence</div>
+    </div>
+    <div class="auth-tabs">
+      <button id="tab-login" class="auth-tab active" onclick="showAuthTab('login')">Sign in</button>
+      <button id="tab-register" class="auth-tab" onclick="showAuthTab('register')">Request access</button>
+    </div>
+    <form id="form-login" onsubmit="handleLogin(event)">
+      <div class="auth-field"><label>Email</label><input id="login-email" type="email" required autocomplete="email" placeholder="you@ukpos.com"></div>
+      <div class="auth-field"><label>Password</label><input id="login-password" type="password" required autocomplete="current-password"></div>
+      <button type="submit" class="auth-submit" id="login-btn">Sign in</button>
+      <button type="button" class="auth-link" onclick="handleForgotPassword()">Forgot password?</button>
+      <div id="login-msg"></div>
+    </form>
+    <form id="form-register" style="display:none" onsubmit="handleRequestAccess(event)">
+      <p style="font-size:11px;color:var(--t2);margin-bottom:14px;line-height:1.5">Submit your work email — the administrator will review and send a set-password link once approved.</p>
+      <div class="auth-field"><label>Work email</label><input id="reg-email" type="email" required placeholder="you@ukpos.com"></div>
+      <div class="auth-field"><label>Full name (optional)</label><input id="reg-name" type="text" placeholder="Jane Smith"></div>
+      <button type="submit" class="auth-submit" id="reg-btn">Submit request</button>
+      <div id="reg-msg"></div>
+    </form>
+  </div>
+</div>
+
+<div id="view-pending" class="auth-shell" style="display:none">
+  <div class="auth-card" style="text-align:center">
+    <div class="auth-logo"><div class="logo" style="display:inline-flex;margin-bottom:10px"><span class="uk">UK</span><span class="pos">POS</span></div><div style="font-size:17px;font-weight:500">PriceWatch Pro</div></div>
+    <div style="font-size:14px;font-weight:500;margin-bottom:8px">Awaiting approval</div>
+    <p style="font-size:12px;color:var(--t2);margin-bottom:16px;line-height:1.5">Your request is in the queue. You'll receive an email when the administrator approves your account.</p>
+    <button class="btn sm" onclick="signOut()">Sign out</button>
+  </div>
+</div>
+
+<div id="view-rejected" class="auth-shell" style="display:none">
+  <div class="auth-card" style="text-align:center">
+    <div class="auth-logo"><div class="logo" style="display:inline-flex;margin-bottom:10px"><span class="uk">UK</span><span class="pos">POS</span></div><div style="font-size:17px;font-weight:500">PriceWatch Pro</div></div>
+    <div style="font-size:14px;font-weight:500;margin-bottom:8px">Request declined</div>
+    <p style="font-size:12px;color:var(--t2);margin-bottom:16px">Contact the administrator if you believe this is an error.</p>
+    <button class="btn sm" onclick="signOut()">Sign out</button>
+  </div>
+</div>
+
+<!-- ════════════════ MAIN APP ════════════════ -->
+<div id="view-app" class="shell" style="display:none">
+
+  <!-- TOPBAR -->
+  <div class="topbar">
+    <div class="logo"><span class="uk">UK</span><span class="pos">POS</span></div>
+    <span class="topbar-product">PriceWatch Pro</span>
+    <div class="topbar-r">
+      <span class="pulse"></span>
+      <span class="topbar-status" id="sync-status">Loading…</span>
+      <button class="tbtn" onclick="manualRefresh()"><i class="ti ti-refresh" style="font-size:12px"></i> Refresh</button>
+      <span style="width:1px;height:18px;background:rgba(255,255,255,.12);margin:0 2px"></span>
+      <span id="header-email">—</span>
+      <button class="tbtn" onclick="openMyAccount()"><i class="ti ti-user-circle" style="font-size:12px"></i> Account</button>
+      <button class="tbtn" onclick="signOut()"><i class="ti ti-logout" style="font-size:12px"></i> Sign out</button>
+    </div>
+  </div>
+
+  <!-- SIDEBAR -->
+  <nav class="sidebar">
+    <div class="nav-sect">Work to do</div>
+    <div class="nav-item" id="nav-alerts" onclick="go('alerts')"><i class="ti ti-bell"></i> Price alerts <span class="nbadge nb-r" id="nav-alerts-badge" style="display:none">0</span></div>
+    <div class="nav-item" id="nav-review" onclick="go('review')"><i class="ti ti-eye-check"></i> Review queue <span class="nbadge nb-a" id="nav-review-badge" style="display:none">0</span></div>
+    <div class="nav-sect">Explore</div>
+    <div class="nav-item" id="nav-skus" onclick="go('skus')"><i class="ti ti-tag"></i> All SKUs</div>
+    <div class="nav-item" id="nav-bycat" onclick="go('bycat')"><i class="ti ti-package"></i> By category</div>
+    <div class="nav-item" id="nav-bycomp" onclick="go('bycomp')"><i class="ti ti-building-store"></i> By competitor</div>
+    <div class="nav-sect">System</div>
+    <div class="nav-item" id="nav-schedule" onclick="go('schedule')"><i class="ti ti-clock"></i> Sync schedule</div>
+    <div class="nav-item" id="nav-settings" onclick="go('settings')"><i class="ti ti-settings-2"></i> Settings</div>
+    <div class="sidebar-foot" id="sidebar-foot">Loading…</div>
+  </nav>
+
+  <!-- ══ MAIN PANELS ══ -->
+  <div class="main" id="main-area">
+
+    <!-- ── ALERTS ── -->
+    <div id="p-alerts" class="panel">
+      <div class="priority-strip" id="priority-strip">
+        <span class="strip-label">Biggest gaps</span>
+        <div class="strip-items" id="strip-items"><span style="color:rgba(255,255,255,.3);font-size:11px">Loading…</span></div>
+      </div>
+      <div class="cmdbar">
+        <div>
+          <div class="cmd-title">Price alerts</div>
+          <div class="cmd-sub" id="alerts-sub">Loading…</div>
+        </div>
+        <div class="cmd-actions" style="align-items:center;gap:10px">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:13px;color:var(--t2)">Filter &amp; export:</span>
+            <div style="display:flex;border:1px solid var(--bm);border-radius:var(--r);overflow:hidden">
+              <button class="btn sm" id="atab-all"  onclick="setAlertTab('all')"  style="border:none;border-right:1px solid var(--bm);border-radius:0">All</button>
+              <button class="btn sm" id="atab-crit" onclick="setAlertTab('crit')" style="border:none;border-right:1px solid var(--bm);border-radius:0">Critical</button>
+              <button class="btn sm" id="atab-warn" onclick="setAlertTab('warn')" style="border:none;border-right:1px solid var(--bm);border-radius:0">Warning</button>
+              <button class="btn sm" id="atab-oos"  onclick="setAlertTab('oos')"  style="border:none;border-radius:0">OOS</button>
+            </div>
+          </div>
+          <button class="btn sm" onclick="exportAlerts()"><i class="ti ti-download"></i> Export CSV</button>
+        </div>
+      </div>
+      <div class="content">
+        <div class="note note-warn" id="alerts-data-note" style="display:none">
+          <i class="ti ti-alert-triangle"></i>
+          <div>Alerts are based on unreviewed matches — treat percentages as indicative until matches are confirmed in the <span style="font-weight:500;cursor:pointer;text-decoration:underline" onclick="go('review')">Review Queue</span>.</div>
+        </div>
+        <div class="metrics">
+          <div class="metric m-r"><span class="ml">Critical &gt;<span id="thresh-red-label">10</span>%</span><span class="mv" id="m-crit">—</span><span class="ms">action needed</span></div>
+          <div class="metric m-a"><span class="ml">Warning <span id="thresh-amb-label">5</span>–<span id="thresh-red-label2">10</span>%</span><span class="mv" id="m-warn">—</span><span class="ms">monitor closely</span></div>
+          <div class="metric m-g"><span class="ml">We're cheapest</span><span class="mv" id="m-cheap">—</span><span class="ms">competitive advantage</span></div>
+          <div class="metric m-gray"><span class="ml">Comp. OOS</span><span class="mv" id="m-oos">—</span><span class="ms">flagged, last price kept</span></div>
+        </div>
+        <div class="two-col">
+          <div class="card">
+            <div class="card-hd"><div class="card-title">Price position distribution</div><span style="font-size:10px;color:var(--t2)">vs cheapest competitor</span></div>
+            <div class="chart-wrap"><canvas id="distChart"></canvas></div>
+          </div>
+          <div class="card">
+            <div class="card-hd"><div class="card-title">Active alerts</div><span id="alert-ts" style="font-size:11px;color:var(--t2)"></span></div>
+            <div id="dash-alerts"><div class="loading"><span class="spinner"></span></div></div>
+          </div>
+        </div>
+        <div class="card-0p">
+          <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+            <div class="card-title">Biggest price gaps <span style="font-weight:400;font-size:11px;color:var(--t2)">— where we're most expensive</span></div>
+            <button class="btn sm ghost" onclick="go('skus')"><i class="ti ti-arrow-right"></i> All SKUs</button>
+          </div>
+          <div class="tw"><table><thead><tr>
+            <th style="border-left:3px solid transparent">SKU</th><th>Product</th><th>Our price</th><th>Competitor</th><th>Their price</th><th>VAT</th><th>Gap</th><th>Stock</th><th>Updated</th><th></th>
+          </tr></thead><tbody id="dash-tbody"><tr><td colspan="10"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── REVIEW QUEUE ── -->
+    <div id="p-review" class="panel">
+      <div class="cmdbar">
+        <div>
+          <div class="cmd-title">Review queue</div>
+          <div class="cmd-sub" id="review-sub">Matches awaiting human confirmation</div>
+        </div>
+        <div class="cmd-actions">
+          <div class="filter-row" style="margin:0">
+            <input type="search" class="search" id="review-search" placeholder="Filter by SKU or competitor…" oninput="filterReview()" style="min-width:200px" autocomplete="new-password" autocorrect="off" autocapitalize="off" spellcheck="false">
+            <select id="review-comp-filter" onchange="filterReview()"><option value="">All competitors</option></select>
+          </div>
+        </div>
+      </div>
+      <div class="content">
+        <div class="note note-crit" id="review-note" style="display:none">
+          <i class="ti ti-alert-circle"></i>
+          <div>Only <strong id="review-confirmed">1</strong> of <strong id="review-total">1,205</strong> matches confirmed. Price comparisons are estimated until you verify them here. Open both links, confirm it's the same product, then approve or reject.</div>
+        </div>
+        <div id="review-list"><div class="loading"><span class="spinner"></span></div></div>
+        <div id="review-pagination" style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--t2)"></div>
+      </div>
+    </div>
+
+    <!-- ── ALL SKUs ── -->
+    <div id="p-skus" class="panel">
+      <div class="cmdbar">
+        <div class="cmd-title">All SKUs</div>
+        <div class="cmd-actions"><span style="font-size:11px;color:var(--t2)" id="skus-sub"></span></div>
+      </div>
+      <!-- filters — fixed, never scrolls away -->
+      <div style="background:var(--surface);border-bottom:1px solid var(--border);padding:10px 14px;flex-shrink:0">
+        <div class="filter-row" style="margin:0">
+          <input type="search" class="search" id="skuQ" placeholder="Search SKU ID, product name, competitor…" oninput="debounce(filterSKUs,400)()" autocomplete="off" spellcheck="false">
+          <select id="fDiff" onchange="filterSKUs()">
+            <option value="">All differentials</option>
+            <option value="crit">Critical — we're most expensive</option>
+            <option value="warn">Warning — 5–10% more expensive</option>
+            <option value="par">At parity</option>
+            <option value="cheap">We're cheaper</option>
+          </select>
+          <select id="fVat" onchange="filterSKUs()">
+            <option value="">All VAT statuses</option>
+            <option value="ex">Ex-VAT confirmed</option>
+            <option value="inc">Inc-VAT confirmed</option>
+            <option value="unknown">VAT unknown</option>
+          </select>
+          <select id="fStock" onchange="filterSKUs()">
+            <option value="">All stock</option>
+            <option value="in">In stock</option>
+            <option value="oos">Out of stock</option>
+            <option value="unavail">Unavailable</option>
+          </select>
+        </div>
+      </div>
+      <!-- table — scrollable middle -->
+      <div style="flex:1;overflow-y:auto;overflow-x:auto;min-height:0">
+        <table id="skus-table" style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>
+          <th class="sortable" style="border-left:3px solid transparent;position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('sku_id')">SKU ID</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('short_title')">Product</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('our_price')">Our price</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('competitor_name')">Best competitor</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('their_price')">Their price</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('diff')">Gap</th>
+          <th style="position:sticky;top:0;z-index:2;background:var(--surface)">Comps</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('availability')">Stock</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('scraped_at')">Scraped</th>
+          <th style="position:sticky;top:0;z-index:2;background:var(--surface)"></th>
+        </tr></thead><tbody id="sku-tbody"><tr><td colspan="10"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table>
+      </div>
+      <!-- pagination — fixed at bottom, never scrolls away -->
+      <div id="sku-pagination" style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-top:1px solid var(--border);font-size:11px;color:var(--t2);background:var(--surface);flex-shrink:0"></div>
+    </div>
+
+    <!-- ── BY CATEGORY ── -->
+    <div id="p-bycat" class="panel">
+      <div class="cmdbar">
+        <div id="bycat-breadcrumb-bar">
+          <div class="cmd-title">By category</div>
+          <div class="cmd-sub" id="bycat-sub">Loading…</div>
+        </div>
+      </div>
+      <div class="content">
+        <div id="bycat-content"><div class="loading"><span class="spinner"></span></div></div>
+      </div>
+    </div>
+
+    <!-- ── BY COMPETITOR (list) ── -->
+    <div id="p-bycomp" class="panel">
+      <div class="cmdbar">
+        <div class="cmd-title">By competitor</div>
+        <div class="cmd-sub">Click a competitor to view their matched SKUs</div>
+      </div>
+      <div class="content">
+        <div class="card-0p">
+          <table id="bycomp-table"><thead><tr>
+            <th class="sortable" style="border-left:3px solid transparent" onclick="sortByCompTable('name')">Competitor</th>
+            <th class="sortable" onclick="sortByCompTable('domain')">Domain</th>
+            <th class="sortable" onclick="sortByCompTable('vat_status')">VAT</th>
+            <th class="sortable" onclick="sortByCompTable('matched')">Matched SKUs</th>
+            <th class="sortable" onclick="sortByCompTable('critical')">Critical</th>
+            <th class="sortable" onclick="sortByCompTable('warning')">Warning</th>
+            <th class="sortable" onclick="sortByCompTable('cheaper')">We're cheaper</th>
+            <th class="sortable" onclick="sortByCompTable('parity')">Parity</th>
+          </tr></thead><tbody id="bycomp-tbody"><tr><td colspan="8"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── COMPETITOR DETAIL PAGE ── -->
+    <div id="p-comp-detail" class="panel">
+      <div class="url-bar">
+        <i class="ti ti-link" style="font-size:12px"></i>
+        <span class="url-path" id="comp-detail-url">pricewatch.ukpos.com/competitor/…</span>
+        <button class="url-copy-btn" onclick="copyUrl()">Copy link</button>
+        <span style="margin-left:auto;font-size:10px;color:var(--t3)">Shareable permalink</span>
+      </div>
+      <div class="cmdbar">
+        <button class="cmdbar-back" onclick="go('bycomp')"><i class="ti ti-arrow-left"></i> All competitors</button>
+        <div class="cmdbar-divider"></div>
+        <div>
+          <div class="cmd-title" id="comp-detail-name">—</div>
+          <div class="cmd-sub" id="comp-detail-sub">—</div>
+        </div>
+        <div class="cmd-actions">
+          <div class="legend" id="comp-detail-legend"></div>
+          <div class="icon-tog-wrap">
+            <button class="icon-tog active" id="tog-grid" onclick="setCompView('grid')" title="Card grid"><i class="ti ti-layout-grid" style="font-size:14px"></i></button>
+            <button class="icon-tog" id="tog-list" onclick="setCompView('list')" title="List"><i class="ti ti-list" style="font-size:14px"></i></button>
+          </div>
+          <input type="text" id="comp-filter-q" placeholder="Filter SKUs…" style="padding:5px 9px;border:1px solid var(--bm);border-radius:var(--r);font-size:12px;font-family:inherit;outline:none;width:170px" oninput="filterCompSKUs(this.value)" autocomplete="new-password" spellcheck="false">
+          <button class="btn sm"><i class="ti ti-download"></i> Export</button>
+        </div>
+      </div>
+      <div class="comp-stats-bar" id="comp-detail-stats"></div>
+      <!-- grid -->
+      <div id="comp-grid-wrap" class="content" style="padding-top:12px">
+        <div class="sku-card-grid" id="comp-sku-grid"></div>
+      </div>
+      <!-- list -->
+      <div id="comp-list-wrap" style="display:none;flex:1;overflow-y:auto;padding:14px 18px">
+        <div class="card-0p">
+          <table id="comp-sku-table"><thead><tr>
+            <th class="sortable" style="border-left:3px solid transparent" onclick="sortCompSkuTable('sku_id')">SKU ID</th>
+            <th class="sortable" onclick="sortCompSkuTable('short_title')">Product</th>
+            <th class="sortable" onclick="sortCompSkuTable('our_price')">Our price</th>
+            <th class="sortable" onclick="sortCompSkuTable('their_price')">Their price (ex)</th>
+            <th class="sortable" onclick="sortCompSkuTable('diff')">Gap</th>
+            <th class="sortable" onclick="sortCompSkuTable('availability')">Stock</th>
+            <th class="sortable" onclick="sortCompSkuTable('scraped_at')">Updated</th>
+            <th></th>
+          </tr></thead><tbody id="comp-sku-tbody"></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SKU DETAIL PAGE ── -->
+    <div id="p-sku-detail" class="panel">
+      <div class="url-bar">
+        <i class="ti ti-link" style="font-size:12px"></i>
+        <span class="url-path" id="sku-detail-url">pricewatch.ukpos.com/sku/…</span>
+        <button class="url-copy-btn" onclick="copyUrl()">Copy link</button>
+        <span style="margin-left:auto;font-size:10px;color:var(--t3)">Shareable permalink</span>
+      </div>
+      <div class="cmdbar">
+        <button class="cmdbar-back" id="sku-detail-back" onclick="go('skus')"><i class="ti ti-arrow-left"></i> Back</button>
+        <div class="cmdbar-divider"></div>
+        <div class="cmd-title">SKU detail</div>
+        <div class="cmd-actions">
+          <a id="sku-site-link" href="#" target="_blank" rel="noopener" style="text-decoration:none"><button class="btn sm"><i class="ti ti-external-link"></i> View on UKPOS site</button></a>
+        </div>
+      </div>
+      <div class="content">
+        <div class="card">
+          <div class="sku-hero" id="sku-hero-content"><div class="loading"><span class="spinner"></span></div></div>
+        </div>
+        <div class="card-0p">
+          <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+            <div class="card-title">All competitor prices <span style="font-weight:400;font-size:11px;color:var(--t2)">— normalised to ex-VAT · sorted worst to best</span></div>
+            <div class="legend" id="sku-detail-legend"></div>
+          </div>
+          <div class="tw"><table id="sku-comp-table"><thead><tr>
+            <th class="sortable" style="border-left:3px solid transparent" onclick="sortSkuCompTable('name')">Competitor</th>
+            <th class="sortable" onclick="sortSkuCompTable('price')">Their price (ex)</th>
+            <th class="sortable" onclick="sortSkuCompTable('vat')">VAT basis</th>
+            <th class="sortable" onclick="sortSkuCompTable('diff')">Gap</th>
+            <th>Diff bar</th>
+            <th class="sortable" onclick="sortSkuCompTable('availability')">Stock</th>
+            <th class="sortable" onclick="sortSkuCompTable('confidence')">Confidence</th>
+            <th class="sortable" onclick="sortSkuCompTable('scraped_at')">Last scraped</th>
+            <th style="min-width:90px">Match URL</th>
+            <th></th>
+          </tr></thead><tbody id="sku-comp-tbody"><tr><td colspan="10"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SCHEDULE ── -->
+    <div id="p-schedule" class="panel">
+      <div class="cmdbar">
+        <div class="cmd-title">Sync schedule</div>
+        <div class="cmd-actions">
+          <button class="btn sm" onclick="loadRuns()"><i class="ti ti-refresh"></i> Refresh</button>
+        </div>
+      </div>
+      <div class="content">
+
+        <!-- Last run summary cards -->
+        <div id="run-summary-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:16px"></div>
+
+        <!-- Config + history side by side -->
+        <div style="display:grid;grid-template-columns:340px 1fr;gap:14px;align-items:start">
+          <div class="card">
+            <div class="card-hd"><div class="card-title">Nightly configuration</div></div>
+            <div class="sched-row"><div class="sched-ico"><i class="ti ti-clock" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">Run time</div><div style="color:var(--t2)">Nightly via GitHub Actions cron</div></div><strong>01:00 am</strong></div>
+            <div class="sched-row"><div class="sched-ico"><i class="ti ti-cpu" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">Parallel workers</div><div style="color:var(--t2)">Concurrent browser contexts</div></div><strong>5</strong></div>
+            <div class="sched-row"><div class="sched-ico"><i class="ti ti-device-mobile" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">User-agent rotation</div><div style="color:var(--t2)">Chrome, Safari, Firefox</div></div><span class="badge b-g">On</span></div>
+            <div class="sched-row"><div class="sched-ico"><i class="ti ti-hourglass" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">Page timeout</div></div><strong>30s</strong></div>
+            <div class="sched-row"><div class="sched-ico"><i class="ti ti-photo" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">Image refresh</div><div style="color:var(--t2)">Competitor OG images re-fetched</div></div><strong>Quarterly</strong></div>
+            <div class="sched-row"><div class="sched-ico"><i class="ti ti-package-off" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">OOS handling</div><div style="color:var(--t2)">Keeps last known price, flags stock</div></div><span class="badge b-a">Flagged</span></div>
+          </div>
+          <div class="card">
+            <div class="card-hd"><div class="card-title">Run history</div><span id="run-history-sub" style="font-size:12px;color:var(--t2)"></span></div>
+            <div id="run-history"><div class="loading"><span class="spinner"></span></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SETTINGS ── -->
+    <div id="p-settings" class="panel">
+      <div class="cmdbar">
+        <div><div class="cmd-title">Settings</div><div class="cmd-sub">Thresholds, competitors, users and account</div></div>
+      </div>
+      <div class="sett-shell">
+        <div class="sett-nav">
+          <div class="sn-item active" id="sn-configurables" onclick="goSett('configurables')"><i class="ti ti-sliders"></i> Configurables</div>
+          <div class="sn-item" id="sn-competitors" onclick="goSett('competitors')"><i class="ti ti-building-store"></i> Competitors</div>
+          <div class="sn-item" id="sn-users" onclick="goSett('users')"><i class="ti ti-users"></i> Users</div>
+          <div class="sn-item" id="sn-account" onclick="goSett('account')"><i class="ti ti-user-circle"></i> My account</div>
+        </div>
+        <div class="sett-body">
+
+          <!-- CONFIGURABLES -->
+          <div id="st-configurables" class="stab active">
+            <div class="note note-info">
+              <i class="ti ti-info-circle"></i>
+              <div>These thresholds control colour-coding throughout the app — alerts, SKU tables, competitor pages and card grids all update when you save.</div>
+            </div>
+            <div>
+              <div style="font-size:13px;font-weight:500;margin-bottom:12px">Price differential thresholds</div>
+              <div class="thresh-grid">
+                <div class="tc tc-r">
+                  <div class="tc-label">Critical (red)</div>
+                  <div class="tc-desc">We're more expensive than this competitor by at least:</div>
+                  <div class="tc-input-row"><input type="number" id="t-red" value="10" min="1" max="50" step="1" oninput="updateThreshPreview()"><span>% or more</span></div>
+                  <div class="tc-preview"><span style="font-size:11px;color:var(--t2)">Looks like:</span><span class="tc-swatch" style="background:var(--rb);color:var(--red)" id="prev-r">−12.4%</span></div>
+                </div>
+                <div class="tc tc-a">
+                  <div class="tc-label">Warning (amber)</div>
+                  <div class="tc-desc">More expensive, but less than the red threshold:</div>
+                  <div class="tc-input-row"><input type="number" id="t-amb" value="5" min="1" max="50" step="1" oninput="updateThreshPreview()"><span>% to &lt; red</span></div>
+                  <div class="tc-preview"><span style="font-size:11px;color:var(--t2)">Looks like:</span><span class="tc-swatch" style="background:var(--ab);color:var(--amb)" id="prev-a">−7.1%</span></div>
+                </div>
+                <div class="tc tc-p">
+                  <div class="tc-label">Parity (light grey)</div>
+                  <div class="tc-desc">Within this range either side — considered at parity:</div>
+                  <div class="tc-input-row"><input type="number" id="t-par" value="2" min="0" max="20" step="1" oninput="updateThreshPreview()"><span>% either side</span></div>
+                  <div class="tc-preview"><span style="font-size:11px;color:var(--t2)">Looks like:</span><span class="tc-swatch" style="background:var(--bg);color:var(--t2);border:1px solid var(--border)" id="prev-p">±1.3%</span></div>
+                </div>
+                <div class="tc tc-g">
+                  <div class="tc-label">We're cheaper (green)</div>
+                  <div class="tc-desc">We're cheaper by more than the parity band:</div>
+                  <div class="tc-input-row"><span style="font-size:12px;color:var(--t2)">Anything above +<span id="t-grn-derived">2</span>%</span></div>
+                  <div class="tc-preview"><span style="font-size:11px;color:var(--t2)">Looks like:</span><span class="tc-swatch" style="background:var(--gb);color:var(--grn)" id="prev-g">+5.8%</span></div>
+                </div>
+              </div>
+              <div class="thresh-live" id="thresh-live"></div>
+              <div style="margin-top:12px;display:flex;gap:8px">
+                <button class="btn prim sm" onclick="saveThresholds()"><i class="ti ti-device-floppy"></i> Save thresholds</button>
+                <button class="btn sm" onclick="resetThresholds()"><i class="ti ti-refresh"></i> Reset to defaults</button>
+              </div>
+            </div>
+            <div style="border-top:1px solid var(--border);padding-top:16px">
+              <div style="font-size:13px;font-weight:500;margin-bottom:12px">Display preferences</div>
+              <div style="display:flex;flex-direction:column;gap:10px;max-width:420px">
+                <label style="display:flex;align-items:center;justify-content:space-between;font-size:12px;cursor:pointer;gap:12px"><span>Show inc-VAT equivalent in price columns</span><input type="checkbox" id="pref-show-inc" checked style="accent-color:var(--orange)"></label>
+                <label style="display:flex;align-items:center;justify-content:space-between;font-size:12px;cursor:pointer;gap:12px"><span>Default competitor page to card grid view</span><input type="checkbox" id="pref-default-grid" checked style="accent-color:var(--orange)"></label>
+                <label style="display:flex;align-items:center;justify-content:space-between;font-size:12px;cursor:pointer;gap:12px"><span>Highlight OOS competitors in tables</span><input type="checkbox" id="pref-oos-flag" checked style="accent-color:var(--orange)"></label>
+              </div>
+            </div>
+          </div>
+
+          <!-- COMPETITORS -->
+          <div id="st-competitors" class="stab">
+            <div class="note note-warn" id="comp-vat-note" style="display:none">
+              <i class="ti ti-alert-triangle"></i>
+              <div id="comp-vat-note-text">Some competitors have unknown VAT status — set these before trusting differentials.</div>
+            </div>
+            <div class="card-0p">
+              <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+                <div><div class="card-title">Monitored competitors</div><div class="card-sub" id="comp-sett-sub">Loading…</div></div>
+              </div>
+              <table><thead><tr><th>Competitor</th><th>Domain</th><th>VAT basis</th><th>Method</th><th>Active</th></tr></thead>
+              <tbody id="comp-sett-tbody"><tr><td colspan="5"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table>
+            </div>
+          </div>
+
+          <!-- USERS -->
+          <div id="st-users" class="stab">
+            <div class="card-0p" style="max-width:560px">
+              <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+                <div><div class="card-title">Team access</div><div class="card-sub" id="users-sub">Loading…</div></div>
+                <button class="btn sm prim"><i class="ti ti-plus"></i> Invite user</button>
+              </div>
+              <div style="padding:0 4px" id="users-list"><div class="loading"><span class="spinner"></span></div></div>
+            </div>
+            <div class="card-0p" style="max-width:560px">
+              <div style="padding:12px 14px;border-bottom:1px solid var(--border)">
+                <div class="card-title">Pending requests</div>
+                <div class="card-sub">Access requests awaiting approval</div>
+              </div>
+              <div id="pending-list" style="padding:0 4px"><div class="loading"><span class="spinner"></span></div></div>
+            </div>
+          </div>
+
+          <!-- MY ACCOUNT -->
+          <div id="st-account" class="stab">
+            <div class="card" style="max-width:400px">
+              <div class="card-hd"><div class="card-title">My account</div></div>
+              <div style="margin-bottom:12px"><label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em">Email (cannot be changed)</label><input type="email" id="ma-email" disabled style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg);color:var(--t2);font-size:12px;font-family:inherit"></div>
+              <div style="margin-bottom:12px"><label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em">Full name</label><input type="text" id="ma-name" placeholder="Your name" style="width:100%;padding:7px 10px;border:1px solid var(--bm);border-radius:var(--r);background:var(--surface);color:var(--text);font-size:12px;font-family:inherit;outline:none"></div>
+              <div style="margin-bottom:16px"><label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em">New password</label><input type="password" id="ma-password" placeholder="Leave blank to keep current" style="width:100%;padding:7px 10px;border:1px solid var(--bm);border-radius:var(--r);background:var(--surface);color:var(--text);font-size:12px;font-family:inherit;outline:none"></div>
+              <div id="ma-msg" style="display:none;margin-bottom:10px"></div>
+              <button class="btn prim sm" onclick="saveMyAccount()">Save changes</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ── DRAWER OVERLAY + PANEL ── -->
+    <div class="drawer-overlay" id="drawer-overlay" onclick="closeDrawer()"></div>
+    <div class="drawer" id="sku-drawer">
+      <div class="drawer-hd">
+        <div style="flex:1">
+          <div style="font-family:'SF Mono',monospace;font-size:11px;color:var(--blu);margin-bottom:2px" id="dr-id">—</div>
+          <div style="font-size:15px;font-weight:500;margin-bottom:4px" id="dr-name">—</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:18px;font-weight:500" id="dr-price">—</span>
+            <span class="vat vex">ex-VAT</span>
+            <button class="btn sm ghost" id="dr-fullpage-btn" style="font-size:11px;color:var(--blu)"><i class="ti ti-arrow-up-right"></i> Full page</button>
+          </div>
+        </div>
+        <button class="drawer-close" onclick="closeDrawer()"><i class="ti ti-x"></i></button>
+      </div>
+      <div class="drawer-body">
+        <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-bottom:8px">Price league table — all prices ex-VAT · rank 1 = cheapest</div>
+        <div id="dr-rows"><div class="loading"><span class="spinner"></span></div></div>
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-bottom:8px">Quick actions</div>
+          <div style="display:flex;gap:7px;flex-wrap:wrap">
+            <button class="btn sm prim" id="dr-scrape-btn"><i class="ti ti-refresh"></i> Scrape now</button>
+            <button class="btn sm" id="dr-fullpage-btn2"><i class="ti ti-arrow-up-right"></i> Open full page</button>
+            <button class="btn sm" id="dr-review-btn"><i class="ti ti-eye-check"></i> Review matches</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main-area -->
+</div><!-- /view-app -->
+
+<script>
+/* ════════════════════════════════════════
+   CONFIG + GLOBALS
+════════════════════════════════════════ */
+const SUPABASE_URL  = 'https://uaqakssusydpjzrcznhb.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhcWFrc3N1c3lkcGp6cmN6bmhiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3NDM3ODUsImV4cCI6MjA5NDMxOTc4NX0.OM0XBJsFb6hlLKXLoNpahuH4zzGcnNR3W-bzKfKPZ-w';
+const API_BASE      = 'https://uaqakssusydpjzrcznhb.supabase.co/functions/v1/api';
+const ALLOWED_DOMAINS = ['ukpos.com'];
+
+let sb, currentUser, currentProfile;
+let skuPage = 1, skuLimit = 50, skuTotal = 0;
+let reviewPage = 1, reviewLimit = 50;
+let alertTab = 'crit';
+let currentCompId = null, currentCompName = null, currentCompSlug = null;
+let currentSkuId = null;
+let compViewMode = 'grid';
+let compSkusAll = [], compSkusFiltered = [];
+let drawerSkuId = null, drawerFromPanel = null;
+let distChart = null;
+
+/* Configurable thresholds — loaded from localStorage */
+let T = { red: 10, amb: 5, par: 2 };
+(function loadThresholds() {
+  try {
+    const saved = localStorage.getItem('pw_thresholds');
+    if (saved) T = {...T, ...JSON.parse(saved)};
+  } catch(e) {}
+  applyThresholdCSS();
+})();
+
+function applyThresholdCSS() {
+  document.getElementById('thresh-red-label') && (document.getElementById('thresh-red-label').textContent = T.red);
+  document.getElementById('thresh-red-label2') && (document.getElementById('thresh-red-label2').textContent = T.red);
+  document.getElementById('thresh-amb-label') && (document.getElementById('thresh-amb-label').textContent = T.amb);
 }
 
-
-# ── Query building ─────────────────────────────────────────────────────────────
-
-def build_search_query(sku: dict) -> str:
-    title = sku["short_title"]
-    clean = re.sub(r"\bx\s*\d+\b", "", title, flags=re.I)
-    clean = re.sub(r"\bpack\s+of\s+\d+\b", "", clean, flags=re.I)
-    clean = re.sub(r"\b\d+\s*pack\b", "", clean, flags=re.I)
-    clean = re.sub(r"\s+", " ", clean).strip().rstrip("-—–").strip()
-    return clean
-
-
-# ── Confidence scoring ─────────────────────────────────────────────────────────
-
-def fuzzy_confidence(sku: dict, comp_title: str, comp_url: str) -> int:
-    score = 0
-    st    = sku["short_title"].lower()
-    ct    = (comp_title or "").lower()
-    cu    = (comp_url or "").lower()
-
-    s_tok = set(re.findall(r"\b[a-z0-9]{2,}\b", st)) - STOP_WORDS
-    c_tok = set(re.findall(r"\b[a-z0-9]{2,}\b", ct)) - STOP_WORDS
-    if s_tok:
-        score += int((len(s_tok & c_tok) / len(s_tok)) * 40)
-
-    dim_pat = r"\b(?:a[0-9]|[0-9]+(?:\.[0-9]+)?(?:cm|mm)|[0-9]+x[0-9]+(?:mm)?)\b"
-    s_dims  = set(re.findall(dim_pat, st, re.I))
-    c_dims  = set(re.findall(dim_pat, ct, re.I)) | set(re.findall(dim_pat, cu, re.I))
-    if s_dims:
-        if s_dims == c_dims:          score += 30
-        elif s_dims & c_dims:         score += 15
-        elif c_dims:                  score -= 15
-
-    if sku.get("unit_qty"):
-        qty = str(sku["unit_qty"])
-        if re.search(r"\b" + qty + r"\b", ct) or re.search(r"\b" + qty + r"\b", cu):
-            score += 20
-        else:
-            other = re.search(r"\b(x?\s*\d{2,4})\b", ct)
-            if other and other.group(0).strip("x ") != qty:
-                score -= 10
-
-    key_words = [w for w in re.findall(r"\b[a-z]{4,}\b", st) if w not in STOP_WORDS][:5]
-    score += min(10, sum(1 for w in key_words if w in cu) * 2)
-
-    return max(0, min(100, score))
-
-
-# ── Detection helpers ─────────────────────────────────────────────────────────
-
-def detect_vat(text: str) -> str:
-    t = text.lower()
-    if any(re.search(p, t) for p in VAT_INC_PATTERNS): return "inc"
-    if any(re.search(p, t) for p in VAT_EX_PATTERNS):  return "ex"
-    return "unknown"
-
-def detect_oos(text: str) -> bool:
-    return any(re.search(p, text.lower()) for p in OOS_PATTERNS)
-
-def parse_price(text: str) -> Optional[float]:
-    t = text.replace(",", "").replace("£", "").strip()
-    m = re.search(r"\b(\d{1,5}\.\d{2})\b", t)
-    if m:
-        val = float(m.group(1))
-        if 0.01 < val < 99999:
-            return val
-    return None
-
-def diff_pct(our: float, their: float) -> float:
-    return round(((their - our) / our) * 100, 2) if our else 0.0
-
-def normalise_price(price: float, vat: str) -> float:
-    return round(price / 1.2, 2) if vat == "inc" else price
-
-# Pack quantity patterns — matches "x 100", "x100", "pack of 50", "50 pack", "pack of 1" etc.
-PACK_QTY_PATTERNS = [
-    r"\bx\s*(\d+)\b",
-    r"\bpack\s+of\s+(\d+)\b",
-    r"\b(\d+)\s*pack\b",
-    r"\bset\s+of\s+(\d+)\b",
-    r"\bbox\s+of\s+(\d+)\b",
-    r"\bbag\s+of\s+(\d+)\b",
-    r"\bper\s+(\d+)\b",
-    r"\bqty\s*[:\-]?\s*(\d+)\b",
-    r"\b(\d+)\s*x\b",
-]
-
-def extract_pack_qty(title: str) -> Optional[int]:
-    """Extract pack quantity from a product title. Returns None if not found or qty=1."""
-    if not title:
-        return None
-    t = title.lower()
-    for pattern in PACK_QTY_PATTERNS:
-        m = re.search(pattern, t, re.I)
-        if m:
-            qty = int(m.group(1))
-            if 2 <= qty <= 10000:  # sanity bounds
-                return qty
-    return None
-
-def per_unit_price(price: float, qty: Optional[int]) -> float:
-    """Return price per single unit. If qty is None or 1, returns price unchanged."""
-    if qty and qty > 1:
-        return round(price / qty, 6)
-    return price
-
-IMAGE_REFRESH_DAYS = int(os.getenv("IMAGE_REFRESH_DAYS", "90"))
-
-def image_needs_refresh(existing_match: Optional[dict]) -> bool:
-    """True if match has no competitor image, or image is older than IMAGE_REFRESH_DAYS."""
-    if not existing_match:
-        return True
-    if not existing_match.get("competitor_image_url"):
-        return True
-    updated = existing_match.get("updated_at")
-    if not updated:
-        return True
-    try:
-        last = datetime.fromisoformat(updated.replace("Z", "+00:00"))
-        return (datetime.now(timezone.utc) - last).days >= IMAGE_REFRESH_DAYS
-    except Exception:
-        return True
-
-
-# ── Scraper class ──────────────────────────────────────────────────────────────
-
-class PriceScraper:
-    def __init__(self, sb: Client, run_id: uuid.UUID):
-        self.sb     = sb
-        self.run_id = str(run_id)
-        self.ua_idx = 0
-
-    def next_ua(self) -> str:
-        ua = USER_AGENTS[self.ua_idx % len(USER_AGENTS)]
-        self.ua_idx += 1
-        return ua
-
-    async def new_context(self, browser: Browser) -> BrowserContext:
-        ctx = await browser.new_context(
-            user_agent=self.next_ua(),
-            viewport={"width": 1280, "height": 800},
-            locale="en-GB",
-            extra_http_headers={
-                "Accept-Language": "en-GB,en;q=0.9",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-                "Accept-Encoding": "gzip, deflate, br",
-                "Upgrade-Insecure-Requests": "1",
-                "Sec-Fetch-Dest": "document",
-                "Sec-Fetch-Mode": "navigate",
-                "Sec-Fetch-Site": "none",
-            },
-        )
-        await ctx.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
-            Object.defineProperty(navigator, 'languages', { get: () => ['en-GB', 'en'] });
-            window.chrome = { runtime: {} };
-        """)
-        return ctx
-
-    # ── Strategy 1: Bing Shopping + Google Shopping ───────────────────────────
-
-    async def search_google_shopping(
-        self, context: BrowserContext, sku: dict, competitor_domain: str
-    ) -> Optional[dict]:
-        query     = build_search_query(sku)
-        clean_dom = competitor_domain.lstrip("www.")
-
-        shopping_engines = [
-            {"name": "Bing Shopping",   "url": f"https://www.bing.com/shop?q={quote_plus(query)}&mkt=en-GB"},
-            {"name": "Google Shopping", "url": f"https://www.google.com/search?tbm=shop&q={quote_plus(query)}&gl=gb&hl=en-GB&num=20"},
-        ]
-
-        for engine in shopping_engines:
-            search_url  = engine["url"]
-            engine_name = engine["name"]
-            page        = await context.new_page()
-
-            try:
-                log.debug(f"  {engine_name}: '{query}' looking for {clean_dom}")
-                await page.goto(search_url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
-                await page.wait_for_timeout(random.uniform(2000, 3500))
-
-                body_text = await page.inner_text("body")
-                if any(x in body_text.lower() for x in ["captcha", "unusual traffic", "i'm not a robot", "prove you're human"]):
-                    log.warning(f"  {engine_name} CAPTCHA — trying next engine")
-                    await page.close()
-                    continue
-
-                results = await page.evaluate(r"""
-                    () => {
-                        const items = [];
-                        const selectors = [
-                            '.br-item', '.br-pdItem', '.pa_item', '.rl_product',
-                            '.sh-dgr__content', '[data-docid]', '.KZmu8e', '.Lq5OHe',
-                            'li[data-idx]', '.product-card',
-                        ];
-                        let cards = [];
-                        for (const sel of selectors) {
-                            cards = document.querySelectorAll(sel);
-                            if (cards.length > 2) break;
-                        }
-                        if (cards.length === 0) {
-                            const seen = new Set();
-                            document.querySelectorAll('a[href]').forEach(a => {
-                                const block = a.closest('div,li,article');
-                                const text  = block?.innerText || '';
-                                if (/£[\s\d]/.test(text) && !seen.has(text.slice(0,40))) {
-                                    seen.add(text.slice(0,40));
-                                    if (block) cards = [...cards, block];
-                                }
-                            });
-                        }
-                        cards.forEach(card => {
-                            if (!card) return;
-                            const text  = card.innerText || '';
-                            const links = Array.from(card.querySelectorAll('a[href]'))
-                                              .map(a => a.href)
-                                              .filter(h => h.startsWith('http'));
-                            const title = (card.querySelector('h3,h4,h2,[role=heading],.title,.name')?.innerText || '').trim();
-                            const priceMatch = text.match(/£\s?([\d,]+\.?\d*)/);
-                            const price = priceMatch ? parseFloat(priceMatch[1].replace(',','')) : null;
-                            if (links.length > 0 || price) items.push({ text, links, title, price });
-                        });
-                        return items;
-                    }
-                """)
-
-                await page.close()
-
-                for result in results:
-                    links     = result.get("links", [])
-                    title     = result.get("title", "")
-                    price     = result.get("price")
-                    comp_link = next((l for l in links if clean_dom in l and "google" not in l and "bing" not in l), None)
-                    if not comp_link:
-                        if clean_dom not in result.get("text", "").lower():
-                            continue
-                    conf = fuzzy_confidence(sku, title, comp_link or "")
-                    if conf >= 40:
-                        log.debug(f"  {engine_name} match: '{title[:50]}' £{price} conf={conf}%")
-                        return {"url": comp_link, "price": price, "title": title, "confidence": conf, "vat_hint": detect_vat(result.get("text", ""))}
-
-                log.debug(f"  {engine_name}: no matching result for {clean_dom}")
-
-            except Exception as e:
-                log.debug(f"  {engine_name} error for {clean_dom}: {e}")
-                try: await page.close()
-                except Exception: pass
-
-        log.debug(f"  Shopping: no result for {clean_dom} via any engine")
-        return None
-
-    # ── Strategy 2: Google/Bing site search ───────────────────────────────────
-
-    async def search_web(self, context: BrowserContext, sku: dict, competitor_domain: str) -> Optional[str]:
-        query     = build_search_query(sku)
-        clean_dom = competitor_domain.lstrip("www.")
-
-        for search_url in [
-            f"https://www.google.com/search?q=site:{competitor_domain}+{quote_plus(query)}&num=10",
-            f"https://www.bing.com/search?q=site:{competitor_domain}+{quote_plus(query)}&count=10",
-        ]:
-            engine = "Google" if "google" in search_url else "Bing"
-            page   = await context.new_page()
-            try:
-                await page.goto(search_url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
-                await page.wait_for_timeout(2000)
-                body = (await page.inner_text("body")).lower()
-                if any(x in body for x in ["captcha", "unusual traffic", "blocked", "robot"]):
-                    await page.close(); continue
-
-                all_links = await page.evaluate("() => Array.from(document.querySelectorAll('a[href]')).map(a => a.href).filter(h => h.startsWith('http'))")
-                domain_links = [u for u in all_links if clean_dom in u and "google" not in u and "bing.com" not in u and "cache" not in u]
-                product_urls = [u for u in domain_links if any(x in u.lower() for x in ["/product","/p/","/item","/buy","/shop",".html","/signs","/display","/frame","/holder","/pavement","/snap","/poster","/board","/sign"])]
-                best = product_urls[0] if product_urls else (domain_links[0] if domain_links else None)
-                await page.close()
-                if best: return best
-            except Exception as e:
-                log.debug(f"  {engine} error: {e}")
-                try: await page.close()
-                except Exception: pass
-
-        return None
-
-    # ── BigCommerce SKU lookup (Harrison Products) ────────────────────────────
-
-    async def bigcommerce_sku_lookup(
-        self, context: BrowserContext, sku: dict, domain: str
-    ) -> Optional[dict]:
-        """
-        BigCommerce stores expose products at /<slug>?sku=<sku_code>.
-        We try the UKPOS SKU ID directly, then stripped variants.
-        Returns dict with url, price, title, confidence — or None.
-        Results go to review queue (confidence capped at 70) for human approval.
-        """
-        sku_id    = sku["sku_id"]
-        base_url  = f"https://www.{domain}"
-
-        # Try the UKPOS SKU directly, then without common suffixes
-        candidates = [sku_id]
-        # Also try stripping trailing letter variants (e.g. SA13A4 → SA13A, SA13)
-        stripped = re.sub(r"[A-Z]\d*$", "", sku_id)
-        if stripped and stripped != sku_id:
-            candidates.append(stripped)
-
-        for candidate_sku in candidates:
-            search_url = f"{base_url}/search.php?search_query={quote_plus(candidate_sku)}"
-            page = await context.new_page()
-            try:
-                log.debug(f"  BigCommerce SKU search: {search_url}")
-                await page.goto(search_url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
-                await page.wait_for_timeout(3000)
-
-                # Extract first product result link
-                links = await page.evaluate("""
-                    () => {
-                        const results = document.querySelectorAll(
-                            'article.card a[href], .productGrid .card a[href], ' +
-                            'li.product a[href], .product-item a.card-title'
-                        );
-                        return Array.from(results).map(a => a.href).filter(h => h.startsWith('http')).slice(0, 3);
-                    }
-                """)
-                await page.close()
-
-                for product_url in links:
-                    # Visit the product page to get title + price + verify SKU match
-                    ppage = await context.new_page()
-                    try:
-                        await ppage.goto(product_url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
-                        await ppage.wait_for_timeout(3000)
-
-                        title     = (await ppage.title()).strip()
-                        full_text = await ppage.inner_text("body")
-
-                        # Check if our SKU ID or a close match appears on the page
-                        sku_found = (
-                            sku_id.lower() in full_text.lower() or
-                            candidate_sku.lower() in full_text.lower()
-                        )
-
-                        # Try to get price from JSON-LD first, then meta, then main price
-                        price = await self._extract_jsonld_price(ppage)
-                        if not price: price = await self._extract_meta_price(ppage)
-                        if not price: price = await self._extract_main_price(ppage)
-
-                        await ppage.close()
-
-                        if price:
-                            conf = fuzzy_confidence(sku, title, product_url)
-                            # Bonus for SKU appearing on page, but cap at 70 — always goes to review
-                            if sku_found: conf = min(70, conf + 20)
-                            conf = min(70, conf)   # always review queue
-
-                            log.info(
-                                f"  BigCommerce match: '{title[:50]}' "
-                                f"£{price} conf={conf}% sku_found={sku_found}"
-                            )
-                            return {
-                                "url":        product_url,
-                                "price":      price,
-                                "title":      title,
-                                "confidence": conf,
-                                "vat_hint":   detect_vat(full_text),
-                            }
-                    except Exception as e:
-                        log.debug(f"  BigCommerce page error: {e}")
-                        try: await ppage.close()
-                        except Exception: pass
-
-            except Exception as e:
-                log.debug(f"  BigCommerce search error: {e}")
-                try: await page.close()
-                except Exception: pass
-
-        return None
-
-    # ── Price extraction methods ──────────────────────────────────────────────
-
-    async def _extract_main_price(self, page: Page) -> Optional[float]:
-        """
-        Smart main-price extraction using DOM scoring.
-        Filters out related/recommended sections and prefers cart-adjacent prices.
-        """
-        try:
-            result = await page.evaluate(r"""
-                () => {
-                    const EXCLUDE_SIGNALS = [
-                        'related', 'similar', 'recommend', 'upsell', 'cross-sell',
-                        'crosssell', 'cross_sell', 'recently', 'also-bought',
-                        'also_bought', 'alsoBought', 'you-may', 'youmay',
-                        'footer', 'nav', 'sidebar', 'widget', 'carousel',
-                        'slick', 'swiper', 'featured-products', 'other-products',
-                        'more-products', 'trending', 'popular',
-                    ];
-                    const CART_SIGNALS = [
-                        'add-to-cart', 'addtocart', 'add_to_cart', 'basket',
-                        'buy-now', 'buynow', 'purchase', 'checkout',
-                    ];
-
-                    function isExcluded(el) {
-                        let node = el;
-                        for (let i = 0; i < 8; i++) {
-                            if (!node || node === document.body) break;
-                            const cls = (node.className || '').toLowerCase();
-                            const id  = (node.id || '').toLowerCase();
-                            if (EXCLUDE_SIGNALS.some(s => cls.includes(s) || id.includes(s))) return true;
-                            node = node.parentElement;
-                        }
-                        return false;
-                    }
-
-                    function hasCartButton(el) {
-                        let node = el;
-                        for (let i = 0; i < 10; i++) {
-                            if (!node || node === document.body) break;
-                            const html = (node.innerHTML || '').toLowerCase();
-                            if (CART_SIGNALS.some(s => html.includes(s))) return true;
-                            node = node.parentElement;
-                        }
-                        return false;
-                    }
-
-                    function getFontSize(el) {
-                        try { return parseFloat(window.getComputedStyle(el).fontSize) || 0; }
-                        catch { return 0; }
-                    }
-
-                    const SELECTORS = [
-                        "[itemprop='price']", ".price", ".product-price", ".our-price",
-                        ".sale-price", "#product-price", "[class*='price']", "[data-price]",
-                        ".offer-price", "span.amount", ".woocommerce-Price-amount",
-                        "p.price", ".product__price", ".pdp-price", ".main-price",
-                        "[class*='product'][class*='price']",
-                    ];
-
-                    const seen = new Set();
-                    const candidates = [];
-
-                    for (const sel of SELECTORS) {
-                        for (const el of document.querySelectorAll(sel)) {
-                            if (seen.has(el)) continue;
-                            seen.add(el);
-                            if (isExcluded(el)) continue;
-                            const raw = (el.getAttribute('content') || el.innerText || '').trim();
-                            const m   = raw.replace(/,/g, '').match(/[\d]+\.?\d*/);
-                            if (!m) continue;
-                            const val = parseFloat(m[0]);
-                            if (val < 0.01 || val > 99999) continue;
-                            candidates.push({ price: val, hasCart: hasCartButton(el), fontSize: getFontSize(el) });
-                        }
-                    }
-
-                    if (!candidates.length) return null;
-                    candidates.sort((a, b) => {
-                        if (a.hasCart !== b.hasCart) return a.hasCart ? -1 : 1;
-                        return b.fontSize - a.fontSize;
-                    });
-                    return candidates[0].price;
-                }
-            """)
-            return float(result) if result else None
-        except Exception:
-            return None
-
-    async def _extract_alplas_price(self, page: Page) -> Optional[float]:
-        """
-        Alplas WooCommerce price structure:
-        .price_inner_container > .total_price_container > .price > span.amount
-        The first .price div contains the ex-VAT price, confirmed by adjacent
-        span.vat_span containing "ex VAT".
-        """
-        try:
-            result = await page.evaluate(r"""
-                () => {
-                    function parsePrice(raw) {
-                        const m = (raw || '').replace(/,/g,'').match(/[\d]+\.[\d]{2}/);
-                        if (!m) return null;
-                        const val = parseFloat(m[0]);
-                        return (val > 0.01 && val < 99999) ? val : null;
-                    }
-
-                    // Primary: .price_inner_container total price, ex-VAT div
-                    const container = document.querySelector(
-                        '.price_inner_container .total_price_container'
-                    );
-                    if (container) {
-                        // Find the .price div that has a sibling span.vat_span "ex VAT"
-                        for (const priceDiv of container.querySelectorAll('.price')) {
-                            const vatSpan = priceDiv.querySelector('.vat_span');
-                            if (vatSpan && vatSpan.innerText.toLowerCase().includes('ex')) {
-                                const amount = priceDiv.querySelector('.amount bdi, .amount');
-                                if (amount) {
-                                    const val = parsePrice(amount.innerText || amount.textContent);
-                                    if (val) return val;
-                                }
-                            }
-                        }
-                        // Fallback: first .amount inside total_price_container
-                        const first = container.querySelector('.price .amount bdi, .price .amount');
-                        if (first) {
-                            const val = parsePrice(first.innerText || first.textContent);
-                            if (val) return val;
-                        }
-                    }
-
-                    // Secondary: unit_container price (also ex-VAT)
-                    const unit = document.querySelector('.unit_container .price .amount');
-                    if (unit) {
-                        const val = parsePrice(unit.innerText || unit.textContent);
-                        if (val) return val;
-                    }
-
-                    return null;
-                }
-            """)
-            return float(result) if result else None
-        except Exception:
-            return None
-
-    async def _extract_pavement_signs_price(self, page: Page) -> Optional[float]:
-        """
-        PavementSigns.com ex-VAT price:
-        <span id="ContentPlaceHolder1_lblexVAT">£89</span>
-        Unique ID makes this trivial — no ambiguity possible.
-        """
-        try:
-            result = await page.evaluate(r"""
-                () => {
-                    const el = document.querySelector('#ContentPlaceHolder1_lblexVAT');
-                    if (!el) return null;
-                    const raw = (el.innerText || el.textContent || '').replace(/,/g,'').trim();
-                    const m = raw.match(/[\d]+\.?[\d]*/);
-                    if (!m) return null;
-                    const val = parseFloat(m[0]);
-                    return (val > 0.01 && val < 99999) ? val : null;
-                }
-            """)
-            return float(result) if result else None
-        except Exception:
-            return None
-
-    async def _extract_discount_displays_price(self, page: Page) -> Optional[float]:
-        """
-        Discount Displays main product price uses these specific classes:
-          font-regular text-gray-900 price label
-        with x-html="getFormattedBasePrice()" rendered by Alpine.js.
-
-        Related product prices are static HTML and appear immediately in the DOM.
-        The main price is Alpine-rendered — we must wait for it to be non-empty.
-
-        Priority:
-          1. span/element with class containing all of: price, label, text-gray-900
-          2. [x-html*="getFormattedBasePrice"] after waiting for Alpine
-          3. .price inside [x-data] scope, excluding related sections
-        """
-        try:
-            # Wait for Alpine to render the main price span
-            try:
-                await page.wait_for_function(
-                    """() => {
-                        const el = document.querySelector('.price.label, [class*="text-gray-900"][class*="price"]');
-                        if (!el) return false;
-                        const raw = (el.innerText || '').trim();
-                        return raw.length > 0 && raw !== '£0.00' && /[1-9]/.test(raw);
-                    }""",
-                    timeout=8000
-                )
-            except Exception:
-                pass  # Continue anyway
-
-            result = await page.evaluate(r"""
-                () => {
-                    function parsePrice(raw) {
-                        const m = (raw || '').replace(/,/g,'').match(/[\d]+\.[\d]{2}/);
-                        if (!m) return null;
-                        const val = parseFloat(m[0]);
-                        return (val > 0.50 && val < 99999) ? val : null;
-                    }
-
-                    // Strategy 1: main product price container
-                    // Class is "price-excl-taxinline-block" (deliberate typo in their HTML)
-                    // Contains span.price with x-html="getFormattedBasePrice()"
-                    // Related product prices are inside .js_slides carousel — excluded here
-                    const mainContainer = document.querySelector(
-                        '[class*="price-excl-taxinline-block"]'
-                    );
-                    if (mainContainer) {
-                        // Make sure it's NOT inside the related products carousel
-                        const inCarousel = mainContainer.closest('.js_slides, [class*="js_slide"]');
-                        if (!inCarousel) {
-                            const priceSpan = mainContainer.querySelector('[x-html*="getFormattedBasePrice"], span.price');
-                            if (priceSpan) {
-                                const val = parsePrice(priceSpan.innerText || priceSpan.textContent);
-                                if (val) return val;
-                            }
-                        }
-                    }
-
-                    // Strategy 2: x-html getFormattedBasePrice NOT inside carousel
-                    for (const el of document.querySelectorAll('[x-html*="getFormattedBasePrice"]')) {
-                        if (el.closest('.js_slides, [class*="js_slide"]')) continue;
-                        const val = parsePrice(el.innerText || el.textContent);
-                        if (val) return val;
-                    }
-
-                    // Strategy 3: price-excluding-tax active NOT inside carousel
-                    for (const el of document.querySelectorAll('.price-excluding-tax.active')) {
-                        if (el.closest('.js_slides, [class*="js_slide"]')) continue;
-                        const val = parsePrice(el.innerText || el.textContent);
-                        if (val) return val;
-                    }
-
-                    return null;
-                }
-            """)
-            return float(result) if result else None
-        except Exception:
-            return None
-
-    # ── Category page detection ───────────────────────────────────────────────
-
-    CATEGORY_URL_SIGNALS = [
-        "/collections/", "/categories/", "/category/", "/c/",
-        "/search", "/shop/", "/products?", "/catalogue",
-        ".htm?", ".aspx?", "/a-boards", "/pavement-signs/",
-        "/wall-sign-holders", "/acrylic-sign-holder-acrylic-frame/",
-        "/a-frame-chalkboard",
-    ]
-
-    def _is_category_url(self, url: str) -> bool:
-        u = url.lower().split("?")[0]
-        for signal in self.CATEGORY_URL_SIGNALS:
-            if signal in u:
-                return True
-        parts = [p for p in u.rstrip("/").split("/") if p]
-        if len(parts) <= 2:
-            return True
-        return False
-
-    async def _extract_shopify_json_price(self, url: str, context: BrowserContext) -> Optional[float]:
-        """Shopify /products/[slug].js endpoint — fast price without full page render."""
-        try:
-            base = url.split("?")[0].rstrip("/")
-            if "/products/" not in base:
-                return None
-            json_url = base + ".js"
-            page = await context.new_page()
-            try:
-                await page.goto(json_url, wait_until="domcontentloaded", timeout=10000)
-                text = await page.inner_text("body")
-                await page.close()
-                data = json.loads(text)
-                variants = data.get("variants", [])
-                if variants:
-                    price_pence = variants[0].get("price")
-                    if price_pence:
-                        return round(float(price_pence) / 100, 2)
-                price = data.get("price")
-                if price:
-                    return round(float(price) / 100, 2)
-            except Exception:
-                try: await page.close()
-                except Exception: pass
-        except Exception:
-            pass
-        return None
-
-    async def _extract_jsonld_price(self, page: Page) -> Optional[float]:
-        for script in await page.locator('script[type="application/ld+json"]').all():
-            try:
-                data  = json.loads(await script.inner_text())
-                items = data if isinstance(data, list) else [data]
-                flat  = []
-                for item in items:
-                    flat.extend(item.get("@graph", [item]))
-                for item in flat:
-                    if item.get("@type") == "Product":
-                        offers = item.get("offers", {})
-                        if isinstance(offers, list): offers = offers[0]
-                        price = offers.get("price") or offers.get("lowPrice")
-                        if price: return float(str(price).replace(",", ""))
-                    if item.get("@type") == "Offer":
-                        price = item.get("price")
-                        if price: return float(str(price).replace(",", ""))
-            except Exception:
-                pass
-        return None
-
-    async def _extract_meta_price(self, page: Page) -> Optional[float]:
-        for attr in ["product:price:amount", "og:price:amount"]:
-            try:
-                el = page.locator(f'meta[property="{attr}"]').first
-                if await el.count() > 0:
-                    val = await el.get_attribute("content")
-                    if val: return parse_price(val)
-            except Exception:
-                pass
-        return None
-
-    async def scrape_product_page(self, context: BrowserContext, url: str, competitor_domain: str = "", fetch_image: bool = False) -> dict:
-        result = {
-            "price": None, "vat": "unknown", "availability": "in_stock",
-            "title": "", "url": url, "error": None, "og_image": None,
-        }
-
-        # ── Skip category/listing pages early ─────────────────────────────────
-        if self._is_category_url(url):
-            result["error"] = "Category page — no single product price"
-            result["availability"] = "unavailable"
-            log.debug(f"  Skipping category page: {url}")
-            return result
-
-        # ── Shopify JSON endpoint (fast, no JS render needed) ─────────────────
-        shopify_price = await self._extract_shopify_json_price(url, context)
-
-        page = await context.new_page()
-        try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
-            await page.wait_for_timeout(10000)
-
-            full_text              = await page.inner_text("body")
-            result["vat"]          = detect_vat(full_text)
-            result["availability"] = "out_of_stock" if detect_oos(full_text) else "in_stock"
-            result["title"]        = (await page.title()).strip()
-
-            # ── OG image — only when due for quarterly refresh ─────────────────
-            if fetch_image:
-                try:
-                    og_image = await page.evaluate("""
-                        () => {
-                            const og  = document.querySelector('meta[property="og:image"]');
-                            const twi = document.querySelector('meta[name="twitter:image"]');
-                            return (og?.content || twi?.content || '').trim() || null;
-                        }
-                    """)
-                    if og_image and og_image.startswith('http'):
-                        result["og_image"] = og_image
-                except Exception:
-                    pass
-
-            price = shopify_price
-
-            if not price: price = await self._extract_jsonld_price(page)
-            if not price: price = await self._extract_meta_price(page)
-
-            # ── Discount Displays specific selector ────────────────────────────
-            if not price and DISCOUNT_DISPLAYS_DOMAIN in competitor_domain:
-                price = await self._extract_discount_displays_price(page)
-            if not price and 'alplas.com' in competitor_domain:
-                price = await self._extract_alplas_price(page)
-            if not price and 'pavementsigns.com' in competitor_domain:
-                price = await self._extract_pavement_signs_price(page)
-
-            # ── Generic smart extraction for everyone else ─────────────────────
-            if not price:
-                price = await self._extract_main_price(page)
-
-            result["price"] = price
-
-        except Exception as e:
-            result["error"]        = str(e)[:200]
-            result["availability"] = "error"
-        finally:
-            await page.close()
-        return result
-
-    # ── Main per-SKU × competitor logic ───────────────────────────────────────
-
-    async def process_sku_competitor(
-        self,
-        browser: Browser,
-        sku: dict,
-        competitor: dict,
-        existing_match: Optional[dict],
-    ) -> dict:
-        snapshot = {
-            "sku_id":              sku["sku_id"],
-            "competitor_id":       competitor["id"],
-            "run_id":              self.run_id,
-            "scraped_at":          datetime.now(timezone.utc).isoformat(),
-            "availability":        "unavailable",
-            "competitor_price":    None,
-            "competitor_vat":      competitor.get("vat_status", "unknown"),
-            "competitor_url":      None,
-            "diff_pct":            None,
-            "diff_pct_normalised": None,
-            "confidence":          None,
-            "error_message":       None,
-            "_comp_title":         None,
-        }
-
-        if existing_match and existing_match["match_status"] == "rejected":
-            log.debug(f"Skipping {sku['sku_id']} × {competitor['domain']} — rejected")
-            return snapshot
-
-        domain = competitor["domain"].lstrip("www.")
-        ctx    = await self.new_context(browser)
-
-        try:
-            url        = existing_match.get("competitor_url") if existing_match else None
-            price      = None
-            comp_title = None
-            vat_hint   = "unknown"
-            confidence = 0
-
-            # ── Path A: existing confirmed URL — scrape directly ───────────────
-            if url:
-                log.debug(f"  Path A — existing URL: {url}")
-                result     = await self.scrape_product_page(ctx, url, domain, fetch_image=image_needs_refresh(existing_match))
-                price      = result["price"]
-                comp_title = result["title"]
-                vat_hint   = result["vat"]
-                confidence = fuzzy_confidence(sku, comp_title, url)
-                snapshot["availability"]  = result["availability"]
-                snapshot["error_message"] = result["error"]
-                snapshot["_og_image"]     = result.get("og_image")
-
-            else:
-                # ── Path B: BigCommerce SKU lookup (Harrison Products) ─────────
-                if any(d in domain for d in BIGCOMMERCE_DOMAINS):
-                    log.debug(f"  Path B (BigCommerce) — SKU lookup for {sku['sku_id']}")
-                    bc_result = await self.bigcommerce_sku_lookup(ctx, sku, domain)
-                    if bc_result and bc_result.get("url"):
-                        url        = bc_result["url"]
-                        price      = bc_result.get("price")
-                        comp_title = bc_result.get("title", "")
-                        confidence = bc_result.get("confidence", 0)
-                        vat_hint   = bc_result.get("vat_hint", "unknown")
-                        snapshot["availability"] = "in_stock" if price else "unavailable"
-
-                # ── Path C: Google/Bing Shopping ───────────────────────────────
-                if not url:
-                    shopping = await self.search_google_shopping(ctx, sku, competitor["domain"])
-                    if shopping and shopping.get("url"):
-                        url        = shopping["url"]
-                        comp_title = shopping.get("title", "")
-                        confidence = shopping.get("confidence", 0)
-                        if shopping.get("price"):
-                            price    = shopping["price"]
-                            vat_hint = shopping.get("vat_hint", "unknown")
-                            snapshot["availability"] = "in_stock"
-                        else:
-                            result     = await self.scrape_product_page(ctx, url, domain, fetch_image=image_needs_refresh(existing_match))
-                            price      = result["price"]
-                            vat_hint   = result["vat"]
-                            comp_title = result["title"] or comp_title
-                            confidence = max(confidence, fuzzy_confidence(sku, comp_title, url))
-                            snapshot["availability"]  = result["availability"]
-                            snapshot["error_message"] = result["error"]
-                            snapshot["_og_image"]     = result.get("og_image")
-
-                # ── Path D: Site web search fallback ───────────────────────────
-                if not url:
-                    url = await self.search_web(ctx, sku, competitor["domain"])
-                    if url:
-                        result     = await self.scrape_product_page(ctx, url, domain, fetch_image=image_needs_refresh(existing_match))
-                        price      = result["price"]
-                        comp_title = result["title"]
-                        vat_hint   = result["vat"]
-                        confidence = fuzzy_confidence(sku, comp_title, url)
-                        snapshot["availability"]  = result["availability"]
-                        snapshot["error_message"] = result["error"]
-                        snapshot["_og_image"]     = result.get("og_image")
-                    else:
-                        snapshot["error_message"] = "No URL found via any method"
-                        return snapshot
-
-            # ── Populate snapshot ──────────────────────────────────────────────
-            snapshot["competitor_url"] = url
-            snapshot["confidence"]     = confidence
-            snapshot["_comp_title"]    = comp_title
-
-            if vat_hint != "unknown":
-                snapshot["competitor_vat"] = vat_hint
-
-            if price:
-                our_price = float(sku["price_ex_vat"])
-                their_ex  = normalise_price(price, snapshot["competitor_vat"])
-
-                # ── Per-unit normalisation ─────────────────────────────────────
-                # If pack quantities differ on either side, normalise both prices
-                # to per-unit before computing diff_pct_normalised.
-                # Cases:
-                #   our_qty=100, comp_qty=1   → we sell pack, they sell single
-                #   our_qty=1,   comp_qty=100 → we sell single, they sell pack
-                #   our_qty=100, comp_qty=100 → like-for-like, no normalisation
-                #   our_qty=1,   comp_qty=1   → both singles, no normalisation
-                our_qty  = sku.get("unit_qty") or 1
-                comp_qty = extract_pack_qty(comp_title) or 1
-
-                if our_qty != comp_qty:
-                    our_per_unit   = per_unit_price(our_price, our_qty)
-                    their_per_unit = per_unit_price(their_ex,  comp_qty)
-                    normalised_diff = diff_pct(our_per_unit, their_per_unit)
-                    log.info(
-                        f"  ✓ {competitor['domain']:35s} "
-                        f"£{price:>7.2f} ({snapshot['competitor_vat']:7s}) "
-                        f"our_qty={our_qty} comp_qty={comp_qty} "
-                        f"→ per-unit diff {normalised_diff:+.1f}%  conf {confidence}%"
-                    )
-                else:
-                    normalised_diff = diff_pct(our_price, their_ex)
-                    log.info(
-                        f"  ✓ {competitor['domain']:35s} "
-                        f"£{price:>7.2f} ({snapshot['competitor_vat']:7s}) "
-                        f"diff {normalised_diff:+.1f}%  conf {confidence}%"
-                    )
-
-                snapshot["competitor_price"]    = price
-                snapshot["diff_pct"]            = diff_pct(our_price, price)
-                snapshot["diff_pct_normalised"] = normalised_diff
-            else:
-                log.info(
-                    f"  ✗ {competitor['domain']:35s} "
-                    f"no price  conf {confidence}%  '{(comp_title or '')[:50]}'"
-                )
-
-        except Exception as e:
-            snapshot["error_message"] = str(e)[:200]
-            log.error(f"Exception {sku['sku_id']} × {competitor['domain']}: {e}")
-        finally:
-            await ctx.close()
-
-        return snapshot
-
-    # ── DB writes ──────────────────────────────────────────────────────────────
-
-    async def write_snapshot(self, snapshot: dict):
-        row = {k: v for k, v in snapshot.items() if not k.startswith("_")}
-        self.sb.table("price_snapshots").insert(row).execute()
-
-    async def flush_matches_for_sku(self, sku: dict, snapshots: list, competitors: list):
-        comp_map = {c["id"]: c for c in competitors}
-        rows     = []
-        for snap in snapshots:
-            if not snap.get("competitor_url"): continue
-            conf         = snap.get("confidence") or 0
-            match_status = "matched" if conf >= 80 else "review"
-            rows.append({
-                "sku_id":           sku["sku_id"],
-                "competitor_id":    snap["competitor_id"],
-                "competitor_url":   snap["competitor_url"],
-                "competitor_title": snap.get("_comp_title"),
-                "match_status":     match_status,
-                "confidence":       conf,
-                "match_method":     "scrape",
-                "updated_at":       datetime.now(timezone.utc).isoformat(),
-            })
-        if rows:
-            self.sb.table("competitor_matches").upsert(rows, on_conflict="sku_id,competitor_id").execute()
-            matched = sum(1 for r in rows if r["match_status"] == "matched")
-            review  = sum(1 for r in rows if r["match_status"] == "review")
-            log.info(f"  → Flushed {len(rows)} matches for {sku['sku_id']}: {matched} matched, {review} review")
-        else:
-            log.info(f"  → No matches flushed for {sku['sku_id']}")
-
-    async def create_alerts(self, snapshot: dict, sku: dict, competitor: dict):
-        our_price = float(sku["price_ex_vat"])
-        diff      = snapshot.get("diff_pct_normalised") or snapshot.get("diff_pct")
-        alerts    = []
-        if snapshot["availability"] == "out_of_stock":
-            alerts.append({"run_id": self.run_id, "sku_id": sku["sku_id"], "competitor_id": competitor["id"], "alert_type": "oos_competitor",
-                "message": f"{competitor['name']} is out of stock for {sku['short_title']} — last known £{snapshot.get('competitor_price','?')}",
-                "diff_pct": diff, "our_price": our_price, "their_price": snapshot.get("competitor_price")})
-        elif diff is not None:
-            if diff <= -10:
-                alerts.append({"run_id": self.run_id, "sku_id": sku["sku_id"], "competitor_id": competitor["id"], "alert_type": "critical",
-                    "message": f"{competitor['name']} is {abs(diff):.1f}% cheaper — £{snapshot['competitor_price']:.2f} vs your £{our_price:.2f}",
-                    "diff_pct": diff, "our_price": our_price, "their_price": snapshot.get("competitor_price")})
-            elif diff <= -5:
-                alerts.append({"run_id": self.run_id, "sku_id": sku["sku_id"], "competitor_id": competitor["id"], "alert_type": "warning",
-                    "message": f"{competitor['name']} is {abs(diff):.1f}% cheaper — £{snapshot['competitor_price']:.2f} vs your £{our_price:.2f}",
-                    "diff_pct": diff, "our_price": our_price, "their_price": snapshot.get("competitor_price")})
-        for alert in alerts:
-            self.sb.table("alerts").insert(alert).execute()
-
-
-# ── Main runner ────────────────────────────────────────────────────────────────
-
-async def run_scraper(trigger: str = "scheduled"):
-    sb     = create_client(SUPABASE_URL, SUPABASE_KEY)
-    run_id = uuid.uuid4()
-
-    sb.table("sync_runs").insert({
-        "id": str(run_id), "trigger": trigger,
-        "status": "running", "started_at": datetime.now(timezone.utc).isoformat(),
-    }).execute()
-
-    mode          = SCRAPER_MODE
-    specific_skus = [s.strip() for s in os.getenv("SCRAPER_SKUS", "").split(",") if s.strip()]
-    if specific_skus:
-        mode = "skus"
-
-    log.info(f"Starting sync run {run_id} | mode={mode} | workers={WORKERS} | delay={DELAY_MIN}–{DELAY_MAX}s")
-
-    comps = (
-        sb.table("competitors")
-        .select("*")
-        .eq("active", True)
-        .order("id")
-        .limit(COMPETITOR_LIMIT)
-        .execute()
-        .data
-    )
-
-    from collections import defaultdict
-
-    if mode == "matched":
-        log.info("Mode: matched — re-scraping confirmed URLs only")
-        matched_rows = (
-            sb.table("competitor_matches")
-            .select("sku_id, competitor_id, competitor_url, competitor_title, confidence, match_status, match_method, human_reviewed, notes")
-            .eq("match_status", "matched")
-            .not_.is_("competitor_url", "null")
-            .execute()
-            .data
-        )
-        if not matched_rows:
-            log.info("No confirmed matches found — nothing to scrape. Run mode=full first.")
-            sb.table("sync_runs").update({
-                "status": "complete", "completed_at": datetime.now(timezone.utc).isoformat(),
-                "skus_attempted": 0, "skus_succeeded": 0, "skus_failed": 0, "oos_flagged": 0,
-            }).eq("id", str(run_id)).execute()
-            return
-
-        log.info(f"  {len(matched_rows)} confirmed matches to re-scrape")
-        match_lookup    = {(r["sku_id"], r["competitor_id"]): r for r in matched_rows}
-        matched_sku_ids = list({r["sku_id"] for r in matched_rows})
-
-        skus = []
-        for i in range(0, len(matched_sku_ids), 200):
-            rows = sb.table("skus").select("*").in_("sku_id", matched_sku_ids[i:i+200]).execute().data
-            skus.extend(rows or [])
-
-        comp_map  = {c["id"]: c for c in comps}
-        sku_work: dict = defaultdict(list)
-        for sku in skus:
-            for comp_id, comp in comp_map.items():
-                key = (sku["sku_id"], comp_id)
-                if key in match_lookup:
-                    sku_work[sku["sku_id"]].append((sku, comp, match_lookup[key]))
-
-    elif mode == "skus":
-        log.info(f"Mode: skus — targeting {specific_skus}")
-        skus        = sb.table("skus").select("*").in_("sku_id", specific_skus).execute().data
-        all_matches = sb.table("competitor_matches").select("*").execute().data
-        match_lookup = {(m["sku_id"], m["competitor_id"]): m for m in all_matches}
-        sku_work: dict = defaultdict(list)
-        for sku in skus:
-            for comp in comps:
-                sku_work[sku["sku_id"]].append((sku, comp, match_lookup.get((sku["sku_id"], comp["id"]))))
-
-    else:
-        log.info("Mode: full — all SKUs × all competitors")
-        skus        = sb.table("skus").select("*").eq("active", True).limit(SKU_LIMIT).execute().data
-        all_matches = sb.table("competitor_matches").select("*").execute().data
-        match_lookup = {(m["sku_id"], m["competitor_id"]): m for m in all_matches}
-        sku_work: dict = defaultdict(list)
-        for sku in skus:
-            for comp in comps:
-                sku_work[sku["sku_id"]].append((sku, comp, match_lookup.get((sku["sku_id"], comp["id"]))))
-
-    log.info(f"  {sum(len(v) for v in sku_work.values())} work items across {len(sku_work)} SKUs")
-
-    scraper = PriceScraper(sb, run_id)
-    stats   = {"attempted": 0, "succeeded": 0, "failed": 0, "oos": 0}
-    sem     = asyncio.Semaphore(WORKERS)
-
-    async def process_sku_group(sku_id: str, items: list):
-        async with sem:
-            sku = items[0][0]
-            log.info(f"\n{'='*60}\n{sku['sku_id']} — {sku['short_title']}")
-            if mode != "matched":
-                log.info(f"Query: '{build_search_query(sku)}'")
-            log.info('='*60)
-
-            sku_snapshots = []
-            for (_, comp, existing) in items:
-                stats["attempted"] += 1
-                try:
-                    snap = await scraper.process_sku_competitor(browser, sku, comp, existing)
-                    await scraper.write_snapshot(snap)
-                    await scraper.create_alerts(snap, sku, comp)
-                    sku_snapshots.append(snap)
-                    if snap["availability"] == "error":
-                        stats["failed"] += 1
-                    else:
-                        stats["succeeded"] += 1
-                        if snap["availability"] == "out_of_stock":
-                            stats["oos"] += 1
-                except Exception as e:
-                    stats["failed"] += 1
-                    log.error(f"Unhandled: {sku['sku_id']} × {comp['domain']}: {e}")
-                finally:
-                    await asyncio.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
-
-            if mode != "matched":
-                await scraper.flush_matches_for_sku(sku, sku_snapshots, comps)
-
-    async with async_playwright() as pw:
-        browser = await pw.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-dev-shm-usage",
-                "--disable-infobars",
-                "--window-size=1280,800",
-            ],
-        )
-        await asyncio.gather(*[
-            process_sku_group(sku_id, items)
-            for sku_id, items in sku_work.items()
-        ])
-        await browser.close()
-
-    sb.table("sync_runs").update({
-        "status": "complete", "completed_at": datetime.now(timezone.utc).isoformat(),
-        "skus_attempted": stats["attempted"], "skus_succeeded": stats["succeeded"],
-        "skus_failed": stats["failed"], "oos_flagged": stats["oos"],
-    }).eq("id", str(run_id)).execute()
-    log.info(f"Run {run_id} complete — mode={mode} — {stats}")
-
-
-if __name__ == "__main__":
-    import sys
-    trigger = sys.argv[1] if len(sys.argv) > 1 else "scheduled"
-    asyncio.run(run_scraper(trigger))
+/* ════════════════════════════════════════
+   HELPERS
+════════════════════════════════════════ */
+const $  = id => document.getElementById(id);
+const el = (tag, attrs={}, ...children) => {
+  const e = document.createElement(tag);
+  Object.entries(attrs).forEach(([k,v]) => {
+    if (k === 'className') e.className = v;
+    else if (k === 'innerHTML') e.innerHTML = v;
+    else if (k.startsWith('on')) e[k] = v;
+    else e.setAttribute(k, v);
+  });
+  children.forEach(c => e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c));
+  return e;
+};
+
+function debounce(fn, ms) {
+  let t;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+
+function ts(dt) {
+  if (!dt) return '—';
+  const d = new Date(dt);
+  const now = new Date();
+  const diff = now - d;
+  if (diff < 60000) return 'Just now';
+  if (diff < 3600000) return Math.floor(diff/60000) + 'm ago';
+  if (diff < 86400000) {
+    return d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+  }
+  if (diff < 172800000) return 'Yesterday ' + d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+  return d.toLocaleDateString('en-GB', {day:'numeric', month:'short'});
+}
+
+function fmtPrice(p) {
+  if (p === null || p === undefined) return '—';
+  return '£' + parseFloat(p).toFixed(2);
+}
+
+function normalisePrice(price, vat) {
+  if (!price) return null;
+  const p = parseFloat(price);
+  return vat === 'inc' ? p / 1.2 : p;
+}
+
+function getTier(diff) {
+  if (diff === null || diff === undefined) return 'par';
+  if (diff <= -T.red) return 'r';
+  if (diff <= -T.amb) return 'a';
+  if (diff >= T.par)  return 'g';
+  return 'p';
+}
+
+function diffClass(diff) {
+  return {r:'d-r', a:'d-a', g:'d-g', p:'d-p'}[getTier(diff)];
+}
+
+function diffLabel(diff) {
+  if (diff === null || diff === undefined) return '—';
+  return (diff > 0 ? '+' : '') + parseFloat(diff).toFixed(1) + '%';
+}
+
+function vatPill(v) {
+  if (v === 'ex')  return '<span class="vat vex">ex</span>';
+  if (v === 'inc') return '<span class="vat vinc">inc</span>';
+  return '<span class="vat vunk">?</span>';
+}
+
+function stockBadge(avail) {
+  if (avail === 'out_of_stock') return '<span class="badge b-oos"><i class="ti ti-package-off" style="font-size:9px"></i> OOS</span>';
+  if (avail === 'unavailable')  return '<span class="badge b-gray">Unavail.</span>';
+  return '';
+}
+
+function confWidget(c) {
+  if (!c) return '—';
+  const col = c >= 80 ? 'var(--grn)' : c >= 60 ? 'var(--amb)' : 'var(--red)';
+  return `<div class="cbar"><div class="ctrack"><div class="cfill" style="width:${c}%;background:${col}"></div></div><span style="font-size:10px">${c}%</span></div>`;
+}
+
+function buildLegend(elId) {
+  const e = $(elId);
+  if (!e) return;
+  e.innerHTML = `
+    <div class="leg-item"><div class="leg-sw" style="background:var(--rb);border:1px solid var(--rbd)"></div>&gt;${T.red}% more exp.</div>
+    <div class="leg-item"><div class="leg-sw" style="background:var(--ab);border:1px solid var(--abd)"></div>${T.amb}–${T.red}%</div>
+    <div class="leg-item"><div class="leg-sw" style="background:var(--bg);border:1px solid var(--border)"></div>±${T.par}% parity</div>
+    <div class="leg-item"><div class="leg-sw" style="background:var(--gb);border:1px solid var(--gbd)"></div>We're cheaper</div>`;
+}
+
+function rowClass(diff) {
+  return {r:'row-r', a:'row-a', g:'row-g', p:'row-gray'}[getTier(diff)];
+}
+
+function skuLink(row) {
+  const url = row.our_url || row.product_url || (row.slug ? `https://www.ukpos.com/${row.slug}?vat=0` : '#');
+  return `<a class="prod-link" href="${url}" target="_blank" rel="noopener" onclick="event.stopPropagation()">
+    <span style="font-family:'SF Mono',monospace;font-size:11px;color:var(--blu)">${row.sku_id}</span>
+    <span style="font-size:10px;color:var(--t2);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block">${row.short_title||''}</span>
+  </a>`;
+}
+
+function slugify(name) {
+  return (name||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+}
+
+/* Cached access token — avoids a getSession() round-trip on every fetch */
+let cachedToken = null;
+
+async function getToken() {
+  if (cachedToken) return cachedToken;
+  const { data: { session } } = await sb.auth.getSession();
+  cachedToken = session?.access_token || null;
+  return cachedToken;
+}
+
+async function authFetch(path, opts = {}) {
+  opts.headers = opts.headers || {};
+  const token = await getToken();
+  if (token) opts.headers['Authorization'] = 'Bearer ' + token;
+  const res = await fetch(API_BASE + path, opts);
+  if (!res.ok) throw new Error(`API ${path} → ${res.status}`);
+  return res.json();
+}
+
+async function authPost(path, body, method = 'POST') {
+  return authFetch(path, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: body !== undefined ? JSON.stringify(body) : undefined
+  });
+}
+
+function showMsg(elId, text, kind) {
+  $(elId).innerHTML = `<div class="auth-msg ${kind}">${text}</div>`;
+}
+
+function copyUrl() {
+  navigator.clipboard.writeText(window.location.href).catch(() => {});
+  event.target.textContent = 'Copied!';
+  setTimeout(() => event.target.textContent = 'Copy link', 1500);
+}
+
+/* ════════════════════════════════════════
+   ROUTING — hash-based
+════════════════════════════════════════ */
+const PANEL_MAP = {
+  alerts: 'alerts', review: 'review', skus: 'skus',
+  bycat: 'bycat', bycomp: 'bycomp', schedule: 'schedule', settings: 'settings'
+};
+const NAV_ITEMS = ['alerts','review','skus','bycat','bycomp','schedule','settings'];
+
+function go(name, opts = {}) {
+  /* Hide all panels */
+  document.querySelectorAll('.panel').forEach(p => {
+    p.classList.remove('active');
+    p.style.display = '';
+  });
+  /* Remove active from all nav items */
+  NAV_ITEMS.forEach(n => {
+    const el = $('nav-' + n);
+    if (el) el.classList.remove('active');
+  });
+
+  const panelId = 'p-' + name;
+  const panel = $(panelId);
+  if (!panel) { go('alerts'); return; }
+  panel.classList.add('active');
+
+  /* Update URL hash */
+  let hash = '#' + name;
+  if (opts.skuId) { hash = '#sku/' + opts.skuId; }
+  else if (opts.compSlug) { hash = '#competitor/' + opts.compSlug; }
+  history.replaceState(null, '', hash);
+
+  /* Update sidebar active */
+  const navKey = {
+    'alerts':'alerts','review':'review','skus':'skus','bycat':'bycat',
+    'bycomp':'bycomp','comp-detail':'bycomp','sku-detail':'skus',
+    'schedule':'schedule','settings':'settings'
+  }[name];
+  if (navKey && $('nav-' + navKey)) $('nav-' + navKey).classList.add('active');
+
+  /* Panel-specific init */
+  if (name === 'skus') { const q = $('skuQ'); if (q && q.value === (currentUser?.email||'')) q.value = ''; if (!skusLoaded) { skusLoaded = true; loadSKUs(); } }
+  if (name === 'review')      loadReview();
+  if (name === 'bycat')       loadByCategory();
+  if (name === 'bycomp')      loadByCompetitor();
+  if (name === 'schedule')    loadRuns();
+  if (name === 'settings')    { goSett('configurables'); loadCompetitorSettings(); loadUsers(); }
+  if (name === 'comp-detail') { loadCompDetail(opts); }
+  if (name === 'sku-detail')  { loadSkuDetail(opts); }
+}
+
+function restoreRoute() {
+  const hash = location.hash.replace('#','');
+  if (!hash) { go('alerts'); return; }
+  if (hash.startsWith('sku/')) {
+    go('sku-detail', { skuId: hash.slice(4) });
+  } else if (hash.startsWith('competitor/')) {
+    const slug = hash.slice(11);
+    /* Try to find comp by slug */
+    if (sb) {
+      sb.from('competitors').select('id,name,domain,vat_status').eq('active',true).then(({data}) => {
+        const c = (data||[]).find(x => slugify(x.name) === slug);
+        if (c) go('comp-detail', { compId: c.id, compName: c.name, compSlug: slug, compDomain: c.domain, compVat: c.vat_status });
+        else go('bycomp');
+      });
+    }
+  } else if (PANEL_MAP[hash]) {
+    go(hash);
+  } else {
+    go('alerts');
+  }
+}
+
+function goSett(tab) {
+  document.querySelectorAll('.stab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.sn-item').forEach(n => n.classList.remove('active'));
+  const st = $('st-' + tab); if (st) st.classList.add('active');
+  const sn = $('sn-' + tab); if (sn) sn.classList.add('active');
+}
+
+/* ════════════════════════════════════════
+   AUTH
+════════════════════════════════════════ */
+function showView(v) {
+  ['view-loading','view-login','view-pending','view-rejected','view-app'].forEach(id => {
+    const el = $(id);
+    if (!el) return;
+    if (id !== v) { el.style.display = 'none'; return; }
+    /* view-app is .shell which needs display:grid, auth screens are block */
+    el.style.display = (id === 'view-app') ? 'grid' : '';
+  });
+}
+
+function showAuthTab(which) {
+  $('tab-login').classList.toggle('active', which === 'login');
+  $('tab-register').classList.toggle('active', which === 'register');
+  $('form-login').style.display    = which === 'login'    ? '' : 'none';
+  $('form-register').style.display = which === 'register' ? '' : 'none';
+  $('login-msg').innerHTML = '';
+  $('reg-msg').innerHTML = '';
+}
+
+async function bootstrap() {
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { showView('view-login'); return; }
+  await onSignedIn(session);
+
+  sb.auth.onAuthStateChange(async (event, session) => {
+    /* Always invalidate cached token on any auth event */
+    cachedToken = session?.access_token || null;
+    if (event === 'SIGNED_OUT' || !session) { currentUser = null; currentProfile = null; showView('view-login'); return; }
+    if (['SIGNED_IN','TOKEN_REFRESHED','USER_UPDATED','INITIAL_SESSION'].includes(event)) await onSignedIn(session);
+  });
+}
+
+async function onSignedIn(session) {
+  currentUser  = session.user;
+  cachedToken  = session.access_token || null;  /* prime cache immediately */
+  const { data: profiles } = await sb.from('profiles').select('*').eq('id', session.user.id).limit(1);
+  if (!profiles || !profiles.length) { showView('view-pending'); return; }
+  currentProfile = profiles[0];
+  $('header-email').textContent = currentProfile.email || '—';
+  $('ma-email').value = currentProfile.email || '';
+  $('ma-name').value  = currentProfile.full_name || '';
+
+  if (currentProfile.status === 'pending')  { showView('view-pending'); return; }
+  if (currentProfile.status === 'rejected') { showView('view-rejected'); return; }
+
+  showView('view-app');
+  if (currentProfile.role === 'super_admin') {
+    const usersTab = $('sn-users');
+    if (usersTab) usersTab.style.display = '';
+  }
+  loadDashboard();
+  restoreRoute();
+  /* Pre-fetch SKU list in the background so By Category loads instantly */
+  if (!allSkus.length) {
+    sb.from('skus')
+      .select('sku_id,short_title,price_ex_vat,product_url,availability,cat_l4,cat_l5,image_url,slug')
+      .eq('active', true)
+      .order('sku_id')
+      .then(({ data }) => { if (data) allSkus = data; });
+  }
+  setInterval(() => { if ($('p-alerts').classList.contains('active')) loadDashboard(); }, 5 * 60 * 1000);
+}
+
+async function handleLogin(e) {
+  e.preventDefault();
+  $('login-btn').disabled = true;
+  const { error } = await sb.auth.signInWithPassword({ email: $('login-email').value.trim(), password: $('login-password').value });
+  $('login-btn').disabled = false;
+  if (error) showMsg('login-msg', error.message, 'err');
+}
+
+async function handleForgotPassword() {
+  const email = $('login-email').value.trim();
+  if (!email) { showMsg('login-msg', 'Enter your email above first.', 'info'); return; }
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + '/' });
+  if (error) showMsg('login-msg', error.message, 'err');
+  else showMsg('login-msg', 'Check your inbox for a reset link.', 'ok');
+}
+
+async function handleRequestAccess(e) {
+  e.preventDefault();
+  $('reg-btn').disabled = true;
+  const email = $('reg-email').value.trim().toLowerCase();
+  const full_name = $('reg-name').value.trim();
+  const domain = email.split('@')[1] || '';
+  if (!ALLOWED_DOMAINS.includes(domain)) {
+    showMsg('reg-msg', 'Only @ukpos.com email addresses are permitted.', 'err');
+    $('reg-btn').disabled = false;
+    return;
+  }
+  const { error } = await sb.from('access_requests').upsert({ email, full_name }, { onConflict: 'email' });
+  $('reg-btn').disabled = false;
+  if (error) { showMsg('reg-msg', error.message || 'Request failed.', 'err'); return; }
+  showMsg('reg-msg', 'Request submitted — you will be notified once approved.', 'ok');
+  $('form-register').reset();
+}
+
+async function signOut() {
+  if (sb) await sb.auth.signOut();
+}
+
+function openMyAccount() { go('settings'); goSett('account'); }
+
+async function saveMyAccount() {
+  const name = $('ma-name').value.trim();
+  const pw   = $('ma-password').value;
+  $('ma-msg').style.display = 'none';
+  try {
+    const { error: dbErr } = await sb.from('profiles').update({ full_name: name }).eq('id', currentProfile.id);
+    if (dbErr) throw new Error(dbErr.message);
+    if (pw) {
+      if (pw.length < 8) throw new Error('Password must be at least 8 characters.');
+      const { error: pwErr } = await sb.auth.updateUser({ password: pw });
+      if (pwErr) throw new Error(pwErr.message);
+    }
+    currentProfile.full_name = name;
+    $('ma-msg').textContent = 'Changes saved.';
+    $('ma-msg').className = 'auth-msg ok';
+    $('ma-msg').style.display = 'block';
+    $('ma-password').value = '';
+  } catch (err) {
+    $('ma-msg').textContent = err.message;
+    $('ma-msg').className = 'auth-msg err';
+    $('ma-msg').style.display = 'block';
+  }
+}
+
+/* ════════════════════════════════════════
+   DASHBOARD / ALERTS
+════════════════════════════════════════ */
+async function loadDashboard() {
+  try {
+    const d = await authFetch('/dashboard');
+    const m = d.metrics || {};
+
+    $('m-crit').textContent  = m.critical  ?? '—';
+    $('m-warn').textContent  = m.warning   ?? '—';
+    $('m-cheap').textContent = m.cheapest  ?? '—';
+    $('m-oos').textContent   = m.oos       ?? '—';
+
+    const reviewCount = m.review || 0;
+    if (reviewCount > 0) {
+      $('nav-review-badge').textContent = reviewCount.toLocaleString();
+      $('nav-review-badge').style.display = '';
+    }
+    const critCount = m.critical || 0;
+    if (critCount > 0) {
+      $('nav-alerts-badge').textContent = critCount;
+      $('nav-alerts-badge').style.display = '';
+    }
+
+    // Sidebar meta
+    $('sidebar-foot').innerHTML = `<strong>${(d.sku_count||0).toLocaleString()}</strong> SKUs · <strong>${d.competitor_count||23}</strong> competitors<br><strong>${(d.snapshot_count||0).toLocaleString()}</strong> snapshots`;
+
+    // Sync status
+    if (d.last_run) {
+      const r = d.last_run;
+      $('sync-status').innerHTML = `Last sync <strong style="color:rgba(255,255,255,.65)">${ts(r.completed_at||r.started_at)}</strong> · ${r.skus_succeeded||0} SKUs`;
+    }
+
+    // Data note if review queue is large
+    if (reviewCount > 100) {
+      $('alerts-data-note').style.display = '';
+    }
+    $('alerts-sub').textContent = `${critCount} critical · ${m.warning||0} warning · ${m.oos||0} competitor OOS`;
+
+    // Priority strip
+    renderPriorityStrip(d.worst || []);
+
+    // Alert render
+    renderAlertList(d.alerts || []);
+    if (d.alerts?.length) $('alert-ts').textContent = `— ${d.alerts.length} active`;
+
+    // Worst table
+    renderWorstTable(d.worst || []);
+
+    // Chart
+    buildDistChart(m);
+
+    // Review note
+    const matched = d.matched_count || 0;
+    const total   = d.match_count   || 0;
+    $('review-confirmed').textContent = matched.toLocaleString();
+    $('review-total').textContent     = total.toLocaleString();
+    if (total > 0) $('review-note').style.display = '';
+
+  } catch (e) {
+    console.error('Dashboard load error:', e);
+    $('dash-alerts').innerHTML = `<div style="color:var(--red);font-size:11px;padding:8px">Failed to load: ${e.message}</div>`;
+  }
+}
+
+function renderPriorityStrip(rows) {
+  const strip = $('strip-items');
+  if (!rows.length) { strip.innerHTML = '<span style="color:rgba(255,255,255,.3);font-size:14px">No data yet</span>'; return; }
+  strip.innerHTML = rows.slice(0, 6).map(r => {
+    const diff = r.diff_pct_normalised ?? r.diff_pct;
+    const tierCls = diff <= -T.red ? '' : 'warn';
+    return `<div class="strip-item" onclick="go('sku-detail',{skuId:'${r.sku_id}',fromPanel:'alerts'})" title="Go to ${r.sku_id}">
+      <div class="si-name" style="font-size:12px;max-width:160px;white-space:normal;line-height:1.3">${(r.short_title||r.sku_id).slice(0,40)}</div>
+      <div class="si-val" style="font-size:14px;font-weight:600;margin:3px 0">${fmtPrice(r.our_price)}</div>
+      <div class="si-diff ${tierCls}" style="font-size:13px">${diffLabel(diff)} vs ${r.competitor_name||'competitor'}</div>
+    </div>`;
+  }).join('');
+}
+
+function setAlertTab(tab) {
+  alertTab = tab;
+  ['all','crit','warn','oos'].forEach(t => {
+    const b = $('atab-'+t);
+    if (b) b.style.background = t === tab ? 'var(--bg)' : '';
+  });
+  /* Re-render alert list filtered by tab */
+  if (window._lastAlerts) renderAlertList(window._lastAlerts);
+}
+
+function exportAlerts() {
+  const alerts = window._lastAlerts || [];
+  const filtered = alertTab === 'all' ? alerts
+    : alerts.filter(a => alertTab === 'crit' ? a.alert_type === 'critical'
+        : alertTab === 'warn' ? a.alert_type === 'warning'
+        : ['oos_us','oos_competitor','unavailable'].includes(a.alert_type));
+  if (!filtered.length) { alert('No alerts to export for the current filter.'); return; }
+  const rows = [['SKU ID','Product','Alert Type','Our Price','Their Price','Diff %','Competitor','Created']];
+  filtered.forEach(a => rows.push([
+    a.sku_id, (a.skus?.short_title||''), a.alert_type,
+    a.our_price||'', a.their_price||'', a.diff_pct||'',
+    (a.competitors?.name||''), a.created_at||''
+  ]));
+  const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url  = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download=`alerts-${alertTab}-${new Date().toISOString().slice(0,10)}.csv`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function renderAlertList(alerts) {
+  window._lastAlerts = alerts;  /* cache for tab switching and export */
+  const filtered = alertTab === 'all' ? alerts
+    : alertTab === 'crit' ? alerts.filter(a => a.alert_type === 'critical')
+    : alertTab === 'warn' ? alerts.filter(a => a.alert_type === 'warning')
+    : alerts.filter(a => ['oos_us','oos_competitor','unavailable'].includes(a.alert_type));
+
+  if (!filtered.length) {
+    $('dash-alerts').innerHTML = '<div style="color:var(--t2);padding:8px;text-align:center">No alerts for this filter</div>';
+    return;
+  }
+  const typeMap = {
+    critical: {cls:'ar-crit',icon:'ti-trending-up'},
+    warning:  {cls:'ar-warn',icon:'ti-trending-up'},
+    oos_us:   {cls:'ar-oos', icon:'ti-package-off'},
+    oos_competitor: {cls:'ar-oos',icon:'ti-package-off'},
+    unavailable: {cls:'ar-oos',icon:'ti-x'},
+    price_rise_them: {cls:'ar-good',icon:'ti-trending-down'},
+  };
+  $('dash-alerts').innerHTML = filtered.slice(0, 8).map(a => {
+    const {cls, icon} = typeMap[a.alert_type] || {cls:'ar-info',icon:'ti-bell'};
+    const sku  = a.skus || {};
+    const comp = a.competitors || {};
+    const borderColor = a.alert_type === 'critical' ? 'var(--red)' : a.alert_type === 'warning' ? 'var(--amb)' : 'var(--t3)';
+    const bg = a.alert_type === 'critical' ? 'var(--rb)' : a.alert_type === 'warning' ? 'var(--ab)' : 'var(--bg)';
+    return `<div style="border-left:3px solid ${borderColor};border-radius:0 var(--r) var(--r) 0;padding:10px 12px;background:${bg};border:1px solid var(--border);border-left-width:3px;margin-bottom:6px;cursor:pointer"
+      onclick="go('sku-detail',{skuId:'${a.sku_id}',fromPanel:'alerts'})">
+      <div style="display:flex;align-items:flex-start;gap:7px;margin-bottom:6px">
+        <i class="ti ${icon}" style="font-size:14px;flex-shrink:0;margin-top:1px"></i>
+        <span style="flex:1;font-weight:500;line-height:1.4;font-size:14px">${a.message}</span>
+        <span style="font-size:12px;opacity:.55;white-space:nowrap">${ts(a.created_at)}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        <div style="background:rgba(0,0,0,.04);border-radius:5px;padding:6px 8px">
+          <div style="font-size:12px;opacity:.6;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">Your product</div>
+          <a href="#sku/${a.sku_id}" onclick="event.preventDefault();event.stopPropagation();go('sku-detail',{skuId:'${a.sku_id}',fromPanel:'alerts'})"
+            style="color:var(--blu);font-weight:600;font-size:14px;text-decoration:none">${a.sku_id}</a>
+          <div style="font-size:12px;color:var(--t2);margin-top:1px">${sku.short_title||''}</div>
+          ${a.our_price ? `<div style="font-weight:600;margin-top:3px;font-size:14px">${fmtPrice(a.our_price)} <span class="vat vex">ex</span></div>` : ''}
+        </div>
+        <div style="background:rgba(0,0,0,.04);border-radius:5px;padding:6px 8px">
+          <div style="font-size:12px;opacity:.6;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">${comp.name||'Competitor'}</div>
+          ${a.their_price ? `<div style="font-weight:600;font-size:14px">${fmtPrice(a.their_price)}</div>` : '<div style="opacity:.5;font-size:13px">Price unknown</div>'}
+          ${a.diff_pct ? `<div style="margin-top:3px"><span class="${diffClass(a.diff_pct)}">${diffLabel(a.diff_pct)}</span></div>` : ''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderWorstTable(rows) {
+  if (!rows.length) {
+    $('dash-tbody').innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--t2);padding:20px">No data yet — run a sync first</td></tr>';
+    return;
+  }
+  $('dash-tbody').innerHTML = rows.map(r => {
+    const diff = r.diff_pct_normalised ?? r.diff_pct;
+    const raw  = r.competitor_price ? parseFloat(r.competitor_price) : null;
+    const vat  = r.competitor_vat || r.competitor_vat_default || 'unknown';
+    const ex   = raw ? normalisePrice(raw, vat) : null;
+    return `<tr class="${rowClass(diff)} tr-link" onclick="go('sku-detail',{skuId:'${r.sku_id}',fromPanel:'alerts'})">
+      <td>${skuLink(r)}</td>
+      <td style="color:var(--t2);max-width:160px;white-space:normal;line-height:1.35">${r.short_title||''}</td>
+      <td style="font-weight:500">${fmtPrice(r.our_price)}</td>
+      <td>${r.competitor_name||'—'}</td>
+      <td style="font-weight:500">${ex ? fmtPrice(ex) : '—'}</td>
+      <td>${vatPill('ex')} ${vatPill(vat)}</td>
+      <td><span class="${diffClass(diff)}">${diffLabel(diff)}</span></td>
+      <td>${stockBadge(r.availability)}</td>
+      <td style="color:var(--t3)">${ts(r.scraped_at)}</td>
+      <td>→</td>
+    </tr>`;
+  }).join('');
+}
+
+function buildDistChart(m) {
+  const ctx = $('distChart');
+  if (!ctx) return;
+  if (distChart) distChart.destroy();
+  distChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: ["Cheaper", "±Parity", `${T.amb}–${T.red}%`, `>${T.red}%`, "OOS"],
+      datasets: [{
+        data: [m.cheapest||0, m.parity||0, m.warning||0, m.critical||0, m.oos||0],
+        backgroundColor: ['#639922','#888780','#BA7517','#A32D2D','#B4B2A9'],
+        borderRadius: 3, borderSkipped: false
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.parsed.y} SKUs` } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#6b6a64', font: { size: 9 }, maxRotation: 0 } },
+        y: { grid: { color: 'rgba(0,0,0,.05)' }, ticks: { color: '#6b6a64', font: { size: 9 } } }
+      }
+    }
+  });
+}
+
+/* ════════════════════════════════════════
+   SKU TABLE
+════════════════════════════════════════ */
+async function loadSKUs() {
+  const q     = $('skuQ')?.value || '';
+  const diff  = $('fDiff')?.value || '';
+  const vat   = $('fVat')?.value  || '';
+  const stock = $('fStock')?.value || '';
+  let url = `/skus?page=${skuPage}&limit=${skuLimit}`;
+  if (q)     url += '&q='    + encodeURIComponent(q);
+  if (diff)  url += '&diff=' + diff;
+  if (vat)   url += '&vat='  + vat;
+  if (stock) url += '&stock='+ stock;
+
+  try {
+    const d = await authFetch(url);
+    const rows = d.data || [];
+    if (d.total !== undefined) skuTotal = d.total;
+    else if (rows.length < skuLimit) skuTotal = (skuPage-1)*skuLimit + rows.length;
+    $('skus-sub').textContent = `${skuTotal.toLocaleString()} SKUs`;
+
+    if (!rows.length) {
+      $('sku-tbody').innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--t2);padding:20px">No matches found</td></tr>';
+      $('sku-pagination').innerHTML = '';
+      return;
+    }
+
+    skusData = rows;
+    sortState.skus = { col: null, dir: 1 };
+    updateSortHeaders('skus-table', 'skus', null);
+    renderSkusRows(rows);
+
+    const from = (skuPage-1)*skuLimit+1, to = (skuPage-1)*skuLimit+rows.length;
+    $('sku-pagination').innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span>${from.toLocaleString()}–${to.toLocaleString()} of ${skuTotal.toLocaleString()}</span>
+        <select onchange="skuLimit=+this.value===0?999999:+this.value;skuPage=1;loadSKUs()" style="padding:3px 6px;border-radius:5px;border:1px solid var(--bm);background:var(--surface);font-size:11px">
+          <option value="50" ${skuLimit===50?'selected':''}>50 / page</option>
+          <option value="100" ${skuLimit===100?'selected':''}>100 / page</option>
+          <option value="250" ${skuLimit===250?'selected':''}>250 / page</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:6px">
+        ${skuPage>1?`<button class="btn sm" onclick="skuPage--;loadSKUs()">← Prev</button>`:''}
+        ${rows.length===skuLimit?`<button class="btn sm" onclick="skuPage++;loadSKUs()">Next →</button>`:''}
+      </div>`;
+  } catch (e) {
+    $('sku-tbody').innerHTML = `<tr><td colspan="9" style="color:var(--red);padding:8px">${e.message}</td></tr>`;
+  }
+}
+
+function filterSKUs() { skuPage = 1; loadSKUs(); }
+
+/* ════════════════════════════════════════
+   REVIEW QUEUE
+════════════════════════════════════════ */
+let reviewAllRows = [];
+
+async function loadReview() {
+  $('review-list').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+  try {
+    const d = await authFetch('/review?page=1&limit=500');
+    const matches = d.data || [];
+
+    /* Fetch latest snapshot price for every match in one query */
+    const matchIds = matches.map(m => `(sku_id.eq.${m.sku_id},competitor_id.eq.${m.competitor_id})`);
+    let snapMap = {};
+    if (matches.length) {
+      /* Supabase doesn't support tuple IN — fetch latest_snapshots for all relevant SKUs then filter */
+      const skuIds = [...new Set(matches.map(m => m.sku_id))];
+      const { data: snaps } = await sb.from('latest_snapshots')
+        .select('sku_id,competitor_id,competitor_price,competitor_vat,availability')
+        .in('sku_id', skuIds);
+      (snaps || []).forEach(s => { snapMap[`${s.sku_id}__${s.competitor_id}`] = s; });
+    }
+
+    /* Merge snapshot data into each match row */
+    reviewAllRows = matches.map(m => ({
+      ...m,
+      _snap: snapMap[`${m.sku_id}__${m.competitor_id}`] || null,
+    }));
+
+    /* Build competitor dropdown from ALL active competitors */
+    const cf = $('review-comp-filter');
+    if (cf && cf.options.length === 1) {
+      const { data: allComps } = await sb.from('competitors').select('id,name').eq('active',true).order('name');
+      (allComps || []).forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.id; opt.textContent = c.name;
+        cf.appendChild(opt);
+      });
+    }
+    filterReview();
+  } catch (e) {
+    $('review-list').innerHTML = `<div style="color:var(--red);padding:8px">${e.message}</div>`;
+  }
+}
+
+function filterReview() {
+  const q    = ($('review-search')?.value || '').toLowerCase().trim();
+  const comp = $('review-comp-filter')?.value || '';
+
+  let rows = reviewAllRows;
+  if (q) {
+    rows = rows.filter(r =>
+      r.sku_id?.toLowerCase().includes(q) ||
+      (r.skus?.short_title||'').toLowerCase().includes(q) ||
+      (r.competitors?.name||'').toLowerCase().includes(q) ||
+      (r.competitor_title||'').toLowerCase().includes(q)
+    );
+  }
+  if (comp) rows = rows.filter(r => String(r.competitor_id) === String(comp));
+
+  const total   = reviewAllRows.length;
+  const showing = rows.length;
+  $('review-sub').textContent = (q || comp)
+    ? `${showing} of ${total} matches (filtered)`
+    : `${total} matches awaiting confirmation`;
+
+  if (!rows.length) {
+    $('review-list').innerHTML = '<div style="text-align:center;color:var(--t2);padding:40px;font-size:12px">'
+      + (q || comp
+          ? '<i class="ti ti-search" style="font-size:24px;display:block;margin-bottom:8px;opacity:.3"></i>No matches for that filter'
+          : '<i class="ti ti-circle-check" style="font-size:24px;display:block;margin-bottom:8px;color:var(--grn)"></i>Queue is empty')
+      + '</div>';
+    $('review-pagination').innerHTML = '';
+    return;
+  }
+
+  const lim   = reviewLimit === 999999 ? rows.length : reviewLimit;
+  const start = (reviewPage - 1) * lim;
+  const page  = rows.slice(start, start + lim);
+  const from  = start + 1;
+  const to    = start + page.length;
+
+  $('review-list').innerHTML = page.map(r => {
+    const sku      = r.skus || {};
+    const comp     = r.competitors || {};
+    const snap     = r._snap || {};
+    const ourUrl   = sku.product_url || (sku.slug ? `https://www.ukpos.com/${sku.slug}?vat=0` : '#');
+    const ourImg   = sku.image_url || '';
+    const compImg  = r.competitor_image_url
+      ? r.competitor_image_url
+      : `https://www.google.com/s2/favicons?domain=${comp.domain||''}&sz=64`;
+    const ourPrice = sku.price_ex_vat ? parseFloat(sku.price_ex_vat) : null;
+    const theirRaw = snap.competitor_price ? parseFloat(snap.competitor_price) : null;
+    const theirEx  = theirRaw ? normalisePrice(theirRaw, snap.competitor_vat || comp.vat_status || 'unknown') : null;
+    const compVat  = snap.competitor_vat || comp.vat_status || 'unknown';
+
+    return `<div class="rev-card" id="rev-${r.id}">
+
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:6px">
+        <div style="display:flex;align-items:center;gap:8px">
+          ${confWidget(r.confidence)}
+          ${r.notes ? `<span style="font-size:10px;color:var(--t2);background:var(--bb);padding:2px 7px;border-radius:10px"><i class="ti ti-info-circle" style="font-size:10px"></i> ${r.notes}</span>` : ''}
+        </div>
+        <div style="font-size:10px;color:var(--t3)">${r.match_method||''}</div>
+      </div>
+
+      <div class="rev-pair">
+
+        <!-- UKPOS side -->
+        <div class="rev-side">
+          <div class="rs-label" style="color:var(--blu)">UKPOS</div>
+          <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px">
+            <div style="width:56px;height:56px;border:1px solid var(--border);border-radius:6px;overflow:hidden;flex-shrink:0;background:var(--bb);display:flex;align-items:center;justify-content:center">
+              ${ourImg
+                ? `<img src="${ourImg}" style="width:100%;height:100%;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+                : ''}<i class="ti ti-photo" style="font-size:20px;color:var(--t3);${ourImg?'display:none':''}"></i>
+            </div>
+            <div style="flex:1;min-width:0">
+              <a href="#sku/${r.sku_id}" onclick="event.preventDefault();go('sku-detail',{skuId:'${r.sku_id}',fromPanel:'review'})" style="font-family:'SF Mono',monospace;font-size:11px;color:var(--blu);text-decoration:none">${r.sku_id}</a>
+              <div class="rs-name" style="margin-top:2px">${sku.short_title||r.sku_id}</div>
+            </div>
+          </div>
+          <a class="rs-url" href="${ourUrl}" target="_blank" rel="noopener" title="${ourUrl}">
+            <i class="ti ti-external-link" style="font-size:10px"></i> ${ourUrl.replace('https://','').slice(0,55)}
+          </a>
+          <div class="rs-price" style="margin-top:6px">
+            ${ourPrice ? `<strong>${fmtPrice(ourPrice)}</strong> <span class="vat vex">ex-VAT</span>` : '<span style="color:var(--t3)">No price</span>'}
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:center;justify-content:center;padding:0 8px;color:var(--t3);font-size:18px">⇄</div>
+
+        <!-- Competitor side -->
+        <div class="rev-side">
+          <div class="rs-label" style="color:var(--amb)">${comp.name||'Competitor'}</div>
+          <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px">
+            <div style="width:56px;height:56px;border:1px solid var(--border);border-radius:6px;overflow:hidden;flex-shrink:0;background:var(--bb);display:flex;align-items:center;justify-content:center">
+              ${r.competitor_image_url
+                ? `<img src="${r.competitor_image_url}" style="width:100%;height:100%;object-fit:contain" onerror="this.src='https://www.google.com/s2/favicons?domain=${comp.domain||''}&sz=64';this.style.width='32px';this.style.height='32px'">`
+                : `<img src="${compImg}" style="width:32px;height:32px;object-fit:contain" onerror="this.style.display='none'">`}
+            </div>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:11px;color:var(--t2)">${comp.domain||''}</div>
+              <div class="rs-name" style="margin-top:2px">${r.competitor_title||'—'}</div>
+            </div>
+          </div>
+          <a class="rs-url" href="${r.competitor_url||'#'}" target="_blank" rel="noopener" title="${r.competitor_url||''}">
+            <i class="ti ti-external-link" style="font-size:10px"></i> ${(r.competitor_url||'No URL set').replace('https://','').slice(0,55)}
+          </a>
+          <div class="rs-price" style="margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            ${theirEx
+              ? `<strong>${fmtPrice(theirEx)}</strong> ${vatPill(compVat)}`
+              : `<span style="color:var(--t3)">Not yet scraped</span> ${vatPill(compVat)}`}
+            ${snap.availability && snap.availability !== 'in_stock' ? stockBadge(snap.availability) : ''}
+          </div>
+        </div>
+
+      </div>
+
+      <div id="rev-actions-${r.id}" style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
+        <button class="btn sm prim" onclick="reviewDecision(${r.id},'approve',this)"><i class="ti ti-check"></i> Confirm match</button>
+        <button class="btn sm danger" onclick="showCorrectUrl(${r.id})"><i class="ti ti-x"></i> Reject</button>
+        <button class="btn sm ghost" onclick="skipReview(${r.id})"><i class="ti ti-skip-forward"></i> Skip</button>
+      </div>
+      <div id="rev-url-wrap-${r.id}" style="display:none;margin-top:8px">
+        <div style="font-size:11px;color:var(--t2);margin-bottom:6px">Paste the correct URL for this product (optional — leave blank to reject without one):</div>
+        <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+          <input id="rev-url-${r.id}" type="text" placeholder="https://competitor.com/correct-product-page"
+            autocomplete="new-password" spellcheck="false"
+            style="flex:1;min-width:200px;padding:6px 10px;font-size:11px;border:1px solid var(--bm);border-radius:var(--r);font-family:inherit;outline:none">
+          <button class="btn sm prim" onclick="saveCorrectUrl(${r.id},this)"><i class="ti ti-device-floppy"></i> Save URL &amp; reject</button>
+          <button class="btn sm danger" onclick="reviewDecision(${r.id},'reject',this)">Reject without URL</button>
+          <button class="btn sm ghost" onclick="cancelReject(${r.id})">Cancel</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  $('review-pagination').innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span>${from}–${to} of ${showing}${q||comp?' (filtered)':''}</span>
+      <select onchange="reviewLimit=+this.value===0?999999:+this.value;reviewPage=1;filterReview()" style="padding:3px 6px;border-radius:5px;border:1px solid var(--bm);background:var(--surface);font-size:11px">
+        <option value="50">50/page</option><option value="100">100/page</option><option value="250">250/page</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:6px">
+      ${reviewPage>1?`<button class="btn sm" onclick="reviewPage--;filterReview()">← Prev</button>`:''}
+      ${to<showing?`<button class="btn sm" onclick="reviewPage++;filterReview()">Next →</button>`:''}
+    </div>`;
+}
+
+async function reviewDecision(matchId, decision, btn) {
+  btn.disabled = true;
+  try {
+    await authPost(`/review/${matchId}`, { decision });
+    const row = $(`rev-${matchId}`);
+    if (row) { row.style.opacity = '.4'; row.style.pointerEvents = 'none'; btn.textContent = decision === 'approve' ? '✓ Confirmed' : 'Rejected'; }
+    loadDashboard();
+  } catch (e) { btn.disabled = false; alert(e.message); }
+}
+
+function skipReview(matchId) {
+  const row = $(`rev-${matchId}`);
+  if (row) row.style.display = 'none';
+}
+
+function showCorrectUrl(matchId) {
+  $(`rev-actions-${matchId}`).style.display = 'none';
+  $(`rev-url-wrap-${matchId}`).style.display = 'block';
+  const input = $(`rev-url-${matchId}`);
+  if (input) input.focus();
+}
+
+function cancelReject(matchId) {
+  $(`rev-actions-${matchId}`).style.display = 'flex';
+  $(`rev-url-wrap-${matchId}`).style.display = 'none';
+}
+
+async function saveCorrectUrl(matchId, btn) {
+  const input  = $(`rev-url-${matchId}`);
+  const newUrl = (input?.value || '').trim();
+  if (!newUrl || !newUrl.startsWith('http')) {
+    input.style.borderColor = 'var(--red)';
+    input.placeholder = 'Must be a valid URL starting with https://…';
+    return;
+  }
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Saving…';
+  try {
+    /* Update the competitor_matches URL then reject */
+    const { error } = await sb.from('competitor_matches')
+      .update({ competitor_url: newUrl, match_status: 'rejected', human_reviewed: true, reviewed_at: new Date().toISOString() })
+      .eq('id', matchId);
+    if (error) throw new Error(error.message);
+    const row = $(`rev-${matchId}`);
+    if (row) {
+      row.style.opacity = '.45';
+      row.style.pointerEvents = 'none';
+      $(`rev-url-wrap-${matchId}`).innerHTML =
+        `<div style="color:var(--grn);font-size:11px;padding:4px 0"><i class="ti ti-check"></i> URL saved — will be scraped on next run</div>`;
+    }
+    /* Refresh local dataset */
+    reviewAllRows = reviewAllRows.filter(r => r.id !== matchId);
+    loadDashboard();
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    alert('Save failed: ' + e.message);
+  }
+}
+
+/* ════════════════════════════════════════
+   BY CATEGORY
+════════════════════════════════════════ */
+let allSkus = [], catL4 = null, catL5 = null;
+
+async function loadByCategory() {
+  if (!allSkus.length) {
+    const { data } = await sb.from('skus').select('sku_id,short_title,price_ex_vat,product_url,availability,cat_l4,cat_l5,image_url,slug').eq('active',true).order('sku_id');
+    allSkus = data || [];
+  }
+  catL4 = null; catL5 = null;
+  renderCategoryLevel();
+}
+
+let catPage = 1;
+const catPageSize = 50;
+
+function renderCategoryLevel() {
+  const sub     = $('bycat-sub');
+  const content = $('bycat-content');
+
+  if (!catL4) {
+    /* Top level — category tiles */
+    catPage = 1;
+    sub.textContent = `${allSkus.length.toLocaleString()} SKUs across ${new Set(allSkus.map(s=>s.cat_l4).filter(Boolean)).size} categories`;
+    const counts = {};
+    allSkus.forEach(s => { if (s.cat_l4) counts[s.cat_l4] = (counts[s.cat_l4]||0) + 1; });
+    const cats = Object.entries(counts).sort((a,b)=>a[0].localeCompare(b[0]));
+    content.innerHTML = `<div class="cat-grid">${cats.map(([name, count]) => {
+      const safe = name.replace(/'/g,"\\'");
+      return `<div class="cat-tile" onclick="selectCat4('${safe}')">
+        <div style="font-weight:500;font-size:14px;margin-bottom:3px">${name}</div>
+        <div class="ct-count">${count} SKUs</div>
+      </div>`;
+    }).join('')}</div>`;
+    return;
+  }
+
+  /* L4 selected — show subcategory tiles if multiple L5s exist, plus table below */
+  const skusInCat = allSkus.filter(s => s.cat_l4 === catL4 && (!catL5 || (s.cat_l5||'(other)') === catL5));
+  const sub5s = [...new Set(allSkus.filter(s=>s.cat_l4===catL4&&s.cat_l5).map(s=>s.cat_l5))].sort();
+
+  const breadcrumb = `
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+      <button class="btn sm ghost" onclick="catL4=null;catL5=null;catPage=1;renderCategoryLevel()"><i class="ti ti-arrow-left"></i> All categories</button>
+      <span style="color:var(--t3)">/</span>
+      ${catL5
+        ? `<span onclick="catL5=null;catPage=1;renderCategoryLevel()" style="cursor:pointer;color:var(--blu)">${catL4}</span>
+           <span style="color:var(--t3)">/</span>
+           <span style="font-weight:500">${catL5}</span>`
+        : `<span style="font-weight:500">${catL4}</span>`}
+    </div>`;
+
+  /* Subcategory filter tiles (only shown at L4 level when multiple L5s exist) */
+  let subTiles = '';
+  if (!catL5 && sub5s.length > 1) {
+    const counts = {};
+    allSkus.filter(s=>s.cat_l4===catL4).forEach(s=>{ const k=s.cat_l5||'(other)'; counts[k]=(counts[k]||0)+1; });
+    subTiles = `<div class="cat-grid" style="margin-bottom:16px">${
+      Object.entries(counts).sort((a,b)=>a[0].localeCompare(b[0])).map(([name,count]) => {
+        const safe = name.replace(/'/g,"\\'");
+        return `<div class="cat-tile" onclick="selectCat5('${safe}')">
+          <div style="font-weight:500;font-size:14px;margin-bottom:3px">${name}</div>
+          <div class="ct-count">${count} SKUs</div>
+        </div>`;
+      }).join('')
+    }</div>`;
+  }
+
+  /* Paginated SKU table */
+  sub.textContent = `${skusInCat.length} SKUs${catL5 ? ' in '+catL5 : ' in '+catL4}`;
+  const start  = (catPage - 1) * catPageSize;
+  const page   = skusInCat.slice(start, start + catPageSize);
+  const from   = start + 1;
+  const to     = start + page.length;
+
+  const table = `
+    <div style="font-size:13px;color:var(--t2);margin-bottom:8px">${from}–${to} of ${skusInCat.length} SKUs</div>
+    <div class="card-0p">
+      <table><thead><tr>
+        <th style="border-left:3px solid transparent">SKU ID</th>
+        <th>Product</th>
+        <th>Our price</th>
+        <th>Stock</th>
+        <th style="width:50px"></th>
+      </tr></thead><tbody>${page.map(s => `
+        <tr class="tr-link" onclick="go('sku-detail',{skuId:'${s.sku_id}',fromPanel:'bycat'})">
+          <td><span style="font-family:'SF Mono',monospace;color:var(--blu)">${s.sku_id}</span></td>
+          <td style="color:var(--text)">${s.short_title||''}</td>
+          <td style="font-weight:500">${fmtPrice(s.price_ex_vat)} <span class="vat vex">ex</span></td>
+          <td>${stockBadge(s.availability)}</td>
+          <td>→</td>
+        </tr>`).join('')}
+      </tbody></table>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;font-size:13px;color:var(--t2)">
+      <span>${from}–${to} of ${skusInCat.length}</span>
+      <div style="display:flex;gap:6px">
+        ${catPage>1 ? `<button class="btn sm" onclick="catPage--;renderCategoryLevel()">← Prev</button>` : ''}
+        ${to<skusInCat.length ? `<button class="btn sm" onclick="catPage++;renderCategoryLevel()">Next →</button>` : ''}
+      </div>
+    </div>`;
+
+  content.innerHTML = breadcrumb + subTiles + table;
+}
+
+function selectCat4(name) { catL4 = name; catL5 = null; catPage = 1; renderCategoryLevel(); }
+function selectCat5(name) { catL5 = name; catPage = 1; renderCategoryLevel(); }
+
+/* ════════════════════════════════════════
+   BY COMPETITOR (list)
+════════════════════════════════════════ */
+async function loadByCompetitor() {
+  try {
+    /* Fetch competitors and snapshot stats in parallel */
+    const [{ data: comps }, { data: snaps }] = await Promise.all([
+      sb.from('competitors').select('id,name,domain,vat_status,active').eq('active',true).order('name'),
+      sb.from('latest_snapshots').select('competitor_id,diff_pct_normalised,diff_pct,competitor_price').not('competitor_price','is',null)
+    ]);
+
+    if (!comps?.length) {
+      $('bycomp-tbody').innerHTML = '<tr><td colspan="8" style="padding:20px;text-align:center;color:var(--t2)">No competitors found</td></tr>';
+      return;
+    }
+
+    /* Aggregate stats per competitor using live thresholds */
+    const stats = {};
+    (snaps || []).forEach(s => {
+      const cid  = s.competitor_id;
+      const diff = s.diff_pct_normalised ?? s.diff_pct ?? 0;
+      if (!stats[cid]) stats[cid] = { matched:0, critical:0, warning:0, cheaper:0, parity:0 };
+      stats[cid].matched++;
+      if      (diff <= -T.red)               stats[cid].critical++;
+      else if (diff <= -T.amb)               stats[cid].warning++;
+      else if (diff >=  T.par)               stats[cid].cheaper++;
+      else                                   stats[cid].parity++;
+    });
+
+    bycompData = comps.map(c => ({
+      ...c,
+      _matched:  stats[c.id]?.matched  ?? 0,
+      _critical: stats[c.id]?.critical ?? 0,
+      _warning:  stats[c.id]?.warning  ?? 0,
+      _cheaper:  stats[c.id]?.cheaper  ?? 0,
+      _parity:   stats[c.id]?.parity   ?? 0,
+    }));
+
+    sortState.bycomp = { col: null, dir: 1 };
+    renderByCompRows(bycompData);
+    updateSortHeaders('bycomp-table', 'bycomp', null);
+  } catch (e) {
+    $('bycomp-tbody').innerHTML = `<tr><td colspan="8" style="color:var(--red);padding:8px">${e.message}</td></tr>`;
+  }
+}
+
+/* ════════════════════════════════════════
+   COMPETITOR DETAIL PAGE
+════════════════════════════════════════ */
+async function loadCompDetail(opts) {
+  currentCompId   = opts.compId;
+  currentCompName = opts.compName;
+  currentCompSlug = opts.compSlug || slugify(opts.compName||'');
+  const domain    = opts.compDomain || '';
+  const vat       = opts.compVat || 'unknown';
+
+  $('comp-detail-url').textContent = `pricewatch.ukpos.com/competitor/${currentCompSlug}`;
+  $('comp-detail-name').textContent = currentCompName;
+  $('comp-detail-sub').textContent = `${domain} · ${vat}-VAT`;
+  history.replaceState(null, '', '#competitor/' + currentCompSlug);
+
+  buildLegend('comp-detail-legend');
+
+  // Fetch snapshots for this competitor
+  $('comp-detail-stats').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+  $('comp-sku-grid').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+  $('comp-sku-tbody').innerHTML = '<tr><td colspan="8"><div class="loading"><span class="spinner"></span></div></td></tr>';
+
+  try {
+    const { data: snaps } = await sb.from('latest_snapshots').select('*').eq('competitor_id', currentCompId).not('competitor_price','is',null).order('diff_pct_normalised', {ascending:true, nullsFirst:false});
+    compSkusAll = snaps || [];
+    compSkusFiltered = [...compSkusAll];
+    sortState.compSku = { col: null, dir: 1 };
+    updateSortHeaders('comp-sku-table', 'compSku', null);
+    renderCompDetail();
+  } catch (e) {
+    $('comp-sku-grid').innerHTML = `<div style="color:var(--red);padding:8px">${e.message}</div>`;
+  }
+
+  // Set view from preference
+  const defaultGrid = $('pref-default-grid')?.checked !== false;
+  setCompView(defaultGrid ? 'grid' : 'list');
+}
+
+function renderCompDetail() {
+  const skus = compSkusFiltered;
+  let crit=0, warn=0, par=0, good=0;
+  skus.forEach(s => {
+    const t = getTier(s.diff_pct_normalised??s.diff_pct);
+    if(t==='r')crit++; else if(t==='a')warn++; else if(t==='g')good++; else par++;
+  });
+
+  $('comp-detail-stats').innerHTML = `
+    <div class="comp-stat"><div class="cs-val">${skus.length}</div><div class="cs-label">Matched SKUs</div></div>
+    <div class="comp-stat"><div class="cs-val" style="color:var(--red)">${crit}</div><div class="cs-label">Critical</div></div>
+    <div class="comp-stat"><div class="cs-val" style="color:var(--amb)">${warn}</div><div class="cs-label">Warning</div></div>
+    <div class="comp-stat"><div class="cs-val" style="color:var(--t2)">${par}</div><div class="cs-label">Parity</div></div>
+    <div class="comp-stat"><div class="cs-val" style="color:var(--grn)">${good}</div><div class="cs-label">We're cheaper</div></div>`;
+
+  // GRID
+  $('comp-sku-grid').innerHTML = skus.length ? skus.map(s => {
+    const diff = s.diff_pct_normalised ?? s.diff_pct;
+    const tier = getTier(diff);
+    const raw  = s.competitor_price ? parseFloat(s.competitor_price) : null;
+    const vat  = s.competitor_vat || s.competitor_vat_default || 'unknown';
+    const ex   = raw ? normalisePrice(raw, vat) : null;
+    return `<div class="sku-card tier-${tier}" onclick="openDrawer('${s.sku_id}','${(s.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(s.our_price)}','comp-detail')">
+      <div class="sc-id">${s.sku_id}</div>
+      <div class="sc-name">${s.short_title||''}</div>
+      <div class="sc-prices"><span>Ours: ${fmtPrice(s.our_price)}</span><span>Theirs: ${ex?fmtPrice(ex):'—'}</span></div>
+      <div class="sc-diff">${diffLabel(diff)}</div>
+      ${s.availability==='out_of_stock'?'<div class="sc-oos">OOS at competitor</div>':''}
+    </div>`;
+  }).join('') : '<div style="color:var(--t2);font-size:12px;padding:20px;text-align:center">No matched SKUs found</div>';
+
+  // LIST
+  $('comp-sku-tbody').innerHTML = skus.length ? skus.map(s => {
+    const diff = s.diff_pct_normalised ?? s.diff_pct;
+    const raw  = s.competitor_price ? parseFloat(s.competitor_price) : null;
+    const vat  = s.competitor_vat || s.competitor_vat_default || 'unknown';
+    const ex   = raw ? normalisePrice(raw, vat) : null;
+    return `<tr class="${rowClass(diff)} tr-link" onclick="openDrawer('${s.sku_id}','${(s.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(s.our_price)}','comp-detail')">
+      <td><span style="font-family:'SF Mono',monospace;font-size:11px;color:var(--blu)">${s.sku_id}</span></td>
+      <td style="font-size:11px;color:var(--t2);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.short_title||''}</td>
+      <td style="font-weight:500">${fmtPrice(s.our_price)}</td>
+      <td style="font-weight:500">${ex?fmtPrice(ex):'—'}</td>
+      <td><span class="${diffClass(diff)}">${diffLabel(diff)}</span></td>
+      <td>${stockBadge(s.availability)}</td>
+      <td style="font-size:10px;color:var(--t3)">${ts(s.scraped_at)}</td>
+      <td><button class="btn sm ghost" onclick="event.stopPropagation();openDrawer('${s.sku_id}','${(s.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(s.our_price)}','comp-detail')">→</button></td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="8" style="text-align:center;color:var(--t2);padding:20px">No matched SKUs</td></tr>';
+}
+
+function setCompView(mode) {
+  compViewMode = mode;
+  $('comp-grid-wrap').style.display = mode === 'grid' ? '' : 'none';
+  $('comp-list-wrap').style.display = mode === 'list' ? '' : 'none';
+  $('tog-grid').classList.toggle('active', mode === 'grid');
+  $('tog-list').classList.toggle('active', mode === 'list');
+}
+
+function filterCompSKUs(q) {
+  compSkusFiltered = q
+    ? compSkusAll.filter(s => s.sku_id.toLowerCase().includes(q.toLowerCase()) || (s.short_title||'').toLowerCase().includes(q.toLowerCase()))
+    : [...compSkusAll];
+  renderCompDetail();
+}
+
+/* ════════════════════════════════════════
+   SKU DETAIL PAGE
+════════════════════════════════════════ */
+async function loadSkuDetail(opts) {
+  currentSkuId = opts.skuId;
+  $('sku-detail-url').textContent = `pricewatch.ukpos.com/sku/${currentSkuId}`;
+  history.replaceState(null, '', '#sku/' + currentSkuId);
+  buildLegend('sku-detail-legend');
+
+  $('sku-hero-content').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+  $('sku-comp-tbody').innerHTML = '<tr><td colspan="8"><div class="loading"><span class="spinner"></span></div></td></tr>';
+
+  // Set back button context
+  const backBtn = $('sku-detail-back');
+  if (opts.fromPanel === 'comp-detail' && currentCompName) {
+    backBtn.innerHTML = `<i class="ti ti-arrow-left"></i> ${currentCompName}`;
+    backBtn.onclick = () => go('comp-detail', { compId: currentCompId, compName: currentCompName, compSlug: currentCompSlug });
+  } else if (opts.fromPanel === 'bycat') {
+    backBtn.innerHTML = '<i class="ti ti-arrow-left"></i> Category';
+    backBtn.onclick = () => go('bycat');
+  } else {
+    backBtn.innerHTML = '<i class="ti ti-arrow-left"></i> All SKUs';
+    backBtn.onclick = () => go('skus');
+  }
+
+  try {
+    // Fetch SKU info
+    const { data: skuArr } = await sb.from('skus').select('*').eq('sku_id', currentSkuId).limit(1);
+    const sku = skuArr?.[0];
+    if (!sku) throw new Error('SKU not found');
+
+    const ourPriceEx  = parseFloat(sku.price_ex_vat || 0);
+    const ourPriceInc = ourPriceEx * 1.2;
+    const unitQty     = sku.unit_qty && sku.unit_qty > 1 ? sku.unit_qty : null;
+    const ourPerUnit  = unitQty ? ourPriceEx / unitQty : null;
+    const siteUrl = sku.product_url || (sku.slug ? `https://www.ukpos.com/${sku.slug}?vat=0` : '#');
+    $('sku-site-link').href = siteUrl;
+
+    $('sku-hero-content').innerHTML = `
+      <div class="sku-img"><i class="ti ti-photo" style="font-size:24px"></i></div>
+      <div style="flex:1">
+        <div class="sku-id-badge">${sku.sku_id}</div>
+        <div class="sku-name">${sku.short_title||sku.sku_id}</div>
+        <div style="display:flex;align-items:baseline;gap:8px;margin:4px 0;flex-wrap:wrap">
+          <span class="sku-price-main">${fmtPrice(ourPriceEx)}</span>
+          <span class="vat vex">ex-VAT</span>
+          <span style="font-size:12px;color:var(--t2)">${fmtPrice(ourPriceInc)} inc-VAT</span>
+          ${ourPerUnit ? `<span style="font-size:12px;background:var(--ab);color:var(--amb);border-radius:4px;padding:1px 7px;font-weight:500">${fmtPrice(ourPerUnit)} per unit (pack of ${unitQty})</span>` : ''}
+        </div>
+        <div class="sku-attrs">
+          ${sku.category ? `<span class="sku-attr">${sku.category}</span>` : ''}
+          ${sku.material ? `<span class="sku-attr">${sku.material}</span>` : ''}
+          ${sku.color    ? `<span class="sku-attr">${sku.color}</span>`    : ''}
+          ${unitQty      ? `<span class="sku-attr" style="background:var(--ab);color:var(--amb);border-color:var(--abd)">Pack of ${unitQty}</span>` : ''}
+          ${sku.mpn      ? `<span class="sku-attr">MPN: ${sku.mpn}</span>` : ''}
+        </div>
+      </div>`;
+
+    // Fetch competitor snapshots for this SKU — include unit_qty via skus join
+    const { data: snaps } = await sb.from('latest_snapshots').select('*,skus(unit_qty)').eq('sku_id', currentSkuId).order('diff_pct_normalised', {ascending:true, nullsFirst:false});
+    const rows = snaps || [];
+
+    if (!rows.length) {
+      $('sku-comp-tbody').innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--t2);padding:20px">No competitor data yet</td></tr>';
+      return;
+    }
+
+    skuCompData = rows;
+    sortState.skuComp = { col: null, dir: 1 };
+    updateSortHeaders('sku-comp-table', 'skuComp', null);
+    renderSkuCompRows(rows);
+
+  } catch (e) {
+    $('sku-hero-content').innerHTML = `<div style="color:var(--red);padding:8px">${e.message}</div>`;
+  }
+}
+
+/* ════════════════════════════════════════
+   DRAWER
+════════════════════════════════════════ */
+async function openDrawer(skuId, name, price, fromPanel) {
+  drawerSkuId  = skuId;
+  drawerFromPanel = fromPanel;
+  $('dr-id').textContent    = skuId;
+  $('dr-name').textContent  = name;
+  $('dr-price').textContent = price;
+
+  // Full page buttons
+  const fpHandler = () => { closeDrawer(); go('sku-detail', { skuId, fromPanel }); };
+  $('dr-fullpage-btn').onclick  = fpHandler;
+  $('dr-fullpage-btn2').onclick = fpHandler;
+  $('dr-scrape-btn').onclick = () => lookupSKU(skuId, $('dr-scrape-btn'));
+  $('dr-review-btn').onclick = () => { closeDrawer(); go('review'); };
+
+  $('drawer-overlay').classList.add('open');
+  $('sku-drawer').classList.add('open');
+  $('dr-rows').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+
+  try {
+    const { data: snaps } = await sb.from('latest_snapshots').select('*').eq('sku_id', skuId).order('diff_pct_normalised', {ascending:true, nullsFirst:false});
+    const rows = snaps || [];
+    if (!rows.length) {
+      $('dr-rows').innerHTML = '<div style="color:var(--t2);font-size:12px;padding:8px">No competitor data yet — run a scrape first.</div>';
+      return;
+    }
+
+    // Build league table: insert UKPOS among competitors ranked by ex-VAT price ascending
+    const ourPriceEx = rows[0]?.our_price ? parseFloat(rows[0].our_price) : null;
+
+    const entries = rows
+      .filter(r => r.competitor_price)
+      .map(r => {
+        const raw = parseFloat(r.competitor_price);
+        const vat = r.competitor_vat || r.competitor_vat_default || 'unknown';
+        const ex  = normalisePrice(raw, vat);
+        return { name: r.competitor_name||'—', domain: r.competitor_domain||'', vat, ex, raw, diff: r.diff_pct_normalised??r.diff_pct, avail: r.availability, isUs: false };
+      });
+
+    if (ourPriceEx) {
+      entries.push({ name: 'UKPOS', domain: 'ukpos.com', vat: 'ex', ex: ourPriceEx, raw: ourPriceEx, diff: 0, avail: 'in_stock', isUs: true });
+    }
+
+    // Sort by ex-VAT price ascending (cheapest first = rank 1)
+    entries.sort((a, b) => (a.ex||999999) - (b.ex||999999));
+
+    $('dr-rows').innerHTML = entries.map((e, i) => {
+      const rank = i + 1;
+      const tier = e.isUs ? 'us' : getTier(e.diff);
+      const tierColors = {
+        r: { bg: 'var(--rb)', border: 'var(--rbd)', txt: 'var(--red)' },
+        a: { bg: 'var(--ab)', border: 'var(--abd)', txt: 'var(--amb)' },
+        g: { bg: 'var(--gb)', border: 'var(--gbd)', txt: 'var(--grn)' },
+        p: { bg: 'var(--bg)', border: 'var(--border)', txt: 'var(--t2)' },
+        us:{ bg: '#111110',   border: 'var(--orange)', txt: '#fff' },
+      };
+      const c = tierColors[tier] || tierColors.p;
+      const rankColor = rank === 1 ? '#f59e0b' : e.isUs ? 'rgba(255,255,255,.5)' : 'var(--t3)';
+      const diffHtml = e.isUs
+        ? `<span style="font-size:10px;color:rgba(255,255,255,.4)">our price</span>`
+        : `<span class="${diffClass(e.diff)}" style="${tier==='us'?'color:#fff':''}">${diffLabel(e.diff)}</span>`;
+      const oosHtml = e.avail === 'out_of_stock' ? `<span style="font-size:10px;opacity:.55;margin-top:2px;display:block">OOS</span>` : '';
+
+      return `<div style="display:grid;grid-template-columns:28px 1fr auto;align-items:center;gap:10px;padding:9px 12px;border-radius:var(--r);border:1px solid ${c.border};background:${c.bg};margin-bottom:6px${e.isUs?';box-shadow:0 0 0 2px var(--orange)':''}">
+        <div style="font-size:13px;font-weight:700;color:${rankColor};text-align:center;line-height:1">${rank}</div>
+        <div>
+          <div style="font-weight:${e.isUs?'700':'500'};font-size:12px;color:${e.isUs?'#fff':'var(--text)'}">${e.name}</div>
+          <div style="font-size:10px;color:${e.isUs?'rgba(255,255,255,.45)':'var(--t2)'}">${e.domain} ${e.isUs?'':vatPill(e.vat)}</div>
+          ${oosHtml}
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:16px;font-weight:600;color:${e.isUs?'#fff':'var(--text)'}">${e.ex ? fmtPrice(e.ex) : '—'}</div>
+          <div style="margin-top:2px">${diffHtml}</div>
+        </div>
+      </div>`;
+    }).join('');
+
+  } catch (e) {
+    $('dr-rows').innerHTML = `<div style="color:var(--red);font-size:12px;padding:8px">${e.message}</div>`;
+  }
+}
+
+function closeDrawer() {
+  $('drawer-overlay').classList.remove('open');
+  $('sku-drawer').classList.remove('open');
+}
+
+/* ════════════════════════════════════════
+   SCHEDULE + RUN HISTORY
+════════════════════════════════════════ */
+async function loadRuns() {
+  try {
+    const { data: rows } = await sb.from('sync_runs')
+      .select('*')
+      .order('started_at', {ascending: false})
+      .limit(20);
+
+    if (!rows?.length) {
+      $('run-history').innerHTML = '<div style="color:var(--t2);padding:8px">No runs yet.</div>';
+      return;
+    }
+
+    /* ── Summary cards from most recent completed run ── */
+    const last = rows.find(r => r.status === 'complete') || rows[0];
+    const dur  = last.completed_at
+      ? Math.round((new Date(last.completed_at) - new Date(last.started_at)) / 60000)
+      : null;
+
+    const cards = [
+      { label: 'Pairs attempted',   val: (last.pairs_attempted||last.skus_attempted||0).toLocaleString(), icon: 'ti-refresh',      color: 'var(--blu)' },
+      { label: 'Prices found',      val: (last.prices_found||0).toLocaleString(),                         icon: 'ti-currency-pound',color: 'var(--grn)' },
+      { label: 'Confirmed matches', val: (last.matches_confirmed||0).toLocaleString(),                    icon: 'ti-circle-check', color: 'var(--grn)' },
+      { label: 'In review queue',   val: (last.matches_review||last.review_queue||0).toLocaleString(),    icon: 'ti-eye-check',    color: 'var(--amb)' },
+      { label: 'Failed',            val: (last.skus_failed||0).toLocaleString(),                          icon: 'ti-alert-circle', color: 'var(--red)' },
+      { label: 'OOS flagged',       val: (last.oos_flagged||0).toLocaleString(),                          icon: 'ti-package-off',  color: 'var(--t2)'  },
+      { label: 'Duration',          val: dur != null ? dur+'m' : '—',                                     icon: 'ti-clock',        color: 'var(--t2)'  },
+      { label: 'Mode',              val: last.scrape_mode || last.trigger || '—',                         icon: 'ti-settings',     color: 'var(--t2)'  },
+    ];
+    $('run-summary-cards').innerHTML = cards.map(c => `
+      <div class="card" style="padding:12px 14px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+          <i class="ti ${c.icon}" style="font-size:14px;color:${c.color}"></i>
+          <span style="font-size:12px;color:var(--t2)">${c.label}</span>
+        </div>
+        <div style="font-size:22px;font-weight:600;color:${c.color}">${c.val}</div>
+        <div style="font-size:11px;color:var(--t3);margin-top:2px">last run · ${ts(last.started_at)}</div>
+      </div>`).join('');
+
+    /* ── Run history table ── */
+    $('run-history-sub').textContent = `${rows.length} most recent runs`;
+    $('run-history').innerHTML = `
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>
+          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--t2)">Started</th>
+          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--t2)">Mode</th>
+          <th style="text-align:right;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--t2)">Pairs</th>
+          <th style="text-align:right;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--t2)">Prices found</th>
+          <th style="text-align:right;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--t2)">Confirmed</th>
+          <th style="text-align:right;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--t2)">Review</th>
+          <th style="text-align:right;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--t2)">Failed</th>
+          <th style="text-align:right;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--t2)">OOS</th>
+          <th style="text-align:right;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--t2)">Duration</th>
+          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--t2)">Status</th>
+        </tr></thead><tbody>
+        ${rows.map(r => {
+          const d    = r.completed_at ? Math.round((new Date(r.completed_at)-new Date(r.started_at))/60000)+'m' : '…';
+          const bc   = r.status==='complete'?'b-g':r.status==='running'?'b-blu':'b-a';
+          const pairs = r.pairs_attempted || r.skus_attempted || 0;
+          const pricePct = pairs > 0 ? Math.round((r.prices_found||0)/pairs*100) : null;
+          return `<tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:7px 10px">${ts(r.started_at)}</td>
+            <td style="padding:7px 10px;color:var(--t2)">${r.scrape_mode||r.trigger||'—'}</td>
+            <td style="padding:7px 10px;text-align:right">${pairs.toLocaleString()}</td>
+            <td style="padding:7px 10px;text-align:right">
+              ${(r.prices_found||0).toLocaleString()}
+              ${pricePct!=null ? `<span style="font-size:11px;color:var(--t3);margin-left:4px">${pricePct}%</span>` : ''}
+            </td>
+            <td style="padding:7px 10px;text-align:right;color:var(--grn);font-weight:500">${(r.matches_confirmed||0).toLocaleString()}</td>
+            <td style="padding:7px 10px;text-align:right;color:var(--amb)">${(r.matches_review||r.review_queue||0).toLocaleString()}</td>
+            <td style="padding:7px 10px;text-align:right;color:${r.skus_failed>0?'var(--red)':'var(--t3)'}">${(r.skus_failed||0).toLocaleString()}</td>
+            <td style="padding:7px 10px;text-align:right;color:var(--t2)">${(r.oos_flagged||0).toLocaleString()}</td>
+            <td style="padding:7px 10px;text-align:right;color:var(--t2)">${d}</td>
+            <td style="padding:7px 10px"><span class="badge ${bc}">${r.status||'—'}</span></td>
+          </tr>`;
+        }).join('')}
+        </tbody></table>
+      </div>`;
+  } catch (e) {
+    $('run-history').innerHTML = `<div style="color:var(--red);padding:8px">${e.message}</div>`;
+  }
+}
+
+/* ════════════════════════════════════════
+   SETTINGS — COMPETITORS
+════════════════════════════════════════ */
+async function loadCompetitorSettings() {
+  try {
+    const { data: comps } = await sb.from('competitors').select('*').order('name');
+    if (!comps?.length) return;
+    const unknown = comps.filter(c=>c.vat_status==='unknown').length;
+    $('comp-sett-sub').textContent = `${comps.filter(c=>c.active).length} active · ${unknown} unknown VAT`;
+    if (unknown > 0) {
+      $('comp-vat-note-text').textContent = `${unknown} competitor${unknown>1?'s':''} have unknown VAT status — set these before trusting differentials.`;
+      $('comp-vat-note').style.display = '';
+    }
+    $('comp-sett-tbody').innerHTML = comps.map(c => {
+      const exCls  = c.vat_status==='ex'  ? 's-ex'  : '';
+      const incCls = c.vat_status==='inc' ? 's-inc' : '';
+      const unkCls = c.vat_status==='unknown' ? 's-unk' : '';
+      const rowBg  = c.vat_status==='unknown' ? 'background:rgba(133,79,11,.03)' : '';
+      return `<tr style="${rowBg}${!c.active?';opacity:.5':''}">
+        <td style="font-weight:500">${c.name}</td>
+        <td style="font-size:11px;color:var(--t2)">${c.domain}</td>
+        <td>
+          <div class="vat-toggle" id="vtog-${c.id}">
+            <button class="vt-opt ${exCls}"  onclick="setVatStatus(${c.id},'ex')">ex</button>
+            <button class="vt-opt ${incCls}" onclick="setVatStatus(${c.id},'inc')">inc</button>
+            <button class="vt-opt ${unkCls}" onclick="setVatStatus(${c.id},'unknown')">?</button>
+          </div>
+        </td>
+        <td><span class="badge ${c.feed_url?'b-g':'b-gray'}" style="font-size:9px">${c.feed_url?'Feed':'Scrape'}</span></td>
+        <td><input type="checkbox" ${c.active?'checked':''} style="accent-color:var(--orange)" onchange="setCompActive(${c.id},this.checked)"></td>
+      </tr>`;
+    }).join('');
+  } catch (e) { $('comp-sett-tbody').innerHTML = `<tr><td colspan="5" style="color:var(--red);padding:8px">${e.message}</td></tr>`; }
+}
+
+async function setVatStatus(compId, val) {
+  try {
+    const { error } = await sb.from('competitors').update({ vat_status: val }).eq('id', compId);
+    if (error) throw new Error(error.message);
+    const tog = $('vtog-'+compId);
+    if (tog) {
+      tog.querySelectorAll('.vt-opt').forEach(b => {
+        b.className = 'vt-opt';
+        if (b.textContent.trim()==='ex'  && val==='ex')      b.className='vt-opt s-ex';
+        if (b.textContent.trim()==='inc' && val==='inc')     b.className='vt-opt s-inc';
+        if (b.textContent.trim()==='?'   && val==='unknown') b.className='vt-opt s-unk';
+      });
+    }
+  } catch (e) { alert('VAT update failed: '+e.message); }
+}
+
+async function setCompActive(compId, active) {
+  try {
+    const { error } = await sb.from('competitors').update({ active }).eq('id', compId);
+    if (error) throw new Error(error.message);
+  } catch (e) { alert('Update failed: '+e.message); }
+}
+
+/* ════════════════════════════════════════
+   SETTINGS — USERS
+════════════════════════════════════════ */
+async function loadUsers() {
+  if (currentProfile?.role !== 'super_admin') {
+    $('users-list').innerHTML = '<div style="color:var(--t2);font-size:12px;padding:12px">Admin access required to manage users.</div>';
+    $('pending-list').innerHTML = '';
+    return;
+  }
+  try {
+    const { data: profiles } = await sb.from('profiles').select('*').eq('status','approved').order('requested_at');
+    const { data: requests } = await sb.from('access_requests').select('*').order('requested_at');
+    $('users-sub').textContent = `${(profiles||[]).length} active users`;
+
+    $('users-list').innerHTML = (profiles||[]).map(p => {
+      const initials = (p.full_name||p.email||'?').split(/[\s@]/)[0].slice(0,2).toUpperCase();
+      const isMe = p.id === currentProfile.id;
+      return `<div class="user-row" style="padding:10px 14px">
+        <div class="avatar" style="${p.role==='super_admin'?'background:var(--os);color:var(--orange)':''}">${initials}</div>
+        <div style="flex:1">
+          <div style="font-weight:500;font-size:12px">${p.email}</div>
+          <div style="font-size:11px;color:var(--t2)">${p.full_name||'—'} · ${p.role==='super_admin'?'Admin':'User'}</div>
+        </div>
+        <span class="badge ${p.role==='super_admin'?'':'b-g'}" style="${p.role==='super_admin'?'background:var(--os);color:var(--orange)':''}">${p.role==='super_admin'?'Admin':'Active'}</span>
+        ${!isMe ? `<button class="btn sm ghost danger" onclick="revokeUser('${p.id}',this)"><i class="ti ti-user-off"></i></button>` : ''}
+      </div>`;
+    }).join('') || '<div style="color:var(--t2);font-size:12px;padding:12px">No approved users.</div>';
+
+    $('pending-list').innerHTML = (requests||[]).length ? (requests||[]).map(r => `
+      <div class="user-row" style="padding:10px 14px">
+        <div class="avatar" style="background:var(--ab);color:var(--amb)">${(r.email||'?').slice(0,2).toUpperCase()}</div>
+        <div style="flex:1">
+          <div style="font-weight:500;font-size:12px">${r.email}</div>
+          <div style="font-size:11px;color:var(--t2)">${r.full_name||'—'} · Requested ${ts(r.requested_at)}</div>
+        </div>
+        <button class="btn sm prim" onclick="approveUser('${r.email}',this)"><i class="ti ti-check"></i> Approve</button>
+        <button class="btn sm danger" onclick="rejectUser('${r.email}',this)"><i class="ti ti-x"></i> Reject</button>
+      </div>`).join('') :
+      '<div style="text-align:center;padding:24px;color:var(--t3);font-size:12px"><i class="ti ti-circle-check" style="font-size:22px;display:block;margin-bottom:6px;color:var(--grn)"></i>No pending requests</div>';
+  } catch (e) {
+    $('users-list').innerHTML = `<div style="color:var(--red);font-size:12px;padding:12px">${e.message}</div>`;
+  }
+}
+
+async function approveUser(email, btn) {
+  btn.disabled = true;
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/approve-user`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + session.access_token },
+      body: JSON.stringify({ email }),
+    });
+    if (!res.ok) { const err = await res.json().catch(()=>{}); throw new Error(err?.error || 'Approve failed'); }
+    await loadUsers();
+  } catch (e) { alert('Approve failed: '+e.message); btn.disabled = false; }
+}
+
+async function rejectUser(email, btn) {
+  if (!confirm(`Reject access request from ${email}?`)) return;
+  btn.disabled = true;
+  try {
+    await sb.from('access_requests').delete().eq('email', email);
+    await loadUsers();
+  } catch (e) { alert('Reject failed: '+e.message); btn.disabled = false; }
+}
+
+async function revokeUser(id, btn) {
+  if (!confirm('Revoke access for this user?')) return;
+  btn.disabled = true;
+  try {
+    await sb.from('profiles').update({ status: 'rejected', rejected_at: new Date().toISOString() }).eq('id', id);
+    await loadUsers();
+  } catch (e) { alert('Revoke failed: '+e.message); btn.disabled = false; }
+}
+
+/* ════════════════════════════════════════
+   THRESHOLDS (configurables)
+════════════════════════════════════════ */
+function updateThreshPreview() {
+  const r = parseInt($('t-red').value) || 10;
+  const a = parseInt($('t-amb').value) || 5;
+  const p = parseInt($('t-par').value) || 2;
+  $('t-grn-derived').textContent = p;
+  $('prev-r').textContent = `-${(r+2.4).toFixed(1)}%`;
+  $('prev-a').textContent = `-${((r+a)/2).toFixed(1)}%`;
+  $('prev-p').textContent = `±${(p*0.6).toFixed(1)}%`;
+
+  const live = $('thresh-live');
+  if (!live) return;
+  const testDiff = -8;
+  let label, fg, bg;
+  if (testDiff <= -r)      { label='Critical'; fg='var(--red)'; bg='var(--rb)'; }
+  else if (testDiff <= -a) { label='Warning';  fg='var(--amb)'; bg='var(--ab)'; }
+  else if (Math.abs(testDiff) <= p) { label='Parity'; fg='var(--t2)'; bg='var(--bg)'; }
+  else                     { label='We\'re cheaper'; fg='var(--grn)'; bg='var(--gb)'; }
+  live.innerHTML = `<span style="color:var(--t2)">A <strong>−8%</strong> differential would be classified as:</span> <span style="padding:3px 10px;border-radius:5px;font-weight:600;background:${bg};color:${fg}">${label}</span>`;
+}
+
+function saveThresholds() {
+  T.red = parseInt($('t-red').value) || 10;
+  T.amb = parseInt($('t-amb').value) || 5;
+  T.par = parseInt($('t-par').value) || 2;
+  try { localStorage.setItem('pw_thresholds', JSON.stringify(T)); } catch(e) {}
+  applyThresholdCSS();
+  buildLegend('comp-detail-legend');
+  buildLegend('sku-detail-legend');
+  if (compSkusAll.length) renderCompDetail();
+  if (distChart) buildDistChart({
+    cheapest:$('m-cheap').textContent||0,
+    parity:0,
+    warning:$('m-warn').textContent||0,
+    critical:$('m-crit').textContent||0,
+    oos:$('m-oos').textContent||0
+  });
+  const btn = event.target;
+  const orig = btn.innerHTML;
+  btn.innerHTML = '<i class="ti ti-check"></i> Saved';
+  setTimeout(() => btn.innerHTML = orig, 1500);
+}
+
+function resetThresholds() {
+  $('t-red').value = 10;
+  $('t-amb').value = 5;
+  $('t-par').value = 2;
+  updateThreshPreview();
+}
+
+/* ════════════════════════════════════════
+   MANUAL LOOKUP / REFRESH
+════════════════════════════════════════ */
+async function lookupSKU(skuId, btn) {
+  const orig = btn.innerHTML;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Scraping…';
+  btn.disabled = true;
+  try {
+    await authFetch('/lookup', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({sku_id: skuId}) });
+    setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 5000);
+  } catch { btn.innerHTML = orig; btn.disabled = false; }
+}
+
+async function scrapeRow(skuId, competitorId, btn) {
+  const orig = btn.innerHTML;
+  btn.innerHTML = '<i class="ti ti-loader" style="font-size:13px"></i>';
+  btn.disabled = true;
+  try {
+    await authFetch('/lookup', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({sku_id: skuId, competitor_id: competitorId}) });
+    /* After a short pause reload the SKU detail so fresh data shows */
+    setTimeout(async () => {
+      btn.innerHTML = '<i class="ti ti-check" style="font-size:13px;color:var(--grn)"></i>';
+      await loadSkuDetail({ skuId, fromPanel: drawerFromPanel });
+    }, 4000);
+  } catch (e) {
+    btn.innerHTML = orig;
+    btn.disabled = false;
+    alert('Scrape failed: ' + e.message);
+  }
+}
+
+async function manualRefresh() {
+  const btn = event.target.closest('button');
+  const orig = btn.innerHTML;
+  btn.innerHTML = '<i class="ti ti-loader" style="font-size:12px"></i> Refreshing…';
+  btn.disabled = true;
+  await loadDashboard();
+  btn.innerHTML = orig;
+  btn.disabled = false;
+}
+
+/* ════════════════════════════════════════
+   SORTING ENGINE
+════════════════════════════════════════ */
+
+/* Sort state per table */
+const sortState = {
+  bycomp:   { col: null, dir: 1 },
+  skus:     { col: null, dir: 1 },
+  compSku:  { col: null, dir: 1 },
+  skuComp:  { col: null, dir: 1 },
+};
+
+/* Cached data for client-side sort */
+let bycompData   = [];   // raw competitor rows from loadByCompetitor
+let skusData     = [];   // current page rows from loadSKUs
+let skuCompData  = [];   // rows from loadSkuDetail
+
+function updateSortHeaders(tableId, stateKey, col) {
+  const tbl = document.getElementById(tableId);
+  if (!tbl) return;
+  tbl.querySelectorAll('th.sortable').forEach(th => {
+    th.classList.remove('sort-asc','sort-desc');
+    const fn = th.getAttribute('onclick') || '';
+    const m  = fn.match(/'([^']+)'/);
+    if (m && m[1] === col) {
+      th.classList.add(sortState[stateKey].dir === 1 ? 'sort-asc' : 'sort-desc');
+    }
+  });
+}
+
+function toggleSort(stateKey, col) {
+  const s = sortState[stateKey];
+  if (s.col === col) s.dir = s.dir === 1 ? -1 : 1;
+  else { s.col = col; s.dir = 1; }
+}
+
+function cmpVal(a, b, dir) {
+  if (a === null || a === undefined) return 1;
+  if (b === null || b === undefined) return -1;
+  if (typeof a === 'string' && typeof b === 'string') return a.localeCompare(b) * dir;
+  return (a - b) * dir;
+}
+
+/* ── By competitor list ── */
+function sortByCompTable(col) {
+  toggleSort('bycomp', col);
+  updateSortHeaders('bycomp-table', 'bycomp', col);
+  const { dir } = sortState.bycomp;
+  const sorted = [...bycompData].sort((a, b) => {
+    const getV = r => {
+      if (col === 'name')     return (r.name||'').toLowerCase();
+      if (col === 'domain')   return (r.domain||'').toLowerCase();
+      if (col === 'vat_status') return (r.vat_status||'').toLowerCase();
+      if (col === 'matched')  return r._matched  ?? 0;
+      if (col === 'critical') return r._critical ?? 0;
+      if (col === 'warning')  return r._warning  ?? 0;
+      if (col === 'cheaper')  return r._cheaper  ?? 0;
+      if (col === 'parity')   return r._parity   ?? 0;
+      return '';
+    };
+    return cmpVal(getV(a), getV(b), dir);
+  });
+  renderByCompRows(sorted);
+}
+
+function renderByCompRows(comps) {
+  $('bycomp-tbody').innerHTML = comps.map(c => {
+    const slug = slugify(c.name);
+    const noData = c._matched === 0;
+    return `<tr class="tr-link" onclick="go('comp-detail',{compId:${c.id},compName:'${c.name.replace(/'/g,"\\'")}',compSlug:'${slug}',compDomain:'${c.domain}',compVat:'${c.vat_status}'})">
+      <td style="font-weight:500">${c.name}</td>
+      <td style="font-size:11px;color:var(--t2)">${c.domain}</td>
+      <td>${vatPill(c.vat_status)}</td>
+      <td style="color:var(--t2)">${noData ? '<span style="color:var(--t3)">—</span>' : c._matched}</td>
+      <td style="font-weight:600">${noData ? '<span style="color:var(--t3)">—</span>' : (c._critical > 0 ? `<span style="color:var(--red)">${c._critical}</span>` : '<span style="color:var(--t3)">0</span>')}</td>
+      <td>${noData ? '<span style="color:var(--t3)">—</span>' : (c._warning > 0 ? `<span style="color:var(--amb);font-weight:500">${c._warning}</span>` : '<span style="color:var(--t3)">0</span>')}</td>
+      <td>${noData ? '<span style="color:var(--t3)">—</span>' : (c._cheaper > 0 ? `<span style="color:var(--grn)">${c._cheaper}</span>` : '<span style="color:var(--t3)">0</span>')}</td>
+      <td style="color:var(--t2)">${noData ? '<span style="color:var(--t3)">—</span>' : c._parity}</td>
+    </tr>`;
+  }).join('');
+}
+
+/* ── All SKUs (current page) ── */
+function sortSkusTable(col) {
+  toggleSort('skus', col);
+  updateSortHeaders('skus-table', 'skus', col);
+  const { dir } = sortState.skus;
+  const sorted = [...skusData].sort((a, b) => {
+    const getV = r => {
+      if (col === 'sku_id')        return (r.sku_id||'').toLowerCase();
+      if (col === 'short_title')   return (r.short_title||'').toLowerCase();
+      if (col === 'our_price')     return parseFloat(r.our_price||0);
+      if (col === 'competitor_name') return (r.competitor_name||'').toLowerCase();
+      if (col === 'their_price')   { const raw = r.competitor_price ? parseFloat(r.competitor_price) : null; const vat = r.competitor_vat || r.competitor_vat_default || 'unknown'; return raw ? normalisePrice(raw, vat) : 999999; }
+      if (col === 'diff')          return parseFloat(r.diff_pct_normalised??r.diff_pct??0);
+      if (col === 'availability')  return (r.availability||'').toLowerCase();
+      if (col === 'scraped_at')    return r.scraped_at ? new Date(r.scraped_at).getTime() : 0;
+      return '';
+    };
+    return cmpVal(getV(a), getV(b), dir);
+  });
+  renderSkusRows(sorted);
+}
+
+function renderSkusRows(rows) {
+  $('sku-tbody').innerHTML = rows.map(r => {
+    const diff = r.diff_pct_normalised ?? r.diff_pct;
+    const raw  = r.competitor_price ? parseFloat(r.competitor_price) : null;
+    const vat  = r.competitor_vat || r.competitor_vat_default || 'unknown';
+    const ex   = raw ? normalisePrice(raw, vat) : null;
+    return `<tr class="${rowClass(diff)} tr-link" onclick="openDrawer('${r.sku_id}','${(r.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(r.our_price)}','skus')">
+      <td>${skuLink(r)}</td>
+      <td style="font-size:11px;color:var(--t2);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.short_title||''}</td>
+      <td style="font-weight:500">${fmtPrice(r.our_price)}</td>
+      <td style="font-size:11px;color:var(--t2)">${r.competitor_name||'—'}</td>
+      <td style="font-weight:500">${ex ? fmtPrice(ex) : '—'}${ex ? ` <span style="font-size:9px;color:var(--t3)">${vatPill(vat)}</span>` : ''}</td>
+      <td><span class="${diffClass(diff)}">${diffLabel(diff)}</span></td>
+      <td style="color:var(--t2)">—</td>
+      <td>${stockBadge(r.availability)}</td>
+      <td style="font-size:10px;color:var(--t3)">${ts(r.scraped_at)}</td>
+      <td><button class="btn sm ghost" onclick="event.stopPropagation();openDrawer('${r.sku_id}','${(r.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(r.our_price)}','skus')">→</button></td>
+    </tr>`;
+  }).join('');
+}
+
+/* ── Competitor detail SKU list ── */
+function sortCompSkuTable(col) {
+  toggleSort('compSku', col);
+  updateSortHeaders('comp-sku-table', 'compSku', col);
+  const { dir } = sortState.compSku;
+  const sorted = [...compSkusFiltered].sort((a, b) => {
+    const getV = r => {
+      const diff = r.diff_pct_normalised ?? r.diff_pct;
+      const raw  = r.competitor_price ? parseFloat(r.competitor_price) : null;
+      const vat  = r.competitor_vat || r.competitor_vat_default || 'unknown';
+      const ex   = raw ? normalisePrice(raw, vat) : null;
+      if (col === 'sku_id')      return (r.sku_id||'').toLowerCase();
+      if (col === 'short_title') return (r.short_title||'').toLowerCase();
+      if (col === 'our_price')   return parseFloat(r.our_price||0);
+      if (col === 'their_price') return ex ?? 999999;
+      if (col === 'diff')        return parseFloat(diff??0);
+      if (col === 'availability')return (r.availability||'').toLowerCase();
+      if (col === 'scraped_at')  return r.scraped_at ? new Date(r.scraped_at).getTime() : 0;
+      return '';
+    };
+    return cmpVal(getV(a), getV(b), dir);
+  });
+  /* Re-render just the tbody using the existing renderCompDetail row template */
+  $('comp-sku-tbody').innerHTML = sorted.map(s => {
+    const diff = s.diff_pct_normalised ?? s.diff_pct;
+    const raw  = s.competitor_price ? parseFloat(s.competitor_price) : null;
+    const vat  = s.competitor_vat || s.competitor_vat_default || 'unknown';
+    const ex   = raw ? normalisePrice(raw, vat) : null;
+    return `<tr class="${rowClass(diff)} tr-link" onclick="openDrawer('${s.sku_id}','${(s.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(s.our_price)}','comp-detail')">
+      <td><span style="font-family:'SF Mono',monospace;font-size:11px;color:var(--blu)">${s.sku_id}</span></td>
+      <td style="font-size:11px;color:var(--t2);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.short_title||''}</td>
+      <td style="font-weight:500">${fmtPrice(s.our_price)}</td>
+      <td style="font-weight:500">${ex?fmtPrice(ex):'—'}</td>
+      <td><span class="${diffClass(diff)}">${diffLabel(diff)}</span></td>
+      <td>${stockBadge(s.availability)}</td>
+      <td style="font-size:10px;color:var(--t3)">${ts(s.scraped_at)}</td>
+      <td><button class="btn sm ghost" onclick="event.stopPropagation();openDrawer('${s.sku_id}','${(s.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(s.our_price)}','comp-detail')">→</button></td>
+    </tr>`;
+  }).join('');
+}
+
+/* ── SKU detail competitor table ── */
+function sortSkuCompTable(col) {
+  toggleSort('skuComp', col);
+  updateSortHeaders('sku-comp-table', 'skuComp', col);
+  const { dir } = sortState.skuComp;
+  const sorted = [...skuCompData].sort((a, b) => {
+    const getV = r => {
+      const diff = r.diff_pct_normalised ?? r.diff_pct;
+      const raw  = r.competitor_price ? parseFloat(r.competitor_price) : null;
+      const vat  = r.competitor_vat || r.competitor_vat_default || 'unknown';
+      const ex   = raw ? normalisePrice(raw, vat) : null;
+      if (col === 'name')        return (r.competitor_name||'').toLowerCase();
+      if (col === 'price')       return ex ?? 999999;
+      if (col === 'vat')         return (vat||'').toLowerCase();
+      if (col === 'diff')        return parseFloat(diff??0);
+      if (col === 'availability')return (r.availability||'').toLowerCase();
+      if (col === 'confidence')  return parseFloat(r.confidence||0);
+      if (col === 'scraped_at')  return r.scraped_at ? new Date(r.scraped_at).getTime() : 0;
+      return '';
+    };
+    return cmpVal(getV(a), getV(b), dir);
+  });
+  renderSkuCompRows(sorted);
+}
+
+function renderSkuCompRows(rows) {
+  $('sku-comp-tbody').innerHTML = rows.map(r => {
+    const diff  = r.diff_pct_normalised ?? r.diff_pct;
+    const raw   = r.competitor_price ? parseFloat(r.competitor_price) : null;
+    const vat   = r.competitor_vat || r.competitor_vat_default || 'unknown';
+    const ex    = raw ? normalisePrice(raw, vat) : null;
+    const tier  = getTier(diff);
+    const barW  = Math.min(100, Math.abs(diff||0) * 4);
+    const barC  = {r:'var(--red)',a:'var(--amb)',g:'var(--grn)',p:'var(--t3)'}[tier];
+    const rowId = `${r.sku_id}-${r.competitor_id}`;
+    const hasUrl = !!r.competitor_url;
+    return `<tr class="${rowClass(diff)}" id="skurow-${rowId}">
+      <td style="font-weight:500">${r.competitor_name||'—'}<div style="font-size:10px;color:var(--t2)">${r.competitor_domain||''}</div></td>
+      <td style="font-weight:500">${ex
+        ? (r.competitor_url
+            ? `<a href="${r.competitor_url}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:underline;text-decoration-color:rgba(0,0,0,.2);text-underline-offset:2px" onclick="event.stopPropagation()">${fmtPrice(ex)} <i class="ti ti-external-link" style="font-size:10px;color:var(--t3)"></i></a>`
+            : fmtPrice(ex))
+        : '—'}</td>
+      <td>${vatPill(vat)}</td>
+      <td><span class="${diffClass(diff)}">${diffLabel(diff)}</span></td>
+      <td><div class="dbar-wrap"><div class="dbar-track"><div class="dbar-fill" style="width:${barW}%;background:${barC}"></div></div></div></td>
+      <td>${stockBadge(r.availability)}</td>
+      <td>${confWidget(r.confidence)}</td>
+      <td style="font-size:10px;color:var(--t3)">${ts(r.scraped_at)}</td>
+      <td>
+        <button class="btn sm ghost" onclick="editMatchUrl('${rowId}','${r.sku_id}',${r.competitor_id},'${(r.competitor_url||'').replace(/'/g,"\\'")}',this)"
+          style="font-size:10px;color:${hasUrl?'var(--grn)':'var(--t3)'}" title="${hasUrl?'Edit matching URL':'Add matching URL'}">
+          <i class="ti ${hasUrl?'ti-link':'ti-link-plus'}" style="font-size:13px"></i>
+          ${hasUrl?'Edit URL':'Add URL'}
+        </button>
+      </td>
+      <td><button class="btn sm ghost" id="scrape-${rowId}" onclick="scrapeRow('${r.sku_id}',${r.competitor_id},this)" title="Re-scrape this competitor now"><i class="ti ti-refresh" style="font-size:13px"></i></button></td>
+    </tr>
+    <tr id="skurow-edit-${rowId}" style="display:none;background:var(--bb)">
+      <td colspan="10" style="padding:10px 12px">
+        <div style="font-size:11px;font-weight:500;margin-bottom:6px;color:var(--blu)">
+          <i class="ti ti-link" style="font-size:12px;margin-right:4px"></i>
+          Match URL for <strong>${r.competitor_name}</strong> — paste the exact product page URL
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input id="match-url-${rowId}" type="text" value="${r.competitor_url||''}" placeholder="https://competitor.com/product-page"
+            autocomplete="new-password" spellcheck="false"
+            style="flex:1;min-width:260px;padding:6px 10px;font-size:12px;border:1px solid var(--bbd);border-radius:var(--r);font-family:inherit;outline:none;background:var(--surface)"
+            onkeydown="if(event.key==='Enter')saveMatchUrl('${rowId}','${r.sku_id}',${r.competitor_id},this.closest('tr').previousElementSibling,event)">
+          <button class="btn sm prim" onclick="saveMatchUrl('${rowId}','${r.sku_id}',${r.competitor_id},this)">
+            <i class="ti ti-device-floppy"></i> Save &amp; scrape
+          </button>
+          <button class="btn sm ghost" onclick="cancelEditUrl('${rowId}')">Cancel</button>
+        </div>
+        <div id="match-url-msg-${rowId}" style="font-size:11px;margin-top:6px;display:none"></div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function editMatchUrl(rowId, skuId, competitorId, currentUrl, btn) {
+  /* Close any other open edit rows first */
+  document.querySelectorAll('[id^="skurow-edit-"]').forEach(r => r.style.display = 'none');
+  const editRow = $(`skurow-edit-${rowId}`);
+  if (editRow) {
+    editRow.style.display = '';
+    const input = $(`match-url-${rowId}`);
+    if (input) { input.value = currentUrl; input.focus(); input.select(); }
+  }
+}
+
+function cancelEditUrl(rowId) {
+  const editRow = $(`skurow-edit-${rowId}`);
+  if (editRow) editRow.style.display = 'none';
+}
+
+async function saveMatchUrl(rowId, skuId, competitorId, btn) {
+  const input = $(`match-url-${rowId}`);
+  const msgEl = $(`match-url-msg-${rowId}`);
+  const url   = (input?.value || '').trim();
+
+  if (!url || !url.startsWith('http')) {
+    input.style.borderColor = 'var(--red)';
+    if (msgEl) { msgEl.textContent = 'Must be a valid URL starting with https://'; msgEl.style.color = 'var(--red)'; msgEl.style.display = ''; }
+    return;
+  }
+
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Saving…';
+  if (msgEl) msgEl.style.display = 'none';
+
+  try {
+    /* Upsert into competitor_matches — sets status to matched so nightly scraper picks it up */
+    const { error } = await sb.from('competitor_matches').upsert({
+      sku_id:          skuId,
+      competitor_id:   competitorId,
+      competitor_url:  url,
+      match_status:    'matched',
+      human_reviewed:  true,
+      reviewed_at:     new Date().toISOString(),
+      updated_at:      new Date().toISOString(),
+    }, { onConflict: 'sku_id,competitor_id' });
+
+    if (error) throw new Error(error.message);
+
+    if (msgEl) { msgEl.textContent = '✓ Saved — triggering scrape…'; msgEl.style.color = 'var(--grn)'; msgEl.style.display = ''; }
+
+    /* Immediately trigger a scrape for this SKU so fresh price appears */
+    try {
+      await authFetch('/lookup', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ sku_id: skuId, competitor_id: competitorId }) });
+    } catch(e) { /* scrape is best-effort */ }
+
+    /* Reload the page data after a short pause */
+    setTimeout(async () => {
+      cancelEditUrl(rowId);
+      await loadSkuDetail({ skuId, fromPanel: drawerFromPanel });
+    }, 3000);
+
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    if (msgEl) { msgEl.textContent = 'Save failed: ' + e.message; msgEl.style.color = 'var(--red)'; msgEl.style.display = ''; }
+  }
+}
+let skusLoaded = false;
+
+/* ════════════════════════════════════════
+   INIT
+════════════════════════════════════════ */
+updateThreshPreview();
+bootstrap();
+</script>
+</body>
+</html>
