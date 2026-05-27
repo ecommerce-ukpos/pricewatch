@@ -225,6 +225,23 @@ def per_unit_price(price: float, qty: Optional[int]) -> float:
         return round(price / qty, 6)
     return price
 
+IMAGE_REFRESH_DAYS = int(os.getenv("IMAGE_REFRESH_DAYS", "90"))
+
+def image_needs_refresh(existing_match: Optional[dict]) -> bool:
+    """True if match has no competitor image, or image is older than IMAGE_REFRESH_DAYS."""
+    if not existing_match:
+        return True
+    if not existing_match.get("competitor_image_url"):
+        return True
+    updated = existing_match.get("updated_at")
+    if not updated:
+        return True
+    try:
+        last = datetime.fromisoformat(updated.replace("Z", "+00:00"))
+        return (datetime.now(timezone.utc) - last).days >= IMAGE_REFRESH_DAYS
+    except Exception:
+        return True
+
 
 # ── Scraper class ──────────────────────────────────────────────────────────────
 
@@ -803,7 +820,7 @@ class PriceScraper:
                 pass
         return None
 
-    async def scrape_product_page(self, context: BrowserContext, url: str, competitor_domain: str = "") -> dict:
+    async def scrape_product_page(self, context: BrowserContext, url: str, competitor_domain: str = "", fetch_image: bool = False) -> dict:
         result = {
             "price": None, "vat": "unknown", "availability": "in_stock",
             "title": "", "url": url, "error": None, "og_image": None,
@@ -829,19 +846,20 @@ class PriceScraper:
             result["availability"] = "out_of_stock" if detect_oos(full_text) else "in_stock"
             result["title"]        = (await page.title()).strip()
 
-            # ── OG image — free since we already have the page loaded ──────────
-            try:
-                og_image = await page.evaluate("""
-                    () => {
-                        const og  = document.querySelector('meta[property="og:image"]');
-                        const twi = document.querySelector('meta[name="twitter:image"]');
-                        return (og?.content || twi?.content || '').trim() || null;
-                    }
-                """)
-                if og_image and og_image.startswith('http'):
-                    result["og_image"] = og_image
-            except Exception:
-                pass
+            # ── OG image — only when due for quarterly refresh ─────────────────
+            if fetch_image:
+                try:
+                    og_image = await page.evaluate("""
+                        () => {
+                            const og  = document.querySelector('meta[property="og:image"]');
+                            const twi = document.querySelector('meta[name="twitter:image"]');
+                            return (og?.content || twi?.content || '').trim() || null;
+                        }
+                    """)
+                    if og_image and og_image.startswith('http'):
+                        result["og_image"] = og_image
+                except Exception:
+                    pass
 
             price = shopify_price
 
@@ -911,14 +929,14 @@ class PriceScraper:
             # ── Path A: existing confirmed URL — scrape directly ───────────────
             if url:
                 log.debug(f"  Path A — existing URL: {url}")
-                result     = await self.scrape_product_page(ctx, url, domain)
+                result     = await self.scrape_product_page(ctx, url, domain, fetch_image=image_needs_refresh(existing_match))
                 price      = result["price"]
                 comp_title = result["title"]
                 vat_hint   = result["vat"]
                 confidence = fuzzy_confidence(sku, comp_title, url)
-                snapshot["availability"]    = result["availability"]
-                snapshot["error_message"]   = result["error"]
-                snapshot["_og_image"]       = result.get("og_image")
+                snapshot["availability"]  = result["availability"]
+                snapshot["error_message"] = result["error"]
+                snapshot["_og_image"]     = result.get("og_image")
 
             else:
                 # ── Path B: BigCommerce SKU lookup (Harrison Products) ─────────
@@ -945,7 +963,7 @@ class PriceScraper:
                             vat_hint = shopping.get("vat_hint", "unknown")
                             snapshot["availability"] = "in_stock"
                         else:
-                            result     = await self.scrape_product_page(ctx, url, domain)
+                            result     = await self.scrape_product_page(ctx, url, domain, fetch_image=image_needs_refresh(existing_match))
                             price      = result["price"]
                             vat_hint   = result["vat"]
                             comp_title = result["title"] or comp_title
@@ -958,7 +976,7 @@ class PriceScraper:
                 if not url:
                     url = await self.search_web(ctx, sku, competitor["domain"])
                     if url:
-                        result     = await self.scrape_product_page(ctx, url, domain)
+                        result     = await self.scrape_product_page(ctx, url, domain, fetch_image=image_needs_refresh(existing_match))
                         price      = result["price"]
                         comp_title = result["title"]
                         vat_hint   = result["vat"]
@@ -1041,21 +1059,16 @@ class PriceScraper:
             if not snap.get("competitor_url"): continue
             conf         = snap.get("confidence") or 0
             match_status = "matched" if conf >= 80 else "review"
-            row = {
-                "sku_id":                sku["sku_id"],
-                "competitor_id":         snap["competitor_id"],
-                "competitor_url":        snap["competitor_url"],
-                "competitor_title":      snap.get("_comp_title"),
-                "match_status":          match_status,
-                "confidence":            conf,
-                "match_method":          "scrape",
-                "updated_at":            datetime.now(timezone.utc).isoformat(),
-            }
-            # Only update competitor_image_url if we got one — don't overwrite
-            # a previously saved image with None just because this run didn't find one
-            if snap.get("_og_image"):
-                row["competitor_image_url"] = snap["_og_image"]
-            rows.append(row)
+            rows.append({
+                "sku_id":           sku["sku_id"],
+                "competitor_id":    snap["competitor_id"],
+                "competitor_url":   snap["competitor_url"],
+                "competitor_title": snap.get("_comp_title"),
+                "match_status":     match_status,
+                "confidence":       conf,
+                "match_method":     "scrape",
+                "updated_at":       datetime.now(timezone.utc).isoformat(),
+            })
         if rows:
             self.sb.table("competitor_matches").upsert(rows, on_conflict="sku_id,competitor_id").execute()
             matched = sum(1 for r in rows if r["match_status"] == "matched")
