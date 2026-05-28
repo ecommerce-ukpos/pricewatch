@@ -153,18 +153,55 @@ function slugify(name) {
 /* Cached access token — avoids a getSession() round-trip on every fetch */
 let cachedToken = null;
 
+/* Always ask the Supabase client for the current session. The client keeps a
+   valid token in memory and refreshes it automatically when near expiry, so
+   getSession() is cheap when the token is fresh and self-heals when it isn't.
+   We no longer trust a long-lived cached token — doing so caused writes to fail
+   with stale-token 401s around the hourly refresh and right after a password
+   change (which rotates the token immediately). */
 async function getToken() {
-  if (cachedToken) return cachedToken;
-  const { data: { session } } = await sb.auth.getSession();
+  let { data: { session } } = await sb.auth.getSession();
+  /* If the session is missing or the token is about to expire, force a refresh
+     so we never send a token the server will reject. */
+  const nearExpiry = session?.expires_at
+    ? (session.expires_at * 1000 - Date.now()) < 60_000
+    : false;
+  if (!session || nearExpiry) {
+    const { data } = await sb.auth.refreshSession();
+    if (data?.session) session = data.session;
+  }
   cachedToken = session?.access_token || null;
   return cachedToken;
 }
 
-async function authFetch(path, opts = {}) {
+/* Ensure the Supabase client holds a valid (non-expired) session before a
+   direct sb.from(...).update() / sb.auth call. These bypass authFetch's retry,
+   so we proactively refresh when near expiry to avoid the stale-token failures
+   that made notes/URL/password saves need several attempts. */
+async function ensureFreshSession() {
+  const { data: { session } } = await sb.auth.getSession();
+  const nearExpiry = session?.expires_at
+    ? (session.expires_at * 1000 - Date.now()) < 60_000
+    : true;
+  if (nearExpiry) {
+    const { data } = await sb.auth.refreshSession();
+    cachedToken = data?.session?.access_token || null;
+  }
+}
+
+async function authFetch(path, opts = {}, _retried = false) {
   opts.headers = opts.headers || {};
   const token = await getToken();
   if (token) opts.headers['Authorization'] = 'Bearer ' + token;
   const res = await fetch(API_BASE + path, opts);
+  /* If the token was rejected, force one refresh and retry exactly once.
+     This makes a stale token heal inside a single user action instead of
+     failing and needing a manual second attempt. */
+  if (res.status === 401 && !_retried) {
+    cachedToken = null;
+    await sb.auth.refreshSession();
+    return authFetch(path, opts, true);
+  }
   if (!res.ok) throw new Error(`API ${path} → ${res.status}`);
   return res.json();
 }
@@ -379,8 +416,11 @@ async function saveMyAccount() {
   const pw   = $('ma-password').value;
   $('ma-msg').style.display = 'none';
   try {
+    await ensureFreshSession();
     const { error: dbErr } = await sb.from('profiles').update({ full_name: name }).eq('id', currentProfile.id);
     if (dbErr) throw new Error(dbErr.message);
+    /* Password change goes LAST: it rotates the access token immediately, which
+       would invalidate the token any subsequent write in this block relies on. */
     if (pw) {
       if (pw.length < 8) throw new Error('Password must be at least 8 characters.');
       const { error: pwErr } = await sb.auth.updateUser({ password: pw });
@@ -890,6 +930,7 @@ async function saveCorrectUrl(matchId, btn) {
   btn.disabled = true;
   btn.innerHTML = '<i class="ti ti-loader"></i> Saving…';
   try {
+    await ensureFreshSession();
     /* Update the competitor_matches URL then reject */
     const { error } = await sb.from('competitor_matches')
       .update({ competitor_url: newUrl, match_status: 'rejected', human_reviewed: true, reviewed_at: new Date().toISOString() })
@@ -1144,6 +1185,7 @@ async function saveCompNotes() {
   btn.disabled = true;
   btn.innerHTML = '<i class="ti ti-loader"></i> Saving…';
   try {
+    await ensureFreshSession();
     const { error } = await sb.from('competitors').update({ notes: ta.value }).eq('id', currentCompId);
     if (error) throw new Error(error.message);
     compNotesDirty = false;
@@ -1946,6 +1988,7 @@ async function saveMatchUrl(rowId, skuId, compId, btn) {
   const orig = btn.innerHTML;
   btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> Saving…';
   try {
+    await ensureFreshSession();
     const { error } = await sb.from('competitor_matches')
       .update({ competitor_url: url || null, human_reviewed: true, reviewed_at: new Date().toISOString() })
       .eq('sku_id', skuId).eq('competitor_id', compId);
