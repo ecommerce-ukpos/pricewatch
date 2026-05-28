@@ -45,7 +45,7 @@
     <form id="form-register" style="display:none" onsubmit="handleRequestAccess(event)">
       <p style="font-size:11px;color:var(--t2);margin-bottom:14px;line-height:1.5">Submit your work email — the administrator will review and send a set-password link once approved.</p>
       <div class="auth-field"><label>Work email</label><input id="reg-email" type="email" required placeholder="you@ukpos.com"></div>
-      <div class="auth-field"><label>Full name (optional)</label><input id="reg-name" type="text" placeholder="Jane Smith"></div>
+      <div class="auth-field"><label>Full name (optional)</label><input id="reg-name" type="text" placeholder="Jane Smith" autocomplete="off" data-1p-ignore data-lpignore="true"></div>
       <button type="submit" class="auth-submit" id="reg-btn">Submit request</button>
       <div id="reg-msg"></div>
     </form>
@@ -512,8 +512,8 @@
             <div class="card" style="max-width:400px">
               <div class="card-hd"><div class="card-title">My account</div></div>
               <div style="margin-bottom:12px"><label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em">Email (cannot be changed)</label><input type="email" id="ma-email" disabled style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg);color:var(--t2);font-size:12px;font-family:inherit"></div>
-              <div style="margin-bottom:12px"><label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em">Full name</label><input type="text" id="ma-name" placeholder="Your name" style="width:100%;padding:7px 10px;border:1px solid var(--bm);border-radius:var(--r);background:var(--surface);color:var(--text);font-size:12px;font-family:inherit;outline:none"></div>
-              <div style="margin-bottom:16px"><label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em">New password</label><input type="password" id="ma-password" placeholder="Leave blank to keep current" style="width:100%;padding:7px 10px;border:1px solid var(--bm);border-radius:var(--r);background:var(--surface);color:var(--text);font-size:12px;font-family:inherit;outline:none"></div>
+              <div style="margin-bottom:12px"><label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em">Full name</label><input type="text" id="ma-name" placeholder="Your name" autocomplete="off" data-1p-ignore data-lpignore="true" style="width:100%;padding:7px 10px;border:1px solid var(--bm);border-radius:var(--r);background:var(--surface);color:var(--text);font-size:12px;font-family:inherit;outline:none"></div>
+              <div style="margin-bottom:16px"><label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em">New password</label><input type="password" id="ma-password" placeholder="Leave blank to keep current" autocomplete="new-password" data-1p-ignore data-lpignore="true" style="width:100%;padding:7px 10px;border:1px solid var(--bm);border-radius:var(--r);background:var(--surface);color:var(--text);font-size:12px;font-family:inherit;outline:none"></div>
               <div id="ma-msg" style="display:none;margin-bottom:10px"></div>
               <button class="btn prim sm" onclick="saveMyAccount()">Save changes</button>
             </div>
