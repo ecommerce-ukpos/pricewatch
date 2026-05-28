@@ -1,0 +1,29 @@
+-- PriceWatch Pro — Migration 004
+-- Adds pack_qty_flag to price_snapshots. This is a human-review SIGNAL only:
+-- when both sides look like singles (no pack qty parsed from either title) yet
+-- the raw prices differ by >=1.5x, the scraper records a note suggesting the
+-- pack sizes be verified. It NEVER drives the per-unit maths — it only prompts
+-- a person to check whether an undetected multipack is hiding the real gap.
+
+alter table price_snapshots
+  add column if not exists pack_qty_flag text;
+
+-- Recreate latest_snapshots so the new column is exposed to the frontend.
+-- DROP then CREATE (not CREATE OR REPLACE) because adding pack_qty_flag to
+-- ps.* changes the view's column ordering, which CREATE OR REPLACE forbids.
+drop view if exists latest_snapshots;
+
+create view latest_snapshots as
+select distinct on (sku_id, competitor_id)
+  ps.*,
+  s.short_title,
+  s.price_ex_vat as our_price,
+  s.product_url  as our_url,
+  s.unit_qty     as our_unit_qty,
+  c.name         as competitor_name,
+  c.domain       as competitor_domain,
+  c.vat_status   as competitor_vat_default
+from price_snapshots ps
+join skus s on s.sku_id = ps.sku_id
+join competitors c on c.id = ps.competitor_id
+order by sku_id, competitor_id, scraped_at desc;

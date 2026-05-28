@@ -908,6 +908,7 @@ class PriceScraper:
             "diff_pct":            None,
             "diff_pct_normalised": None,
             "competitor_unit_qty": None,
+            "pack_qty_flag":       None,
             "confidence":          None,
             "error_message":       None,
             "_comp_title":         None,
@@ -1009,13 +1010,35 @@ class PriceScraper:
                 #   our_qty=1,   comp_qty=100 → we sell single, they sell pack
                 #   our_qty=100, comp_qty=100 → like-for-like, no normalisation
                 #   our_qty=1,   comp_qty=1   → both singles, no normalisation
-                our_qty  = sku.get("unit_qty") or 1
+                # Establish pack quantities. TITLES are authoritative for the
+                # maths. Our side: prefer a pack qty parsed from our own title
+                # (e.g. "…x 100"), because the skus.unit_qty column is often
+                # stale or defaulted to 1. Fall back to the column only when the
+                # title yields no pack signal.
+                our_title_qty = extract_pack_qty(sku.get("short_title", "")) or 1
+                our_col_qty   = sku.get("unit_qty") or 1
+                our_qty  = our_title_qty if our_title_qty > 1 else our_col_qty
                 comp_qty = extract_pack_qty(comp_title) or 1
 
                 # Persist the competitor's detected pack qty so the dashboard can
                 # show a true per-unit comparison. Stored as-is (1 when no pack
                 # signal found in their title).
                 snapshot["competitor_unit_qty"] = comp_qty
+
+                # ── Price-gap review flag (NEVER drives the maths) ─────────────
+                # A large raw price gap CAN indicate an undetected pack-size
+                # mismatch — but it can equally mean a genuinely cheaper rival,
+                # a VAT-basis error, or a clearance price. So we only RAISE A
+                # FLAG for human review; we never infer a multiple or normalise
+                # by it. Trigger: qtys look like singles on both sides yet the
+                # raw per-item prices differ by enough to look pack-like.
+                if our_qty == comp_qty and their_ex and our_price:
+                    ratio = max(our_price, their_ex) / min(our_price, their_ex)
+                    if ratio >= 1.5:
+                        snapshot["pack_qty_flag"] = (
+                            f"raw price gap {ratio:.1f}× with no pack signal in "
+                            f"either title — verify pack sizes"
+                        )
 
                 if our_qty != comp_qty:
                     our_per_unit   = per_unit_price(our_price, our_qty)
