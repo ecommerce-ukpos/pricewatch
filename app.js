@@ -1578,11 +1578,16 @@ async function loadUsers() {
     return;
   }
   try {
-    const { data: profiles } = await sb.from('profiles').select('*').order('created_at',{ascending:false});
-    const active = (profiles||[]).filter(p => p.status === 'active');
+    const [{ data: profiles }, { data: requests }] = await Promise.all([
+      sb.from('profiles').select('*').order('created_at', { ascending: false }),
+      sb.from('access_requests').select('*').order('requested_at', { ascending: false }),
+    ]);
+
+    const active  = (profiles||[]).filter(p => p.status === 'approved');
     const pending = (profiles||[]).filter(p => p.status === 'pending');
 
     $('users-sub').textContent = `${active.length} active user${active.length===1?'':'s'}`;
+
     $('users-list').innerHTML = active.length ? active.map(u => {
       const initials = (u.full_name||u.email||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
       return `<div class="user-row">
@@ -1597,44 +1602,56 @@ async function loadUsers() {
       </div>`;
     }).join('') : '<div style="padding:12px;color:var(--t2);font-size:12px">No active users</div>';
 
-    $('pending-list').innerHTML = pending.length ? pending.map(u => `
-      <div class="user-row">
-        <div class="avatar" style="background:var(--ab);color:var(--amb)"><i class="ti ti-clock" style="font-size:14px"></i></div>
-        <div style="flex:1">
-          <div style="font-weight:500">${u.full_name||u.email}</div>
-          <div style="font-size:11px;color:var(--t2)">${u.email}</div>
-        </div>
-        <button class="btn sm prim" onclick="approveUser('${u.id}','${u.email}',this)">Approve</button>
-        <button class="btn sm danger" onclick="rejectUser('${u.id}',this)">Reject</button>
-      </div>`).join('') : '<div style="padding:12px;color:var(--t2);font-size:12px">No pending requests</div>';
+    // Combine pending profiles + access_requests
+    const pendingHtml = [
+      ...(requests||[]).map(r => `
+        <div class="user-row">
+          <div class="avatar" style="background:var(--ab);color:var(--amb)"><i class="ti ti-clock" style="font-size:14px"></i></div>
+          <div style="flex:1">
+            <div style="font-weight:500">${r.full_name||r.email}</div>
+            <div style="font-size:11px;color:var(--t2)">${r.email} · requested ${new Date(r.requested_at).toLocaleDateString('en-GB')}</div>
+          </div>
+          <button class="btn sm prim" onclick="approveRequest('${r.email}','${(r.full_name||'').replace(/'/g,"\\'")}',this)">Approve</button>
+          <button class="btn sm danger" onclick="rejectRequest('${r.email}',this)">Reject</button>
+        </div>`),
+      ...pending.map(u => `
+        <div class="user-row">
+          <div class="avatar" style="background:var(--ab);color:var(--amb)"><i class="ti ti-clock" style="font-size:14px"></i></div>
+          <div style="flex:1">
+            <div style="font-weight:500">${u.full_name||u.email}</div>
+            <div style="font-size:11px;color:var(--t2)">${u.email}</div>
+          </div>
+          <button class="btn sm prim" onclick="approveUser('${u.id}','${u.email}',this)">Approve</button>
+          <button class="btn sm danger" onclick="rejectUser('${u.id}',this)">Reject</button>
+        </div>`),
+    ].join('');
+
+    $('pending-list').innerHTML = pendingHtml || '<div style="padding:12px;color:var(--t2);font-size:12px">No pending requests</div>';
+
   } catch (e) {
     $('users-list').innerHTML = `<div style="color:var(--red);padding:8px">${e.message}</div>`;
   }
 }
 
-async function approveUser(userId, email, btn) {
+async function approveRequest(email, fullName, btn) {
   btn.disabled = true; btn.textContent = 'Approving…';
   try {
-    await authPost('/approve-user', { user_id: userId, email });
+    const { data: { session } } = await sb.auth.getSession();
+    const res = await fetch('https://uaqakssusydpjzrcznhb.supabase.co/functions/v1/approve-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + session.access_token },
+      body: JSON.stringify({ email }),
+    });
+    if (!res.ok) { const e = await res.json().catch(()=>{}); throw new Error(e?.error||'Failed'); }
     loadUsers();
   } catch (e) { btn.disabled = false; btn.textContent = 'Approve'; alert('Approve failed: ' + e.message); }
 }
 
-async function rejectUser(userId, btn) {
-  if (!confirm('Reject this access request?')) return;
+async function rejectRequest(email, btn) {
+  if (!confirm(`Reject request from ${email}?`)) return;
   btn.disabled = true;
   try {
-    const { error } = await sb.from('profiles').update({ status: 'rejected' }).eq('id', userId);
-    if (error) throw new Error(error.message);
-    loadUsers();
-  } catch (e) { btn.disabled = false; alert(e.message); }
-}
-
-async function revokeUser(userId, btn) {
-  if (!confirm('Revoke this user\'s access?')) return;
-  btn.disabled = true;
-  try {
-    const { error } = await sb.from('profiles').update({ status: 'rejected' }).eq('id', userId);
+    const { error } = await sb.from('access_requests').delete().eq('email', email);
     if (error) throw new Error(error.message);
     loadUsers();
   } catch (e) { btn.disabled = false; alert(e.message); }
