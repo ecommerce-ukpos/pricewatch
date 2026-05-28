@@ -287,6 +287,7 @@
           <div class="cmd-title" id="comp-detail-name">—</div>
           <div class="cmd-sub" id="comp-detail-sub">—</div>
         </div>
+        <button class="btn sm ghost" onclick="scrollToCompNotes()" title="Jump to notes" style="color:var(--blu);align-self:center"><i class="ti ti-note"></i> Competitor notes</button>
         <div class="cmd-actions">
           <div class="legend" id="comp-detail-legend"></div>
           <div class="icon-tog-wrap">
@@ -315,6 +316,21 @@
             <th class="sortable" onclick="sortCompSkuTable('scraped_at')">Updated</th>
             <th></th>
           </tr></thead><tbody id="comp-sku-tbody"></tbody></table>
+        </div>
+      </div>
+      <!-- notes footer — always visible below both grid and list views -->
+      <div id="comp-notes-footer" style="flex-shrink:0;border-top:1px solid var(--border);background:var(--surface);padding:12px 18px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--t3)"><i class="ti ti-note" style="font-size:13px;margin-right:4px"></i>Competitor notes</div>
+          <span id="comp-notes-status" style="font-size:11px;color:var(--t3)"></span>
+        </div>
+        <textarea id="comp-notes-text" placeholder="Notes about this competitor — pricing quirks, VAT basis, contacts, anything worth remembering…"
+          oninput="markCompNotesDirty()"
+          style="width:100%;min-height:64px;max-height:180px;resize:vertical;padding:8px 10px;border:1px solid var(--bm);border-radius:var(--r);font-family:inherit;font-size:12px;line-height:1.5;color:var(--text);background:var(--bg);outline:none"
+          autocomplete="off" spellcheck="true" data-1p-ignore data-lpignore="true"></textarea>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+          <button class="btn sm prim" id="comp-notes-save" onclick="saveCompNotes()"><i class="ti ti-device-floppy"></i> Save notes</button>
+          <span id="comp-notes-dirty" style="font-size:11px;color:var(--amb);display:none">Unsaved changes</span>
         </div>
       </div>
     </div>

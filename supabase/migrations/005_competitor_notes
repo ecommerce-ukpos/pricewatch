@@ -1,0 +1,8 @@
+-- PriceWatch Pro — Migration 005
+-- Adds a free-text notes field to competitors, edited from the competitor
+-- detail page. No view rebuild needed: latest_snapshots selects only named
+-- competitor columns (name, domain, vat_status), never competitors.*, so the
+-- new column does not affect the view's shape.
+
+alter table competitors
+  add column if not exists notes text;

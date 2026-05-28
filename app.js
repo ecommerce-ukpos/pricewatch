@@ -1103,6 +1103,66 @@ async function loadCompDetail(opts) {
   // Set view from preference
   const defaultGrid = $('pref-default-grid')?.checked !== false;
   setCompView(defaultGrid ? 'grid' : 'list');
+
+  // Load saved notes for this competitor
+  loadCompNotes();
+}
+
+/* ── Competitor notes ── */
+let compNotesDirty = false;
+
+async function loadCompNotes() {
+  const ta = $('comp-notes-text');
+  const status = $('comp-notes-status');
+  if (!ta) return;
+  ta.value = '';
+  compNotesDirty = false;
+  $('comp-notes-dirty').style.display = 'none';
+  status.textContent = 'Loading…';
+  try {
+    const { data, error } = await sb.from('competitors').select('notes').eq('id', currentCompId).single();
+    if (error) throw new Error(error.message);
+    ta.value = data?.notes || '';
+    status.textContent = data?.notes ? 'Saved' : 'No notes yet';
+  } catch (e) {
+    status.textContent = 'Could not load notes';
+  }
+}
+
+function markCompNotesDirty() {
+  compNotesDirty = true;
+  $('comp-notes-dirty').style.display = '';
+  $('comp-notes-status').textContent = '';
+}
+
+async function saveCompNotes() {
+  const ta  = $('comp-notes-text');
+  const btn = $('comp-notes-save');
+  const status = $('comp-notes-status');
+  if (!ta || currentCompId == null) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Saving…';
+  try {
+    const { error } = await sb.from('competitors').update({ notes: ta.value }).eq('id', currentCompId);
+    if (error) throw new Error(error.message);
+    compNotesDirty = false;
+    $('comp-notes-dirty').style.display = 'none';
+    status.textContent = 'Saved';
+    btn.innerHTML = '<i class="ti ti-check"></i> Saved';
+    setTimeout(() => { btn.disabled = false; btn.innerHTML = orig; }, 1500);
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    status.textContent = 'Save failed: ' + e.message;
+  }
+}
+
+function scrollToCompNotes() {
+  const footer = $('comp-notes-footer');
+  const ta = $('comp-notes-text');
+  if (footer) footer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  if (ta) setTimeout(() => ta.focus(), 300);
 }
 
 function renderCompDetail() {
