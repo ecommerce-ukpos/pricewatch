@@ -16,6 +16,7 @@ let compViewMode = 'grid';
 let compSkusAll = [], compSkusFiltered = [];
 let drawerSkuId = null, drawerFromPanel = null;
 let distChart = null;
+let appBootstrapped = false; // true after first sign-in load; gates redundant alerts re-fetch
 
 /* Configurable thresholds — loaded from localStorage */
 let T = { red: 10, amb: 5, par: 2 };
@@ -264,8 +265,11 @@ function go(name, opts = {}) {
   }[name];
   if (navKey && $('nav-' + navKey)) $('nav-' + navKey).classList.add('active');
 
-  /* Panel-specific init */
-  if (name === 'skus') { const q = $('skuQ'); if (q && q.value === (currentUser?.email||'')) q.value = ''; if (!skusLoaded) { skusLoaded = true; loadSKUs(); } }
+  /* Panel-specific init — every panel re-fetches on entry so data is always
+     fresh. (All-SKUs previously loaded only once via a skusLoaded guard, which
+     is why it showed stale data until a manual refresh — guard removed.) */
+  if (name === 'skus') { const q = $('skuQ'); if (q && q.value === (currentUser?.email||'')) q.value = ''; loadSKUs(); }
+  if (name === 'alerts')      { if (appBootstrapped) loadDashboard(); }
   if (name === 'review')      loadReview();
   if (name === 'bycat')       loadByCategory();
   if (name === 'bycomp')      loadByCompetitor();
@@ -358,8 +362,14 @@ async function onSignedIn(session) {
     const usersTab = $('sn-users');
     if (usersTab) usersTab.style.display = '';
   }
+  /* loadDashboard() populates global chrome (sidebar badges, footer counts,
+     sync status) shown on every page, plus the alerts panel — so call it once
+     at sign-in regardless of landing route. Navigation reloads are handled in
+     go(); the bootstrapped flag below prevents a double-fetch when the landing
+     route is the alerts panel. */
   loadDashboard();
   restoreRoute();
+  appBootstrapped = true;
   /* Pre-fetch SKU list in the background so By Category loads instantly */
   if (!allSkus.length) {
     sb.from('skus')
@@ -2007,7 +2017,7 @@ async function saveMatchUrl(rowId, skuId, compId, btn) {
 /* ════════════════════════════════════════
    STATE FLAGS + INIT
 ════════════════════════════════════════ */
-let skusLoaded = false;
+let skusLoaded = false; // retained: no longer gates loading; kept to avoid touching unrelated refs
 
 /* React to hash changes (back/forward buttons) */
 window.addEventListener('hashchange', () => {
