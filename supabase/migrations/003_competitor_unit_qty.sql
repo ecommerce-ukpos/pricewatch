@@ -8,8 +8,12 @@ alter table price_snapshots
   add column if not exists competitor_unit_qty int;
 
 -- Recreate latest_snapshots so the new column is exposed to the frontend.
--- (ps.* now includes competitor_unit_qty automatically.)
-create or replace view latest_snapshots as
+-- NOTE: we DROP then CREATE (rather than CREATE OR REPLACE) because adding
+-- competitor_unit_qty to ps.* plus our_unit_qty changes the view's column
+-- ordering, and Postgres won't let CREATE OR REPLACE reorder existing columns.
+drop view if exists latest_snapshots;
+
+create view latest_snapshots as
 select distinct on (sku_id, competitor_id)
   ps.*,
   s.short_title,

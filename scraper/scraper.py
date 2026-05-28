@@ -907,6 +907,7 @@ class PriceScraper:
             "competitor_url":      None,
             "diff_pct":            None,
             "diff_pct_normalised": None,
+            "competitor_unit_qty": None,
             "confidence":          None,
             "error_message":       None,
             "_comp_title":         None,
@@ -1010,6 +1011,11 @@ class PriceScraper:
                 #   our_qty=1,   comp_qty=1   → both singles, no normalisation
                 our_qty  = sku.get("unit_qty") or 1
                 comp_qty = extract_pack_qty(comp_title) or 1
+
+                # Persist the competitor's detected pack qty so the dashboard can
+                # show a true per-unit comparison. Stored as-is (1 when no pack
+                # signal found in their title).
+                snapshot["competitor_unit_qty"] = comp_qty
 
                 if our_qty != comp_qty:
                     our_per_unit   = per_unit_price(our_price, our_qty)
