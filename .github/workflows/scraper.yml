@@ -2,45 +2,43 @@ name: Price Scraper
 
 on:
   schedule:
-    # Matched run — re-scrapes all confirmed URLs in one go, every 3 days
-    # Runs at 1am on Mon, Thu, Sun (every ~3 days)
+    # Price scrape — every 3 days (Mon/Thu/Sun at 1am)
+    # Only visits confirmed competitor URLs — fast and reliable
     - cron: '0 1 * * 0,1,4'
-
-    # Batch search run — finds new matches across unscraped SKUs
-    # Mon–Fri only, 570 SKUs/day ≈ 20k pairs/week, full pass in ~5 working days
-    - cron: '0 3 * * 1-5'
 
   workflow_dispatch:
     inputs:
-      mode:
-        description: 'Scrape mode'
+      job:
+        description: 'Which job to run'
         required: true
-        default: 'matched'
+        default: 'scrape'
         type: choice
         options:
-          - matched    # re-scrape all confirmed URLs in one go
-          - batch      # search phase — next 570 unscraped SKUs
-          - skus       # specific SKU IDs only
-          - full       # all SKUs × all competitors (slow, use batch instead)
-      batch_size:
-        description: 'SKUs per batch run (mode=batch only, default 570)'
-        required: false
-        default: '570'
-      batch_id:
-        description: 'Batch group label e.g. 2026-Q2 (blank = auto-generated)'
-        required: false
-        default: ''
+          - scrape      # price scrape of confirmed URLs (default, scheduled)
+          - discover    # URL discovery — find new competitor product pages
       scraper_skus:
-        description: 'Comma-separated SKU IDs (mode=skus only)'
+        description: 'Comma-separated SKU IDs (optional — targets specific SKUs only)'
         required: false
         default: ''
       scraper_workers:
-        description: 'Parallel workers (default: 5)'
+        description: 'Parallel workers (scrape default: 5, discover default: 2)'
         required: false
         default: ''
+      discover_force:
+        description: 'Re-discover already-matched SKUs? (discover only)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      discover_sku_limit:
+        description: 'Max SKUs per discovery run (default 250)'
+        required: false
+        default: '250'
 
 jobs:
-  scrape:
+  run:
     runs-on: ubuntu-22.04
     timeout-minutes: 360
     steps:
@@ -53,37 +51,40 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install supabase playwright
+        run: pip install supabase playwright httpx
 
       - name: Install Playwright browsers
-        run: python -m playwright install chromium
+        run: python -m playwright install --with-deps chromium
 
-      - name: Determine mode for scheduled runs
-        id: mode
+      - name: Determine job for scheduled runs
+        id: job
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
-            HOUR=$(date -u +%H)
-            if [ "$HOUR" = "03" ]; then
-              echo "mode=batch"   >> $GITHUB_OUTPUT
-              echo "batch_size=570" >> $GITHUB_OUTPUT
-            else
-              echo "mode=matched" >> $GITHUB_OUTPUT
-              echo "batch_size=570" >> $GITHUB_OUTPUT
-            fi
+            echo "job=scrape" >> $GITHUB_OUTPUT
           else
-            echo "mode=${{ github.event.inputs.mode || 'matched' }}" >> $GITHUB_OUTPUT
-            echo "batch_size=${{ github.event.inputs.batch_size || '570' }}" >> $GITHUB_OUTPUT
+            echo "job=${{ github.event.inputs.job || 'scrape' }}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Run scraper
+      - name: Run price scrape
+        if: steps.job.outputs.job == 'scrape'
         env:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          SCRAPER_MODE:         ${{ steps.mode.outputs.mode }}
-          SCRAPER_SKUS:         ${{ github.event.inputs.scraper_skus }}
+          SCRAPER_SKUS:         ${{ github.event.inputs.scraper_skus || '' }}
           SCRAPER_WORKERS:      ${{ github.event.inputs.scraper_workers || '5' }}
           SCRAPER_DELAY_MIN:    '3'
           SCRAPER_DELAY_MAX:    '7'
-          SCRAPER_BATCH_SIZE:   ${{ steps.mode.outputs.batch_size }}
-          SCRAPER_BATCH_ID:     ${{ github.event.inputs.batch_id || '' }}
-        run: python scraper/scraper.py
+        run: python scraper/scrape.py scheduled
+
+      - name: Run URL discovery
+        if: steps.job.outputs.job == 'discover'
+        env:
+          SUPABASE_URL:          ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY:  ${{ secrets.SUPABASE_SERVICE_KEY }}
+          DISCOVER_SKUS:         ${{ github.event.inputs.scraper_skus || '' }}
+          DISCOVER_WORKERS:      ${{ github.event.inputs.scraper_workers || '2' }}
+          DISCOVER_FORCE:        ${{ github.event.inputs.discover_force || 'false' }}
+          DISCOVER_SKU_LIMIT:    ${{ github.event.inputs.discover_sku_limit || '250' }}
+          DISCOVER_DELAY_MIN:    '8'
+          DISCOVER_DELAY_MAX:    '15'
+        run: python scraper/discover.py
