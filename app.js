@@ -1796,11 +1796,18 @@ function renderSkuCompRows(rows) {
     const compQty = r.competitor_unit_qty || 1;
     const perUnitDiffer = ourQty !== compQty && (ourQty > 1 || compQty > 1);
 
-    // Per-unit sub-labels under each price
-    const ourPerUnit   = (ourQty > 1 && r.our_price)
-      ? `<div>${perUnitLabel(parseFloat(r.our_price), ourQty)}</div>` : '';
-    const theirPerUnit = (compQty > 1 && ex)
-      ? `<div>${perUnitLabel(ex, compQty)}</div>` : '';
+    // Per-unit sub-label under the competitor price. Shown whenever the two
+    // sides differ in pack size — including the case where THEIR qty is 1 but
+    // ours is a pack, so the "/unit ×1" line makes the like-for-like basis
+    // explicit. Built inline (not via perUnitLabel) because that shared helper
+    // deliberately suppresses the qty-1 case for the All-SKUs table; here we
+    // want it. (Our own per-unit price is shown in the SKU hero above.)
+    let theirPerUnit = '';
+    if (perUnitDiffer && ex) {
+      const per = ex / compQty;
+      const perTxt = per < 1 ? `£${per.toFixed(3)}` : `£${per.toFixed(2)}`;
+      theirPerUnit = `<div><span style="font-size:10px;color:var(--t3);white-space:nowrap">${perTxt}/unit ×${compQty}</span></div>`;
+    }
 
     // Small tag on the gap cell when the comparison was normalised per-unit
     const basisTag = perUnitDiffer
