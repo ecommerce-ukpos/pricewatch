@@ -827,8 +827,8 @@ function filterReview() {
       <div id="rev-url-wrap-${r.id}" style="display:none;margin-top:8px">
         <div style="font-size:11px;color:var(--t2);margin-bottom:6px">Paste the correct URL for this product (optional — leave blank to reject without one):</div>
         <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
-          <input id="rev-url-${r.id}" type="text" placeholder="https://competitor.com/correct-product-page"
-            autocomplete="new-password" spellcheck="false"
+          <input id="rev-url-${r.id}" type="url" name="rev-url-${r.id}" placeholder="https://competitor.com/correct-product-page"
+            autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-1p-ignore data-lpignore="true" data-form-type="other"
             style="flex:1;min-width:200px;padding:6px 10px;font-size:11px;border:1px solid var(--bm);border-radius:var(--r);font-family:inherit;outline:none">
           <button class="btn sm prim" onclick="saveCorrectUrl(${r.id},this)"><i class="ti ti-device-floppy"></i> Save URL &amp; reject</button>
           <button class="btn sm danger" onclick="reviewDecision(${r.id},'reject',this)">Reject without URL</button>
@@ -1843,8 +1843,8 @@ function renderSkuCompRows(rows) {
           Match URL for <strong>${r.competitor_name}</strong> — paste the exact product page URL
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <input id="match-url-${rowId}" type="text" value="${r.competitor_url||''}" placeholder="https://competitor.com/product-page"
-            autocomplete="new-password" spellcheck="false"
+          <input id="match-url-${rowId}" type="url" name="match-url-${rowId}" value="${r.competitor_url||''}" placeholder="https://competitor.com/product-page"
+            autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-1p-ignore data-lpignore="true" data-form-type="other"
             style="flex:1;min-width:260px;padding:6px 10px;font-size:12px;border:1px solid var(--bbd);border-radius:var(--r);font-family:inherit;outline:none;background:var(--surface)"
             onkeydown="if(event.key==='Enter')saveMatchUrl('${rowId}','${r.sku_id}',${r.competitor_id},this.closest('tr').previousElementSibling,event)">
           <button class="btn sm prim" onclick="saveMatchUrl('${rowId}','${r.sku_id}',${r.competitor_id},this)">

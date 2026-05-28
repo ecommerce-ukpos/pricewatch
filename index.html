@@ -172,7 +172,7 @@
         </div>
         <div class="cmd-actions">
           <div class="filter-row" style="margin:0">
-            <input type="search" class="search" id="review-search" placeholder="Filter by SKU or competitor…" oninput="filterReview()" style="min-width:200px" autocomplete="new-password" autocorrect="off" autocapitalize="off" spellcheck="false">
+            <input type="search" class="search" id="review-search" name="review-filter" placeholder="Filter by SKU or competitor…" oninput="filterReview()" style="min-width:200px" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-1p-ignore data-lpignore="true" data-form-type="other">
             <select id="review-comp-filter" onchange="filterReview()"><option value="">All competitors</option></select>
           </div>
         </div>
@@ -196,7 +196,7 @@
       <!-- filters — fixed, never scrolls away -->
       <div style="background:var(--surface);border-bottom:1px solid var(--border);padding:10px 14px;flex-shrink:0">
         <div class="filter-row" style="margin:0">
-          <input type="search" class="search" id="skuQ" placeholder="Search SKU ID, product name, competitor…" oninput="debounce(filterSKUs,400)()" autocomplete="off" spellcheck="false">
+          <input type="search" class="search" id="skuQ" name="sku-filter" placeholder="Search SKU ID, product name, competitor…" oninput="debounce(filterSKUs,400)()" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-1p-ignore data-lpignore="true" data-form-type="other">
           <select id="fDiff" onchange="filterSKUs()">
             <option value="">All differentials</option>
             <option value="crit">Critical — we're most expensive</option>
@@ -293,7 +293,7 @@
             <button class="icon-tog active" id="tog-grid" onclick="setCompView('grid')" title="Card grid"><i class="ti ti-layout-grid" style="font-size:14px"></i></button>
             <button class="icon-tog" id="tog-list" onclick="setCompView('list')" title="List"><i class="ti ti-list" style="font-size:14px"></i></button>
           </div>
-          <input type="text" id="comp-filter-q" placeholder="Filter SKUs…" style="padding:5px 9px;border:1px solid var(--bm);border-radius:var(--r);font-size:12px;font-family:inherit;outline:none;width:170px" oninput="filterCompSKUs(this.value)" autocomplete="new-password" spellcheck="false">
+          <input type="search" id="comp-filter-q" name="comp-sku-filter" placeholder="Filter SKUs…" style="padding:5px 9px;border:1px solid var(--bm);border-radius:var(--r);font-size:12px;font-family:inherit;outline:none;width:170px" oninput="filterCompSKUs(this.value)" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-1p-ignore data-lpignore="true" data-form-type="other">
           <button class="btn sm"><i class="ti ti-download"></i> Export</button>
         </div>
       </div>
