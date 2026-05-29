@@ -17,14 +17,16 @@ a{color:var(--blu);text-decoration:underline;text-decoration-color:rgba(24,95,16
 a:hover{text-decoration-color:var(--blu)}
 
 /* ── Shell ── */
-.shell{display:grid;grid-template-columns:220px 1fr;grid-template-rows:48px 1fr;height:100vh;overflow:hidden}
+.shell{display:grid;grid-template-columns:220px 1fr;grid-template-rows:48px 1fr;height:100vh;overflow:hidden;transition:grid-template-columns .22s cubic-bezier(.4,0,.2,1)}
+.shell.nav-collapsed{grid-template-columns:52px 1fr}
 
 /* ── Topbar ── */
 .topbar{grid-column:1/-1;background:#111110;display:flex;align-items:center;padding:0 16px;gap:10px;border-bottom:2px solid var(--orange);z-index:20}
-.logo-full{height:22px;width:auto;max-width:160px;display:block;flex-shrink:0;overflow:hidden;transition:opacity .15s .05s,max-width .22s}
-.logo-icon{height:22px;width:22px;max-width:0;display:block;flex-shrink:0;opacity:0;overflow:hidden;transition:opacity .15s,max-width .22s}
-.shell.nav-collapsed .logo-full{opacity:0;max-width:0}
-.shell.nav-collapsed .logo-icon{opacity:1;max-width:22px}
+.logo-full{height:22px;display:flex;align-items:center;flex-shrink:0;overflow:hidden;transition:opacity .15s .05s,width .22s}
+.logo-full img{height:22px;width:auto}
+.logo-icon{height:22px;width:0;display:block;flex-shrink:0;opacity:0;overflow:hidden;transition:opacity .15s .05s,width .22s}
+.shell.nav-collapsed .logo-full{opacity:0;width:0;pointer-events:none}
+.shell.nav-collapsed .logo-icon{opacity:1;width:28px}
 .logo{background:var(--orange);border-radius:4px;padding:3px 8px;display:inline-flex;align-items:center;gap:0;flex-shrink:0}
 .logo .uk{color:#fff;font-weight:800;font-size:13px;border-right:1.5px solid rgba(255,255,255,.35);padding-right:5px;margin-right:4px}
 .logo .pos{color:#fff;font-weight:800;font-size:13px}
@@ -39,10 +41,7 @@ a:hover{text-decoration-color:var(--blu)}
 #header-email{color:rgba(255,255,255,.5);font-size:14px}
 
 /* ── Sidebar ── */
-/* ── Shell override for collapsible sidebar ── */
-.shell{grid-template-columns:220px 1fr !important}
-.shell.nav-collapsed{grid-template-columns:52px 1fr !important}
-.sidebar{background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;z-index:10;width:var(--sidebar-w,220px);flex-shrink:0;overflow:hidden;transition:width .22s cubic-bezier(.4,0,.2,1)}
+.sidebar{background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;z-index:10;width:220px;flex-shrink:0;overflow:hidden;transition:width .22s cubic-bezier(.4,0,.2,1)}
 .sidebar.nav-collapsed{width:52px}
 .nav-sect{padding:12px 12px 3px;font-size:10px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;white-space:nowrap;overflow:hidden;transition:opacity .12s .05s,height .22s,padding .22s}
 .sidebar.nav-collapsed .nav-sect{opacity:0;height:0;padding:0}
@@ -357,12 +356,12 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
 /* ── Mobile sidebar ── */
 .mob-hamburger{display:none;background:none;border:none;cursor:pointer;color:rgba(255,255,255,.65);padding:4px;border-radius:4px;align-items:center;justify-content:center}
 .mob-hamburger:hover{background:rgba(255,255,255,.1)}
-.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9;backdrop-filter:blur(2px)}
+.sidebar-overlay{display:none;position:fixed;top:48px;left:0;right:0;bottom:0;background:rgba(0,0,0,.4);z-index:9;backdrop-filter:blur(2px)}
 .sidebar-overlay.open{display:block}
 @media(max-width:768px){
   .shell{grid-template-columns:1fr !important;grid-template-rows:48px 1fr}
   .shell.nav-collapsed{grid-template-columns:1fr !important}
-  .sidebar{position:fixed;top:0;left:0;height:100vh;z-index:10;width:220px !important;transform:translateX(-100%);transition:transform .22s cubic-bezier(.4,0,.2,1);box-shadow:4px 0 24px rgba(0,0,0,.18)}
+  .sidebar{position:fixed;top:48px;left:0;height:calc(100vh - 48px);z-index:10;width:220px !important;transform:translateX(-100%);transition:transform .22s cubic-bezier(.4,0,.2,1);box-shadow:4px 0 24px rgba(0,0,0,.18)}
   .sidebar.mob-open{transform:translateX(0)}
   .sidebar.nav-collapsed{transform:translateX(-100%)}
   .mob-hamburger{display:inline-flex}
