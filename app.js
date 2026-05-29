@@ -74,9 +74,6 @@ function fmtPrice(p) {
   return '£' + parseFloat(p).toFixed(2);
 }
 
-/* Per-unit display helper.
-   Given an ex-VAT price and a pack qty, returns a small muted "per unit" label
-   when qty > 1, else ''. Uses 3 dp for sub-£1 unit prices, 2 dp otherwise. */
 function perUnitLabel(exPrice, qty) {
   if (!exPrice || !qty || qty <= 1) return '';
   const per = exPrice / qty;
@@ -151,19 +148,10 @@ function slugify(name) {
   return (name||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
 }
 
-/* Cached access token — avoids a getSession() round-trip on every fetch */
 let cachedToken = null;
 
-/* Always ask the Supabase client for the current session. The client keeps a
-   valid token in memory and refreshes it automatically when near expiry, so
-   getSession() is cheap when the token is fresh and self-heals when it isn't.
-   We no longer trust a long-lived cached token — doing so caused writes to fail
-   with stale-token 401s around the hourly refresh and right after a password
-   change (which rotates the token immediately). */
 async function getToken() {
   let { data: { session } } = await sb.auth.getSession();
-  /* If the session is missing or the token is about to expire, force a refresh
-     so we never send a token the server will reject. */
   const nearExpiry = session?.expires_at
     ? (session.expires_at * 1000 - Date.now()) < 60_000
     : false;
@@ -175,10 +163,6 @@ async function getToken() {
   return cachedToken;
 }
 
-/* Ensure the Supabase client holds a valid (non-expired) session before a
-   direct sb.from(...).update() / sb.auth call. These bypass authFetch's retry,
-   so we proactively refresh when near expiry to avoid the stale-token failures
-   that made notes/URL/password saves need several attempts. */
 async function ensureFreshSession() {
   const { data: { session } } = await sb.auth.getSession();
   const nearExpiry = session?.expires_at
@@ -195,9 +179,6 @@ async function authFetch(path, opts = {}, _retried = false) {
   const token = await getToken();
   if (token) opts.headers['Authorization'] = 'Bearer ' + token;
   const res = await fetch(API_BASE + path, opts);
-  /* If the token was rejected, force one refresh and retry exactly once.
-     This makes a stale token heal inside a single user action instead of
-     failing and needing a manual second attempt. */
   if (res.status === 401 && !_retried) {
     cachedToken = null;
     await sb.auth.refreshSession();
@@ -235,12 +216,10 @@ const PANEL_MAP = {
 const NAV_ITEMS = ['alerts','review','skus','bycat','bycomp','schedule','settings'];
 
 function go(name, opts = {}) {
-  /* Hide all panels */
   document.querySelectorAll('.panel').forEach(p => {
     p.classList.remove('active');
     p.style.display = '';
   });
-  /* Remove active from all nav items */
   NAV_ITEMS.forEach(n => {
     const el = $('nav-' + n);
     if (el) el.classList.remove('active');
@@ -251,13 +230,11 @@ function go(name, opts = {}) {
   if (!panel) { go('alerts'); return; }
   panel.classList.add('active');
 
-  /* Update URL hash */
   let hash = '#' + name;
   if (opts.skuId) { hash = '#sku/' + opts.skuId; }
   else if (opts.compSlug) { hash = '#competitor/' + opts.compSlug; }
   history.replaceState(null, '', hash);
 
-  /* Update sidebar active */
   const navKey = {
     'alerts':'alerts','review':'review','skus':'skus','bycat':'bycat',
     'bycomp':'bycomp','comp-detail':'bycomp','sku-detail':'skus',
@@ -265,18 +242,34 @@ function go(name, opts = {}) {
   }[name];
   if (navKey && $('nav-' + navKey)) $('nav-' + navKey).classList.add('active');
 
-  /* Panel-specific init — every panel re-fetches on entry so data is always
-     fresh. (All-SKUs previously loaded only once via a skusLoaded guard, which
-     is why it showed stale data until a manual refresh — guard removed.) */
-  if (name === 'skus') { const q = $('skuQ'); if (q && q.value === (currentUser?.email||'')) q.value = ''; loadSKUs(); }
+  /* FIX 1 — reset panel content to spinner before every load so stale data
+     is never shown while the new fetch is in flight */
+  if (name === 'skus') {
+    const q = $('skuQ'); if (q && q.value === (currentUser?.email||'')) q.value = '';
+    $('sku-tbody').innerHTML = '<tr><td colspan="10"><div class="loading"><span class="spinner"></span></div></td></tr>';
+    loadSKUs();
+  }
   if (name === 'alerts')      { if (appBootstrapped) loadDashboard(); }
-  if (name === 'review')      loadReview();
+  if (name === 'review')      {
+    $('review-list').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+    loadReview();
+  }
   if (name === 'bycat')       loadByCategory();
-  if (name === 'bycomp')      loadByCompetitor();
-  if (name === 'schedule')    loadRuns();
+  if (name === 'bycomp')      {
+    $('bycomp-tbody').innerHTML = '<tr><td colspan="8"><div class="loading"><span class="spinner"></span></div></td></tr>';
+    loadByCompetitor();
+  }
+  if (name === 'schedule')    {
+    $('run-history').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+    loadRuns();
+  }
   if (name === 'settings')    { goSett('configurables'); loadCompetitorSettings(); loadUsers(); }
   if (name === 'comp-detail') { loadCompDetail(opts); }
-  if (name === 'sku-detail')  { loadSkuDetail(opts); }
+  if (name === 'sku-detail')  {
+    $('sku-hero-content').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+    $('sku-comp-tbody').innerHTML = '<tr><td colspan="10"><div class="loading"><span class="spinner"></span></div></td></tr>';
+    loadSkuDetail(opts);
+  }
 }
 
 function restoreRoute() {
@@ -286,7 +279,6 @@ function restoreRoute() {
     go('sku-detail', { skuId: hash.slice(4) });
   } else if (hash.startsWith('competitor/')) {
     const slug = hash.slice(11);
-    /* Try to find comp by slug */
     if (sb) {
       sb.from('competitors').select('id,name,domain,vat_status').eq('active',true).then(({data}) => {
         const c = (data||[]).find(x => slugify(x.name) === slug);
@@ -316,7 +308,6 @@ function showView(v) {
     const el = $(id);
     if (!el) return;
     if (id !== v) { el.style.display = 'none'; return; }
-    /* view-app is .shell which needs display:grid, auth screens are block */
     el.style.display = (id === 'view-app') ? 'grid' : '';
   });
 }
@@ -337,7 +328,6 @@ async function bootstrap() {
   await onSignedIn(session);
 
   sb.auth.onAuthStateChange(async (event, session) => {
-    /* Always invalidate cached token on any auth event */
     cachedToken = session?.access_token || null;
     if (event === 'SIGNED_OUT' || !session) { currentUser = null; currentProfile = null; showView('view-login'); return; }
     if (['SIGNED_IN','TOKEN_REFRESHED','USER_UPDATED','INITIAL_SESSION'].includes(event)) await onSignedIn(session);
@@ -346,7 +336,7 @@ async function bootstrap() {
 
 async function onSignedIn(session) {
   currentUser  = session.user;
-  cachedToken  = session.access_token || null;  /* prime cache immediately */
+  cachedToken  = session.access_token || null;
   const { data: profiles } = await sb.from('profiles').select('*').eq('id', session.user.id).limit(1);
   if (!profiles || !profiles.length) { showView('view-pending'); return; }
   currentProfile = profiles[0];
@@ -362,15 +352,9 @@ async function onSignedIn(session) {
     const usersTab = $('sn-users');
     if (usersTab) usersTab.style.display = '';
   }
-  /* loadDashboard() populates global chrome (sidebar badges, footer counts,
-     sync status) shown on every page, plus the alerts panel — so call it once
-     at sign-in regardless of landing route. Navigation reloads are handled in
-     go(); the bootstrapped flag below prevents a double-fetch when the landing
-     route is the alerts panel. */
   loadDashboard();
   restoreRoute();
   appBootstrapped = true;
-  /* Pre-fetch SKU list in the background so By Category loads instantly */
   if (!allSkus.length) {
     sb.from('skus')
       .select('sku_id,short_title,price_ex_vat,product_url,availability,cat_l4,cat_l5,image_url,slug')
@@ -429,8 +413,6 @@ async function saveMyAccount() {
     await ensureFreshSession();
     const { error: dbErr } = await sb.from('profiles').update({ full_name: name }).eq('id', currentProfile.id);
     if (dbErr) throw new Error(dbErr.message);
-    /* Password change goes LAST: it rotates the access token immediately, which
-       would invalidate the token any subsequent write in this block relies on. */
     if (pw) {
       if (pw.length < 8) throw new Error('Password must be at least 8 characters.');
       const { error: pwErr } = await sb.auth.updateUser({ password: pw });
@@ -472,35 +454,24 @@ async function loadDashboard() {
       $('nav-alerts-badge').style.display = '';
     }
 
-    // Sidebar meta
     $('sidebar-foot').innerHTML = `<strong>${(d.sku_count||0).toLocaleString()}</strong> SKUs · <strong>${d.competitor_count||23}</strong> competitors<br><strong>${(d.snapshot_count||0).toLocaleString()}</strong> snapshots`;
 
-    // Sync status
     if (d.last_run) {
       const r = d.last_run;
       $('sync-status').innerHTML = `Last sync <strong style="color:rgba(255,255,255,.65)">${ts(r.completed_at||r.started_at)}</strong> · ${r.skus_succeeded||0} SKUs`;
     }
 
-    // Data note if review queue is large
     if (reviewCount > 100) {
       $('alerts-data-note').style.display = '';
     }
     $('alerts-sub').textContent = `${critCount} critical · ${m.warning||0} warning · ${m.oos||0} competitor OOS`;
 
-    // Priority strip
     renderPriorityStrip(d.worst || []);
-
-    // Alert render
     renderAlertList(d.alerts || []);
     if (d.alerts?.length) $('alert-ts').textContent = `— ${d.alerts.length} active`;
-
-    // Worst table
     renderWorstTable(d.worst || []);
-
-    // Chart
     buildDistChart(m);
 
-    // Review note
     const matched = d.matched_count || 0;
     const total   = d.match_count   || 0;
     $('review-confirmed').textContent = matched.toLocaleString();
@@ -533,7 +504,6 @@ function setAlertTab(tab) {
     const b = $('atab-'+t);
     if (b) b.style.background = t === tab ? 'var(--bg)' : '';
   });
-  /* Re-render alert list filtered by tab */
   if (window._lastAlerts) renderAlertList(window._lastAlerts);
 }
 
@@ -558,7 +528,7 @@ function exportAlerts() {
 }
 
 function renderAlertList(alerts) {
-  window._lastAlerts = alerts;  /* cache for tab switching and export */
+  window._lastAlerts = alerts;
   const filtered = alertTab === 'all' ? alerts
     : alertTab === 'crit' ? alerts.filter(a => a.alert_type === 'critical')
     : alertTab === 'warn' ? alerts.filter(a => a.alert_type === 'warning')
@@ -714,6 +684,9 @@ function filterSKUs() { skuPage = 1; loadSKUs(); }
    REVIEW QUEUE
 ════════════════════════════════════════ */
 let reviewAllRows = [];
+/* FIX 3a — sort state */
+let reviewSortCol = 'confidence';
+let reviewSortDir = 1; // 1 = asc, -1 = desc
 
 async function loadReview() {
   $('review-list').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
@@ -721,11 +694,8 @@ async function loadReview() {
     const d = await authFetch('/review?page=1&limit=500');
     const matches = d.data || [];
 
-    /* Fetch latest snapshot price for every match in one query */
-    const matchIds = matches.map(m => `(sku_id.eq.${m.sku_id},competitor_id.eq.${m.competitor_id})`);
     let snapMap = {};
     if (matches.length) {
-      /* Supabase doesn't support tuple IN — fetch latest_snapshots for all relevant SKUs then filter */
       const skuIds = [...new Set(matches.map(m => m.sku_id))];
       const { data: snaps } = await sb.from('latest_snapshots')
         .select('sku_id,competitor_id,competitor_price,competitor_vat,availability')
@@ -733,13 +703,11 @@ async function loadReview() {
       (snaps || []).forEach(s => { snapMap[`${s.sku_id}__${s.competitor_id}`] = s; });
     }
 
-    /* Merge snapshot data into each match row */
     reviewAllRows = matches.map(m => ({
       ...m,
       _snap: snapMap[`${m.sku_id}__${m.competitor_id}`] || null,
     }));
 
-    /* Build competitor dropdown from ALL active competitors */
     const cf = $('review-comp-filter');
     if (cf && cf.options.length === 1) {
       const { data: allComps } = await sb.from('competitors').select('id,name').eq('active',true).order('name');
@@ -753,6 +721,15 @@ async function loadReview() {
   } catch (e) {
     $('review-list').innerHTML = `<div style="color:var(--red);padding:8px">${e.message}</div>`;
   }
+}
+
+/* FIX 3c — sort setter */
+function setReviewSort(val) {
+  const parts = val.split('_');
+  reviewSortDir = parts.pop() === 'desc' ? -1 : 1;
+  reviewSortCol = parts.join('_');
+  reviewPage = 1;
+  filterReview();
 }
 
 function filterReview() {
@@ -769,6 +746,23 @@ function filterReview() {
     );
   }
   if (comp) rows = rows.filter(r => String(r.competitor_id) === String(comp));
+
+  /* FIX 3b — sort before rendering */
+  rows = [...rows].sort((a, b) => {
+    let av, bv;
+    if (reviewSortCol === 'confidence') {
+      av = a.confidence ?? 0; bv = b.confidence ?? 0;
+    } else if (reviewSortCol === 'competitor') {
+      av = a.competitors?.name || ''; bv = b.competitors?.name || '';
+    } else if (reviewSortCol === 'sku_id') {
+      av = a.sku_id || ''; bv = b.sku_id || '';
+    } else {
+      av = a[reviewSortCol] ?? ''; bv = b[reviewSortCol] ?? '';
+    }
+    if (av < bv) return -1 * reviewSortDir;
+    if (av > bv) return  1 * reviewSortDir;
+    return 0;
+  });
 
   const total   = reviewAllRows.length;
   const showing = rows.length;
@@ -817,8 +811,6 @@ function filterReview() {
       </div>
 
       <div class="rev-pair">
-
-        <!-- UKPOS side -->
         <div class="rev-side">
           <div class="rs-label" style="color:var(--blu)">UKPOS</div>
           <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px">
@@ -842,7 +834,6 @@ function filterReview() {
 
         <div style="display:flex;align-items:center;justify-content:center;padding:0 8px;color:var(--t3);font-size:18px">⇄</div>
 
-        <!-- Competitor side -->
         <div class="rev-side">
           <div class="rs-label" style="color:var(--amb)">${comp.name||'Competitor'}</div>
           <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px">
@@ -866,7 +857,6 @@ function filterReview() {
             ${snap.availability && snap.availability !== 'in_stock' ? stockBadge(snap.availability) : ''}
           </div>
         </div>
-
       </div>
 
       <div id="rev-actions-${r.id}" style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
@@ -928,6 +918,8 @@ function cancelReject(matchId) {
   $(`rev-url-wrap-${matchId}`).style.display = 'none';
 }
 
+/* FIX 2 — use authPost to the edge function instead of direct sb.from() write,
+   which is blocked by RLS for non-service-role keys */
 async function saveCorrectUrl(matchId, btn) {
   const input  = $(`rev-url-${matchId}`);
   const newUrl = (input?.value || '').trim();
@@ -940,12 +932,7 @@ async function saveCorrectUrl(matchId, btn) {
   btn.disabled = true;
   btn.innerHTML = '<i class="ti ti-loader"></i> Saving…';
   try {
-    await ensureFreshSession();
-    /* Update the competitor_matches URL then reject */
-    const { error } = await sb.from('competitor_matches')
-      .update({ competitor_url: newUrl, match_status: 'rejected', human_reviewed: true, reviewed_at: new Date().toISOString() })
-      .eq('id', matchId);
-    if (error) throw new Error(error.message);
+    await authPost(`/review/${matchId}/correct`, { url: newUrl });
     const row = $(`rev-${matchId}`);
     if (row) {
       row.style.opacity = '.45';
@@ -953,7 +940,6 @@ async function saveCorrectUrl(matchId, btn) {
       $(`rev-url-wrap-${matchId}`).innerHTML =
         `<div style="color:var(--grn);font-size:11px;padding:4px 0"><i class="ti ti-check"></i> URL saved — will be scraped on next run</div>`;
     }
-    /* Refresh local dataset */
     reviewAllRows = reviewAllRows.filter(r => r.id !== matchId);
     loadDashboard();
   } catch (e) {
@@ -985,7 +971,6 @@ function renderCategoryLevel() {
   const content = $('bycat-content');
 
   if (!catL4) {
-    /* Top level — category tiles */
     catPage = 1;
     sub.textContent = `${allSkus.length.toLocaleString()} SKUs across ${new Set(allSkus.map(s=>s.cat_l4).filter(Boolean)).size} categories`;
     const counts = {};
@@ -1001,7 +986,6 @@ function renderCategoryLevel() {
     return;
   }
 
-  /* L4 selected — show subcategory tiles if multiple L5s exist, plus table below */
   const skusInCat = allSkus.filter(s => s.cat_l4 === catL4 && (!catL5 || (s.cat_l5||'(other)') === catL5));
   const sub5s = [...new Set(allSkus.filter(s=>s.cat_l4===catL4&&s.cat_l5).map(s=>s.cat_l5))].sort();
 
@@ -1016,7 +1000,6 @@ function renderCategoryLevel() {
         : `<span style="font-weight:500">${catL4}</span>`}
     </div>`;
 
-  /* Subcategory filter tiles (only shown at L4 level when multiple L5s exist) */
   let subTiles = '';
   if (!catL5 && sub5s.length > 1) {
     const counts = {};
@@ -1032,7 +1015,6 @@ function renderCategoryLevel() {
     }</div>`;
   }
 
-  /* Paginated SKU table */
   sub.textContent = `${skusInCat.length} SKUs${catL5 ? ' in '+catL5 : ' in '+catL4}`;
   const start  = (catPage - 1) * catPageSize;
   const page   = skusInCat.slice(start, start + catPageSize);
@@ -1077,7 +1059,6 @@ function selectCat5(name) { catL5 = name; catPage = 1; renderCategoryLevel(); }
 ════════════════════════════════════════ */
 async function loadByCompetitor() {
   try {
-    /* Fetch competitors and snapshot stats in parallel */
     const [{ data: comps }, { data: snaps }] = await Promise.all([
       sb.from('competitors').select('id,name,domain,vat_status,active').eq('active',true).order('name'),
       sb.from('latest_snapshots').select('competitor_id,diff_pct_normalised,diff_pct,competitor_price').not('competitor_price','is',null)
@@ -1088,7 +1069,6 @@ async function loadByCompetitor() {
       return;
     }
 
-    /* Aggregate stats per competitor using live thresholds */
     const stats = {};
     (snaps || []).forEach(s => {
       const cid  = s.competitor_id;
@@ -1135,7 +1115,6 @@ async function loadCompDetail(opts) {
 
   buildLegend('comp-detail-legend');
 
-  // Fetch snapshots for this competitor
   $('comp-detail-stats').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
   $('comp-sku-grid').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
   $('comp-sku-tbody').innerHTML = '<tr><td colspan="8"><div class="loading"><span class="spinner"></span></div></td></tr>';
@@ -1151,15 +1130,11 @@ async function loadCompDetail(opts) {
     $('comp-sku-grid').innerHTML = `<div style="color:var(--red);padding:8px">${e.message}</div>`;
   }
 
-  // Set view from preference
   const defaultGrid = $('pref-default-grid')?.checked !== false;
   setCompView(defaultGrid ? 'grid' : 'list');
-
-  // Load saved notes for this competitor
   loadCompNotes();
 }
 
-/* ── Competitor notes ── */
 let compNotesDirty = false;
 
 async function loadCompNotes() {
@@ -1232,7 +1207,6 @@ function renderCompDetail() {
     <div class="comp-stat"><div class="cs-val" style="color:var(--t2)">${par}</div><div class="cs-label">Parity</div></div>
     <div class="comp-stat"><div class="cs-val" style="color:var(--grn)">${good}</div><div class="cs-label">We're cheaper</div></div>`;
 
-  // GRID
   $('comp-sku-grid').innerHTML = skus.length ? skus.map(s => {
     const diff = s.diff_pct_normalised ?? s.diff_pct;
     const tier = getTier(diff);
@@ -1248,7 +1222,6 @@ function renderCompDetail() {
     </div>`;
   }).join('') : '<div style="color:var(--t2);font-size:12px;padding:20px;text-align:center">No matched SKUs found</div>';
 
-  // LIST
   $('comp-sku-tbody').innerHTML = skus.length ? skus.map(s => {
     const diff = s.diff_pct_normalised ?? s.diff_pct;
     const raw  = s.competitor_price ? parseFloat(s.competitor_price) : null;
@@ -1294,7 +1267,6 @@ async function loadSkuDetail(opts) {
   $('sku-hero-content').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
   $('sku-comp-tbody').innerHTML = '<tr><td colspan="8"><div class="loading"><span class="spinner"></span></div></td></tr>';
 
-  // Set back button context
   const backBtn = $('sku-detail-back');
   if (opts.fromPanel === 'comp-detail' && currentCompName) {
     backBtn.innerHTML = `<i class="ti ti-arrow-left"></i> ${currentCompName}`;
@@ -1308,7 +1280,6 @@ async function loadSkuDetail(opts) {
   }
 
   try {
-    // Fetch SKU info
     const { data: skuArr } = await sb.from('skus').select('*').eq('sku_id', currentSkuId).limit(1);
     const sku = skuArr?.[0];
     if (!sku) throw new Error('SKU not found');
@@ -1340,7 +1311,6 @@ async function loadSkuDetail(opts) {
         </div>
       </div>`;
 
-    // Fetch competitor snapshots for this SKU — include unit_qty via skus join
     const { data: snaps } = await sb.from('latest_snapshots').select('*,skus(unit_qty)').eq('sku_id', currentSkuId).order('diff_pct_normalised', {ascending:true, nullsFirst:false});
     const rows = snaps || [];
 
@@ -1369,7 +1339,6 @@ async function openDrawer(skuId, name, price, fromPanel) {
   $('dr-name').textContent  = name;
   $('dr-price').textContent = price;
 
-  // Full page buttons
   const fpHandler = () => { closeDrawer(); go('sku-detail', { skuId, fromPanel }); };
   $('dr-fullpage-btn').onclick  = fpHandler;
   $('dr-fullpage-btn2').onclick = fpHandler;
@@ -1388,7 +1357,6 @@ async function openDrawer(skuId, name, price, fromPanel) {
       return;
     }
 
-    // Build league table: insert UKPOS among competitors ranked by ex-VAT price ascending
     const ourPriceEx = rows[0]?.our_price ? parseFloat(rows[0].our_price) : null;
 
     const entries = rows
@@ -1404,7 +1372,6 @@ async function openDrawer(skuId, name, price, fromPanel) {
       entries.push({ name: 'UKPOS', domain: 'ukpos.com', vat: 'ex', ex: ourPriceEx, raw: ourPriceEx, diff: 0, avail: 'in_stock', isUs: true });
     }
 
-    // Sort by ex-VAT price ascending (cheapest first = rank 1)
     entries.sort((a, b) => (a.ex||999999) - (b.ex||999999));
 
     $('dr-rows').innerHTML = entries.map((e, i) => {
@@ -1457,7 +1424,6 @@ async function loadRuns() {
     const d = await authFetch('/runs');
     const runs = d.data || [];
 
-    /* Batch progress summary */
     let progressHtml = '';
     try {
       const { data: prog } = await sb.from('scrape_progress').select('*').order('updated_at',{ascending:false}).limit(1);
@@ -1481,7 +1447,6 @@ async function loadRuns() {
       }
     } catch(e) { /* scrape_progress table optional */ }
 
-    /* Summary cards from most recent run */
     const last = runs[0];
     if (last) {
       $('run-summary-cards').innerHTML = progressHtml + `
@@ -1493,7 +1458,6 @@ async function loadRuns() {
       $('run-summary-cards').innerHTML = progressHtml || '<div style="color:var(--t2);font-size:12px;padding:8px">No runs recorded yet</div>';
     }
 
-    /* History table */
     if (!runs.length) {
       $('run-history').innerHTML = '<div style="color:var(--t2);font-size:12px;padding:8px">No run history</div>';
       return;
@@ -1602,7 +1566,6 @@ async function loadUsers() {
       </div>`;
     }).join('') : '<div style="padding:12px;color:var(--t2);font-size:12px">No active users</div>';
 
-    // Combine pending profiles + access_requests
     const pendingHtml = [
       ...(requests||[]).map(r => `
         <div class="user-row">
@@ -1683,7 +1646,6 @@ function saveThresholds() {
   T.par = +$('t-par').value || 2;
   try { localStorage.setItem('pw_thresholds', JSON.stringify(T)); } catch(e) {}
   applyThresholdCSS();
-  /* Re-render anything currently visible */
   if ($('p-alerts').classList.contains('active')) loadDashboard();
   if ($('p-bycomp').classList.contains('active')) loadByCompetitor();
   const btn = event?.target?.closest('button');
@@ -1705,7 +1667,6 @@ async function lookupSKU(skuId, btn) {
   try {
     await authPost('/lookup', { sku_id: skuId });
     if (btn) { btn.innerHTML = '<i class="ti ti-check"></i> Queued'; setTimeout(()=>{ btn.disabled=false; btn.innerHTML=orig; }, 2000); }
-    /* Refresh drawer if open on this SKU */
     if (drawerSkuId === skuId) setTimeout(() => openDrawer(skuId, $('dr-name').textContent, $('dr-price').textContent, drawerFromPanel), 800);
   } catch (e) {
     if (btn) { btn.disabled = false; btn.innerHTML = orig; }
@@ -1751,7 +1712,6 @@ const sortState = {
 };
 let bycompData = [], skusData = [], compSkuData = [], skuCompData = [];
 
-/* Comparable value extractor — handles numbers, prices, dates, strings */
 function cmpVal(v) {
   if (v === null || v === undefined) return -Infinity;
   if (typeof v === 'number') return v;
@@ -1769,7 +1729,6 @@ function updateSortHeaders(tableId, stateKey, col) {
   table.querySelectorAll('th.sortable').forEach(th => th.classList.remove('sort-asc','sort-desc'));
   if (!col) return;
   const dir = sortState[stateKey].dir;
-  /* find the th whose onclick references this col */
   table.querySelectorAll('th.sortable').forEach(th => {
     const oc = th.getAttribute('onclick') || '';
     if (oc.includes(`'${col}'`)) th.classList.add(dir === 1 ? 'sort-asc' : 'sort-desc');
@@ -1783,7 +1742,6 @@ function toggleSort(stateKey, col) {
   return st;
 }
 
-/* ── By-competitor sort ── */
 function sortByCompTable(col) {
   const st = toggleSort('bycomp', col);
   const keyMap = {
@@ -1817,7 +1775,6 @@ function renderByCompRows(rows) {
   }).join('');
 }
 
-/* ── All-SKUs sort ── */
 function sortSkusTable(col) {
   const st = toggleSort('skus', col);
   const keyMap = {
@@ -1861,7 +1818,6 @@ function renderSkusRows(rows) {
   }).join('');
 }
 
-/* ── Competitor-detail list sort ── */
 function sortCompSkuTable(col) {
   const st = toggleSort('compSku', col);
   const keyMap = {
@@ -1886,7 +1842,6 @@ function sortCompSkuTable(col) {
   updateSortHeaders('comp-sku-table', 'compSku', col);
 }
 
-/* ── SKU-detail competitor sort ── */
 function sortSkuCompTable(col) {
   const st = toggleSort('skuComp', col);
   skuCompData.sort((a,b) => {
@@ -1919,18 +1874,10 @@ function renderSkuCompRows(rows) {
     const rowId = `${r.sku_id}-${r.competitor_id}`;
     const hasUrl = !!r.competitor_url;
 
-    // Pack quantities: ours comes from the skus join (our_unit_qty via view, or
-    // skus.unit_qty via the embedded select); theirs from the persisted snapshot.
     const ourQty  = (r.our_unit_qty ?? r.skus?.unit_qty) || 1;
     const compQty = r.competitor_unit_qty || 1;
     const perUnitDiffer = ourQty !== compQty && (ourQty > 1 || compQty > 1);
 
-    // Per-unit sub-label under the competitor price. Shown whenever the two
-    // sides differ in pack size — including the case where THEIR qty is 1 but
-    // ours is a pack, so the "/unit ×1" line makes the like-for-like basis
-    // explicit. Built inline (not via perUnitLabel) because that shared helper
-    // deliberately suppresses the qty-1 case for the All-SKUs table; here we
-    // want it. (Our own per-unit price is shown in the SKU hero above.)
     let theirPerUnit = '';
     if (perUnitDiffer && ex) {
       const per = ex / compQty;
@@ -1938,7 +1885,6 @@ function renderSkuCompRows(rows) {
       theirPerUnit = `<div><span style="font-size:10px;color:var(--t3);white-space:nowrap">${perTxt}/unit ×${compQty}</span></div>`;
     }
 
-    // Small tag on the gap cell when the comparison was normalised per-unit
     const basisTag = perUnitDiffer
       ? `<div style="font-size:9px;color:var(--amb);background:var(--ab);border-radius:3px;padding:0 4px;display:inline-block;margin-top:2px">per-unit basis</div>`
       : '';
@@ -1987,7 +1933,6 @@ function renderSkuCompRows(rows) {
   }).join('');
 }
 
-/* ── Match URL editing (SKU detail table) ── */
 function editMatchUrl(rowId, skuId, compId, currentUrl, btn) {
   const editRow = $(`skurow-edit-${rowId}`);
   if (editRow) {
@@ -2034,16 +1979,13 @@ async function saveMatchUrl(rowId, skuId, compId, btn) {
 /* ════════════════════════════════════════
    STATE FLAGS + INIT
 ════════════════════════════════════════ */
-let skusLoaded = false; // retained: no longer gates loading; kept to avoid touching unrelated refs
+let skusLoaded = false;
 
-/* React to hash changes (back/forward buttons) */
 window.addEventListener('hashchange', () => {
   if (currentProfile && currentProfile.status === 'active') restoreRoute();
 });
 
-/* Keyboard: Esc closes drawer */
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
 
-/* Kick everything off */
 updateThreshPreview();
 bootstrap();
