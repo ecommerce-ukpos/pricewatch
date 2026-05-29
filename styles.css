@@ -120,7 +120,7 @@ a:hover{text-decoration-color:var(--blu)}
 .btn.prim:hover{background:#c73d16}
 .btn.sm{padding:4px 9px;font-size:14px}
 .btn.ghost{border-color:transparent;background:lightgreen}
-.btn.ghost:hover{background:garkgreen,color:white}
+.btn.ghost:hover{background:darkgreen;color:white;border-color:transparent}
 .btn.danger{background:var(--rb);color:var(--red);border-color:var(--rbd)}
 .btn.danger:hover{background:#f7c1c1}
 .icon-tog{padding:5px 9px;border:1px solid var(--bm);border-radius:var(--r);cursor:pointer;background:var(--surface);color:var(--t2);transition:all .1s}
