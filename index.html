@@ -561,13 +561,13 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
       <!-- table — scrollable middle -->
       <div style="flex:1;overflow-y:auto;overflow-x:auto;min-height:0">
         <table id="skus-table" style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>
+          <th style="width:58px;position:sticky;top:0;z-index:2;background:var(--surface)"></th>
           <th class="sortable" style="border-left:3px solid transparent;position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('sku_id')">SKU ID</th>
           <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('short_title')">Product</th>
           <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('our_price')">Our price</th>
           <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('competitor_name')">Best competitor</th>
           <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('their_price')">Their price</th>
           <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('diff')">Gap</th>
-          <th style="position:sticky;top:0;z-index:2;background:var(--surface)">Comps</th>
           <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('availability')">Stock</th>
           <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('scraped_at')">Scraped</th>
           <th style="position:sticky;top:0;z-index:2;background:var(--surface)"></th>
@@ -1515,10 +1515,15 @@ async function loadSKUs() {
       return;
     }
 
-    skusData = rows;
+    /* Enrich with image_url from allSkus cache (Edge Function doesn't return it) */
+    const imgMap = {};
+    (allSkus || []).forEach(s => { if (s.image_url) imgMap[s.sku_id] = s.image_url; });
+    const enriched = rows.map(r => ({ ...r, image_url: imgMap[r.sku_id] || r.image_url || null }));
+
+    skusData = enriched;
     sortState.skus = { col: null, dir: 1 };
     updateSortHeaders('skus-table', 'skus', null);
-    renderSkusRows(rows);
+    renderSkusRows(enriched);
 
     const from = (skuPage-1)*skuLimit+1, to = (skuPage-1)*skuLimit+rows.length;
     $('sku-pagination').innerHTML = `
@@ -2665,21 +2670,28 @@ function sortSkusTable(col) {
 
 function renderSkusRows(rows) {
   $('sku-tbody').innerHTML = rows.map(r => {
-    const diff = r.diff_pct_normalised ?? r.diff_pct;
-    const raw  = r.competitor_price ? parseFloat(r.competitor_price) : null;
-    const vat  = r.competitor_vat || r.competitor_vat_default || 'unknown';
-    const ex   = raw ? normalisePrice(raw, vat) : null;
-    return `<tr class="${rowClass(diff)} tr-link" onclick="openDrawer('${r.sku_id}','${(r.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(r.our_price)}','skus')">
+    const diff  = r.diff_pct_normalised ?? r.diff_pct;
+    const raw   = r.competitor_price ? parseFloat(r.competitor_price) : null;
+    const vat   = r.competitor_vat || r.competitor_vat_default || 'unknown';
+    const ex    = raw ? normalisePrice(raw, vat) : null;
+    const thumb = thumbUrl(r.image_url || '', 50, 50);
+    return `<tr class="${rowClass(diff)} tr-link" onclick="go('sku-detail',{skuId:'${r.sku_id}',fromPanel:'skus'})">
+      <td style="padding:4px 8px;width:58px">
+        <div style="width:50px;height:50px;border:1px solid var(--border);border-radius:5px;overflow:hidden;background:var(--bb);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          ${thumb
+            ? `<img src="${thumb}" style="width:100%;height:100%;object-fit:contain" onerror="this.style.display='none'">`
+            : `<i class="ti ti-photo" style="font-size:16px;color:var(--t3)"></i>`}
+        </div>
+      </td>
       <td>${skuLink(r)}</td>
-      <td style="font-size:11px;color:var(--t2);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.short_title||''}</td>
+      <td style="color:var(--t2);max-width:160px;white-space:normal;line-height:1.3">${r.short_title||''}</td>
       <td style="font-weight:500">${fmtPrice(r.our_price)}</td>
-      <td style="font-size:11px;color:var(--t2)">${r.competitor_name||'—'}</td>
+      <td style="color:var(--t2)">${r.competitor_name||'—'}</td>
       <td style="font-weight:500">${ex ? fmtPrice(ex) : '—'}${ex ? ` <span style="font-size:9px;color:var(--t3)">${vatPill(vat)}</span>` : ''}</td>
       <td><span class="${diffClass(diff)}">${diffLabel(diff)}</span></td>
-      <td style="color:var(--t2)">—</td>
       <td>${stockBadge(r.availability)}</td>
-      <td style="font-size:10px;color:var(--t3)">${ts(r.scraped_at)}</td>
-      <td><button class="btn sm ghost" onclick="event.stopPropagation();openDrawer('${r.sku_id}','${(r.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(r.our_price)}','skus')">→</button></td>
+      <td style="color:var(--t3)">${ts(r.scraped_at)}</td>
+      <td>→</td>
     </tr>`;
   }).join('');
 }
