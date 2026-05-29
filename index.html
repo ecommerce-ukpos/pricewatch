@@ -1595,22 +1595,35 @@ async function loadReview() {
   }
 
   try {
-    /* Single join query — all data we need in one shot */
-    const { data, error } = await sb.from('competitor_matches')
-      .select(`
-        id, sku_id, competitor_id, competitor_url, competitor_title,
-        competitor_image_url, confidence, match_status, match_source,
-        human_reviewed, reviewed_at, updated_at, notes,
-        skus!inner(sku_id, short_title, price_ex_vat, product_url, image_url, slug, unit_qty),
-        competitors!inner(name, domain, vat_status),
-        latest_snapshots(competitor_price, competitor_vat, competitor_vat_default,
-                         diff_pct, diff_pct_normalised, availability, scraped_at)
-      `)
-      .order('updated_at', { ascending: false })
-      .limit(3000);
+    /* Two parallel queries — can't join competitor_matches to latest_snapshots view via PostgREST */
+    const [{ data: matches, error: err1 }, { data: snaps, error: err2 }] = await Promise.all([
+      sb.from('competitor_matches')
+        .select(`
+          id, sku_id, competitor_id, competitor_url, competitor_title,
+          competitor_image_url, confidence, match_status, match_source,
+          human_reviewed, reviewed_at, updated_at, notes,
+          skus!inner(sku_id, short_title, price_ex_vat, product_url, image_url, slug, unit_qty),
+          competitors!inner(name, domain, vat_status)
+        `)
+        .order('updated_at', { ascending: false })
+        .limit(3000),
+      sb.from('latest_snapshots')
+        .select('sku_id, competitor_id, competitor_price, competitor_vat, competitor_vat_default, diff_pct, diff_pct_normalised, availability, scraped_at'),
+    ]);
 
-    if (error) throw new Error(error.message);
-    reviewAllRows = data || [];
+    if (err1) throw new Error(err1.message);
+    if (err2) throw new Error(err2.message);
+
+    /* Build snapshot lookup keyed by sku_id__competitor_id */
+    const snapMap = {};
+    (snaps||[]).forEach(s => { snapMap[`${s.sku_id}__${s.competitor_id}`] = s; });
+
+    /* Merge snapshot data into each match row */
+    reviewAllRows = (matches||[]).map(m => ({
+      ...m,
+      _snap: snapMap[`${m.sku_id}__${m.competitor_id}`] || {},
+    }));
+
     updateMatchTabCounts();
     filterReview();
   } catch(e) {
@@ -1703,7 +1716,7 @@ function renderReviewRows(rows) {
     const sku   = r.skus        || {};
     const comp  = r.competitors || {};
     /* latest_snapshots can be array or object depending on Supabase version */
-    const snap  = Array.isArray(r.latest_snapshots) ? (r.latest_snapshots[0]||{}) : (r.latest_snapshots||{});
+    const snap  = r._snap || {};
 
     const ourPriceEx = sku.price_ex_vat ? parseFloat(sku.price_ex_vat) : null;
     const unitQty    = sku.unit_qty && sku.unit_qty > 1 ? sku.unit_qty : null;
@@ -1827,7 +1840,7 @@ function sortReviewTable(col) {
   const getV = r => {
     const sku  = r.skus || {};
     const comp = r.competitors || {};
-    const snap = Array.isArray(r.latest_snapshots) ? (r.latest_snapshots[0]||{}) : (r.latest_snapshots||{});
+    const snap = r._snap || {};
     if (col === 'sku_id')          return r.sku_id||'';
     if (col === 'short_title')     return (sku.short_title||'').toLowerCase();
     if (col === 'competitor_name') return (comp.name||'').toLowerCase();
