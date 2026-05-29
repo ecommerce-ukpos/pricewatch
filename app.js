@@ -1810,7 +1810,7 @@ function renderSkusRows(rows) {
       <td style="font-size:11px;color:var(--t2)">${r.competitor_name||'—'}</td>
       <td style="font-weight:500">${ex ? fmtPrice(ex) : '—'}${ex ? ` <span style="font-size:9px;color:var(--t3)">${vatPill(vat)}</span>` : ''}${perU}</td>
       <td><span class="${diffClass(diff)}">${diffLabel(diff)}</span></td>
-      <td style="color:var(--t2)">—</td>
+      <td style="color:var(--t2);font-size:11px">${r.comp_count > 0 ? r.comp_count : '—'}</td>
       <td>${stockBadge(r.availability)}</td>
       <td style="font-size:10px;color:var(--t3)">${ts(r.scraped_at)}</td>
       <td><button class="btn sm ghost" onclick="event.stopPropagation();openDrawer('${r.sku_id}','${(r.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(r.our_price)}','skus')">→</button></td>
