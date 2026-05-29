@@ -307,6 +307,13 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
 .drc-price{font-size:14px;font-weight:500;text-align:right}
 .drc-diff{font-size:12px;font-weight:600;text-align:right;min-width:46px}
 
+/* ── Match manager tabs ── */
+.mtab{padding:10px 14px;border:none;background:transparent;color:var(--t2);cursor:pointer;font-size:13px;font-family:inherit;border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .1s;white-space:nowrap}
+.mtab:hover{color:var(--text)}
+.mtab.active{color:var(--text);font-weight:600;border-bottom-color:var(--orange)}
+.nb-g{background:var(--gb);color:var(--grn)}
+.nb-blu{background:var(--bb);color:var(--blu)}
+
 /* ── Auth screens ── */
 .auth-shell{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:999}
 .auth-card{width:100%;max-width:420px;background:var(--surface);border:1px solid var(--border);border-radius:var(--rl);padding:28px 32px}
