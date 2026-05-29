@@ -18,11 +18,17 @@
   <!-- TOPBAR -->
   <div class="topbar">
     <button class="mob-hamburger" onclick="toggleMobileSidebar()" aria-label="Open menu" title="Open menu"><i class="ti ti-menu-2" style="font-size:18px"></i></button>
-    <img src="logo-full.png" alt="UKPOS PriceWatch Pro" class="logo-full"
-      onerror="this.style.display='none';document.getElementById('logo-text-fallback').style.display='inline-flex'">
-    <div class="logo" id="logo-text-fallback" style="display:none"><span class="uk">UK</span><span class="pos">POS</span></div>
-    <img src="logo-icon.png" alt="UKPOS" class="logo-icon"
-      onerror="this.style.display='none'">
+    <!-- Logo: image shown when available, text fallback always present as backup -->
+    <img src="logo-full.png" alt="UKPOS PriceWatch Pro" class="logo-full" id="logo-full-img"
+      onload="this.style.display='block';document.getElementById('logo-text-fallback').style.display='none'"
+      onerror="this.style.display='none'"
+      style="display:none">
+    <div class="logo logo-full" id="logo-text-fallback"><span class="uk">UK</span><span class="pos">POS</span></div>
+    <img src="logo-icon.png" alt="UKPOS" class="logo-icon" id="logo-icon-img"
+      onload="this.style.display='block'"
+      onerror="this.style.display='none';document.getElementById('logo-icon-fallback').style.display='block'"
+      style="display:none">
+    <div class="logo logo-icon" id="logo-icon-fallback" style="display:none;padding:2px 5px"><span class="uk" style="border:none;padding:0;margin:0;font-size:11px">UK</span></div>
     <div class="topbar-r">
       <button class="tbtn" onclick="toggleSidebar()" id="sidebar-toggle-btn" title="Collapse sidebar" aria-label="Toggle sidebar"><i class="ti ti-layout-sidebar-left-collapse" id="sidebar-toggle-icon" style="font-size:14px"></i></button>
       <span style="width:1px;height:18px;background:rgba(255,255,255,.12);margin:0 2px"></span>
