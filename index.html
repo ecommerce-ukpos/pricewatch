@@ -1593,13 +1593,13 @@ async function loadReview() {
       _snap: snapMap[`${m.sku_id}__${m.competitor_id}`] || null,
     }));
 
-    /* Update tab counts */
+    /* Update tab counts — same logic as filterReview tabs */
     const counts = { review: 0, auto: 0, human: 0, rejected: 0 };
     reviewAllRows.forEach(r => {
-      if (r.match_status === 'rejected')                             counts.rejected++;
-      else if (r.match_source === 'human' || r.human_reviewed)       counts.human++;
-      else if (r.match_source === 'scraper_auto' || (r.match_status === 'matched' && !r.human_reviewed)) counts.auto++;
-      else                                                            counts.review++;
+      if      (r.match_status === 'rejected')                               counts.rejected++;
+      else if (r.match_status === 'matched' && r.human_reviewed === true)   counts.human++;
+      else if (r.match_status === 'matched' && r.human_reviewed === false)  counts.auto++;
+      else if (r.match_status === 'review'  && r.human_reviewed === false)  counts.review++;
     });
     Object.entries(counts).forEach(([k,v]) => {
       const el = $('mtab-n-'+k);
@@ -1631,12 +1631,12 @@ function filterReview() {
   const q    = ($('review-search')?.value || '').toLowerCase().trim();
   const comp = $('review-comp-filter')?.value || '';
 
-  /* Filter by active tab */
+  /* Filter by active tab — logic matches actual DB values */
   let rows = reviewAllRows.filter(r => {
     if (matchTab === 'rejected') return r.match_status === 'rejected';
-    if (matchTab === 'human')    return r.match_source === 'human' || (r.human_reviewed && r.match_status !== 'rejected');
-    if (matchTab === 'auto')     return !r.human_reviewed && r.match_status === 'matched';
-    /* needs review tab */      return r.match_status === 'review' && !r.human_reviewed;
+    if (matchTab === 'human')    return r.match_status === 'matched' && r.human_reviewed === true;
+    if (matchTab === 'auto')     return r.match_status === 'matched' && r.human_reviewed === false;
+    /* needs review */           return r.match_status === 'review'  && r.human_reviewed === false;
   });
 
   /* Text + competitor filters */
