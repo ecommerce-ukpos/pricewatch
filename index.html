@@ -17,22 +17,15 @@
 
   <!-- TOPBAR -->
   <div class="topbar">
-    <!-- Mobile only: hamburger -->
     <button class="mob-hamburger" id="mob-hamburger-btn" onclick="toggleMobileSidebar()" aria-label="Toggle menu">
       <i class="ti ti-menu-2" id="mob-hamburger-icon" style="font-size:18px"></i>
     </button>
-    <!-- Logos: JS picks which one to show -->
-    <div id="topbar-logo">
-      <div class="logo"><span class="uk">UK</span><span class="pos">POS</span></div>
-    </div>
-    <!-- Product name -->
+    <div id="topbar-logo"></div>
+    <button class="tbtn" id="sidebar-toggle-btn" onclick="toggleSidebar()" title="Collapse sidebar" aria-label="Toggle sidebar">
+      <i class="ti ti-layout-sidebar-left-collapse" id="sidebar-toggle-icon" style="font-size:16px"></i>
+    </button>
     <span class="topbar-product">PriceWatch Pro</span>
     <div class="topbar-r">
-      <!-- Desktop only: sidebar collapse toggle -->
-      <button class="tbtn" id="sidebar-toggle-btn" onclick="toggleSidebar()" title="Collapse sidebar" aria-label="Toggle sidebar">
-        <i class="ti ti-layout-sidebar-left-collapse" id="sidebar-toggle-icon" style="font-size:15px"></i>
-      </button>
-      <span class="topbar-divider"></span>
       <span class="pulse"></span>
       <span class="topbar-status" id="sync-status">Loading…</span>
       <button class="tbtn" onclick="manualRefresh()"><i class="ti ti-refresh" style="font-size:12px"></i> Refresh</button>
@@ -566,14 +559,11 @@ function setTopbarLogo(collapsed) {
   const el = document.getElementById('topbar-logo');
   if (!el) return;
   const src = (!collapsed || isMobile()) ? 'logo-full.png' : 'logo-icon.png';
-  const fallback = (!collapsed || isMobile())
-    ? '<div class="logo"><span class="uk">UK</span><span class="pos">POS</span></div>'
-    : '<div class="logo" style="padding:3px 5px"><span class="uk" style="border:none;padding:0;margin:0">UK</span></div>';
   const img = new Image();
   img.alt = 'UKPOS';
   img.style.cssText = 'height:22px;width:auto;display:block';
   img.onload  = () => { el.innerHTML = ''; el.appendChild(img); };
-  img.onerror = () => { el.innerHTML = fallback; };
+  img.onerror = () => { el.innerHTML = ''; };
   img.src = src;
 }
 
@@ -1013,13 +1003,6 @@ async function loadDashboard() {
 
     // Chart
     buildDistChart(m);
-
-    // Review note
-    const matched = d.matched_count || 0;
-    const total   = d.match_count   || 0;
-    $('review-confirmed').textContent = matched.toLocaleString();
-    $('review-total').textContent     = total.toLocaleString();
-    if (total > 0) $('review-note').style.display = '';
 
   } catch (e) {
     console.error('Dashboard load error:', e);
