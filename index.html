@@ -174,6 +174,13 @@
           <div class="filter-row" style="margin:0">
             <input type="search" class="search" id="review-search" name="review-filter" placeholder="Filter by SKU or competitor…" oninput="filterReview()" style="min-width:200px" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-1p-ignore data-lpignore="true" data-form-type="other">
             <select id="review-comp-filter" onchange="filterReview()"><option value="">All competitors</option></select>
+            <!-- FIX 3d — confidence sort dropdown -->
+            <select id="review-sort" onchange="setReviewSort(this.value)" style="padding:5px 9px;border:1px solid var(--bm);border-radius:var(--r);font-size:12px;font-family:inherit;background:var(--surface);color:var(--text)">
+              <option value="confidence_asc">Confidence ↑</option>
+              <option value="confidence_desc">Confidence ↓</option>
+              <option value="sku_id_asc">SKU A→Z</option>
+              <option value="competitor_asc">Competitor A→Z</option>
+            </select>
           </div>
         </div>
       </div>
@@ -193,7 +200,6 @@
         <div class="cmd-title">All SKUs</div>
         <div class="cmd-actions"><span style="font-size:11px;color:var(--t2)" id="skus-sub"></span></div>
       </div>
-      <!-- filters — fixed, never scrolls away -->
       <div style="background:var(--surface);border-bottom:1px solid var(--border);padding:10px 14px;flex-shrink:0">
         <div class="filter-row" style="margin:0">
           <input type="search" class="search" id="skuQ" name="sku-filter" placeholder="Search SKU ID, product name, competitor…" oninput="debounce(filterSKUs,400)()" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-1p-ignore data-lpignore="true" data-form-type="other">
@@ -218,7 +224,6 @@
           </select>
         </div>
       </div>
-      <!-- table — scrollable middle -->
       <div style="flex:1;overflow-y:auto;overflow-x:auto;min-height:0">
         <table id="skus-table" style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>
           <th class="sortable" style="border-left:3px solid transparent;position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('sku_id')">SKU ID</th>
@@ -233,7 +238,6 @@
           <th style="position:sticky;top:0;z-index:2;background:var(--surface)"></th>
         </tr></thead><tbody id="sku-tbody"><tr><td colspan="10"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table>
       </div>
-      <!-- pagination — fixed at bottom, never scrolls away -->
       <div id="sku-pagination" style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-top:1px solid var(--border);font-size:11px;color:var(--t2);background:var(--surface);flex-shrink:0"></div>
     </div>
 
@@ -299,11 +303,9 @@
         </div>
       </div>
       <div class="comp-stats-bar" id="comp-detail-stats"></div>
-      <!-- grid -->
       <div id="comp-grid-wrap" class="content" style="padding-top:12px">
         <div class="sku-card-grid" id="comp-sku-grid"></div>
       </div>
-      <!-- list -->
       <div id="comp-list-wrap" style="display:none;flex:1;overflow-y:auto;padding:14px 18px">
         <div class="card-0p">
           <table id="comp-sku-table"><thead><tr>
@@ -318,7 +320,6 @@
           </tr></thead><tbody id="comp-sku-tbody"></tbody></table>
         </div>
       </div>
-      <!-- notes footer — always visible below both grid and list views -->
       <div id="comp-notes-footer" style="flex-shrink:0;border-top:1px solid var(--border);background:var(--surface);padding:12px 18px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
           <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--t3)"><i class="ti ti-note" style="font-size:13px;margin-right:4px"></i>Competitor notes</div>
@@ -385,11 +386,7 @@
         </div>
       </div>
       <div class="content">
-
-        <!-- Last run summary cards -->
         <div id="run-summary-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:16px"></div>
-
-        <!-- Config + history side by side -->
         <div style="display:grid;grid-template-columns:340px 1fr;gap:14px;align-items:start">
           <div class="card">
             <div class="card-hd"><div class="card-title">Nightly configuration</div></div>
