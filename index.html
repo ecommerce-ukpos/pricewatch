@@ -17,18 +17,21 @@
 
   <!-- TOPBAR -->
   <div class="topbar">
-    <button class="mob-hamburger" onclick="toggleMobileSidebar()" aria-label="Open menu" title="Open menu"><i class="ti ti-menu-2" style="font-size:18px"></i></button>
-    <!-- Logo: image shown when available, text fallback always present as backup -->
+    <!-- Mobile: hamburger + icon logo combined into one button -->
+    <button class="mob-hamburger" onclick="toggleMobileSidebar()" aria-label="Toggle menu" title="Toggle menu" id="mob-hamburger-btn">
+      <i class="ti ti-menu-2" id="mob-hamburger-icon" style="font-size:18px"></i>
+    </button>
+    <!-- Desktop: full logo (fades to icon logo when sidebar collapsed) -->
     <img src="logo-full.png" alt="UKPOS PriceWatch Pro" class="logo-full" id="logo-full-img"
-      onload="this.style.display='block';document.getElementById('logo-text-fallback').style.display='none'"
+      onload="this.style.opacity='1';document.getElementById('logo-text-fallback').style.display='none'"
       onerror="this.style.display='none'"
-      style="display:none">
+      style="opacity:0;transition:opacity .2s">
     <div class="logo logo-full" id="logo-text-fallback"><span class="uk">UK</span><span class="pos">POS</span></div>
     <img src="logo-icon.png" alt="UKPOS" class="logo-icon" id="logo-icon-img"
-      onload="this.style.display='block'"
-      onerror="this.style.display='none';document.getElementById('logo-icon-fallback').style.display='block'"
-      style="display:none">
-    <div class="logo logo-icon" id="logo-icon-fallback" style="display:none;padding:2px 5px"><span class="uk" style="border:none;padding:0;margin:0;font-size:11px">UK</span></div>
+      onload="this.style.opacity='1'"
+      onerror="this.style.display='none';document.getElementById('logo-icon-fallback').style.display='flex'"
+      style="opacity:0;transition:opacity .2s">
+    <div class="logo logo-icon" id="logo-icon-fallback" style="display:none"><span class="uk" style="border:none;padding:0;margin:0;font-size:11px">UK</span></div>
     <div class="topbar-r">
       <button class="tbtn" onclick="toggleSidebar()" id="sidebar-toggle-btn" title="Collapse sidebar" aria-label="Toggle sidebar"><i class="ti ti-layout-sidebar-left-collapse" id="sidebar-toggle-icon" style="font-size:14px"></i></button>
       <span style="width:1px;height:18px;background:rgba(255,255,255,.12);margin:0 2px"></span>
@@ -558,7 +561,11 @@ function applyThresholdCSS() {
   document.getElementById('thresh-amb-label') && (document.getElementById('thresh-amb-label').textContent = T.amb);
 }
 
+function isMobile() { return window.innerWidth <= 768; }
+
 function toggleSidebar() {
+  /* Desktop only — toggles nav-collapsed on shell + sidebar */
+  if (isMobile()) { toggleMobileSidebar(); return; }
   const shell   = $('view-app');
   const sidebar = $('sidebar');
   const icon    = $('sidebar-toggle-icon');
@@ -575,8 +582,11 @@ function toggleSidebar() {
 function toggleMobileSidebar() {
   const sidebar  = $('sidebar');
   const overlay  = $('sidebar-overlay');
+  const icon     = $('mob-hamburger-icon');
   const isOpen   = sidebar.classList.toggle('mob-open');
   overlay.classList.toggle('open', isOpen);
+  /* Swap hamburger icon: ☰ closed → ✕ open */
+  if (icon) icon.className = isOpen ? 'ti ti-x' : 'ti ti-menu-2';
 }
 
 /* Close mobile sidebar when a nav item is clicked */
@@ -586,20 +596,19 @@ document.addEventListener('click', e => {
   }
 });
 
-/* Restore sidebar state on load */
+/* Restore desktop sidebar collapse state on load */
 (function restoreSidebar() {
   try {
-    if (localStorage.getItem('pw_sidebar_collapsed') === '1') {
-      /* Defer until DOM is ready */
+    if (!isMobile() && localStorage.getItem('pw_sidebar_collapsed') === '1') {
       document.addEventListener('DOMContentLoaded', () => {
-        const sb = document.getElementById('sidebar');
-        const shell = document.getElementById('view-app');
-        const icon  = document.getElementById('sidebar-toggle-icon');
-        const btn   = document.getElementById('sidebar-toggle-btn');
-        if (sb) sb.classList.add('nav-collapsed');
+        const sb   = document.getElementById('sidebar');
+        const shell= document.getElementById('view-app');
+        const icon = document.getElementById('sidebar-toggle-icon');
+        const btn  = document.getElementById('sidebar-toggle-btn');
+        if (sb)    sb.classList.add('nav-collapsed');
         if (shell) shell.classList.add('nav-collapsed');
-        if (icon) icon.className = 'ti ti-layout-sidebar-left-expand';
-        if (btn) btn.title = 'Expand sidebar';
+        if (icon)  icon.className = 'ti ti-layout-sidebar-left-expand';
+        if (btn)   btn.title = 'Expand sidebar';
       });
     }
   } catch(e) {}
