@@ -309,7 +309,11 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
 .drawer-close{background:none;border:none;cursor:pointer;color:var(--t3);font-size:16px;padding:2px;border-radius:4px;margin-left:auto;flex-shrink:0;line-height:1;transition:color .1s}
 .drawer-close:hover{color:var(--text);background:var(--bg)}
 .drawer-body{flex:1;overflow-y:auto;padding:14px 16px}
-.dr-comp-row{border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;margin-bottom:7px;display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:10px}
+.mtab{padding:10px 14px;border:none;background:transparent;color:var(--t2);cursor:pointer;font-size:13px;font-family:inherit;border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .1s;white-space:nowrap}
+.mtab:hover{color:var(--text)}
+.mtab.active{color:var(--text);font-weight:600;border-bottom-color:var(--orange)}
+.nb-g{background:var(--gb);color:var(--grn)}
+.nb-blu{background:var(--bb);color:var(--blu)}
 .dr-comp-row.tier-r{background:rgba(163,45,45,.05);border-color:var(--rbd)}
 .dr-comp-row.tier-a{background:rgba(133,79,11,.04);border-color:var(--abd)}
 .dr-comp-row.tier-g{background:rgba(59,109,17,.04);border-color:var(--gbd)}
@@ -362,7 +366,7 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
   <nav class="sidebar">
     <div class="nav-sect">Work to do</div>
     <div class="nav-item" id="nav-alerts" onclick="go('alerts')"><i class="ti ti-bell"></i> Price alerts <span class="nbadge nb-r" id="nav-alerts-badge" style="display:none">0</span></div>
-    <div class="nav-item" id="nav-review" onclick="go('review')"><i class="ti ti-eye-check"></i> Review queue <span class="nbadge nb-a" id="nav-review-badge" style="display:none">0</span></div>
+    <div class="nav-item" id="nav-review" onclick="go('review')"><i class="ti ti-eye-check"></i> Match manager <span class="nbadge nb-a" id="nav-review-badge" style="display:none">0</span></div>
     <div class="nav-sect">Explore</div>
     <div class="nav-item" id="nav-skus" onclick="go('skus')"><i class="ti ti-tag"></i> All SKUs</div>
     <div class="nav-item" id="nav-bycat" onclick="go('bycat')"><i class="ti ti-package"></i> By category</div>
@@ -433,24 +437,29 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
       </div>
     </div>
 
-    <!-- ── REVIEW QUEUE ── -->
+    <!-- ── MATCH MANAGER ── -->
     <div id="p-review" class="panel">
       <div class="cmdbar">
         <div>
-          <div class="cmd-title">Review queue</div>
-          <div class="cmd-sub" id="review-sub">Matches awaiting human confirmation</div>
+          <div class="cmd-title">Match manager</div>
+          <div class="cmd-sub" id="review-sub">Loading…</div>
         </div>
         <div class="cmd-actions">
-          <div class="filter-row" style="margin:0">
-            <input type="search" class="search" id="review-search" placeholder="Filter by SKU or competitor…" oninput="filterReview()" style="min-width:200px" autocomplete="new-password" autocorrect="off" autocapitalize="off" spellcheck="false">
-            <select id="review-comp-filter" onchange="filterReview()"><option value="">All competitors</option></select>
-          </div>
+          <input type="search" class="search" id="review-search" placeholder="Filter by SKU or competitor…" oninput="filterReview()" style="min-width:180px" autocomplete="new-password" spellcheck="false">
+          <select id="review-comp-filter" onchange="filterReview()"><option value="">All competitors</option></select>
         </div>
+      </div>
+      <!-- Status tabs -->
+      <div style="display:flex;gap:2px;padding:0 14px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0">
+        <button class="mtab active" id="mtab-review"    onclick="setMatchTab('review')"   >Needs review    <span class="nbadge nb-a" id="mtab-n-review"   style="margin-left:4px">0</span></button>
+        <button class="mtab"        id="mtab-auto"      onclick="setMatchTab('auto')"     >AI matched      <span class="nbadge nb-g" id="mtab-n-auto"     style="margin-left:4px">0</span></button>
+        <button class="mtab"        id="mtab-human"     onclick="setMatchTab('human')"    >Human verified  <span class="nbadge nb-g" id="mtab-n-human"    style="margin-left:4px">0</span></button>
+        <button class="mtab"        id="mtab-rejected"  onclick="setMatchTab('rejected')" >Rejected        <span class="nbadge"    id="mtab-n-rejected" style="margin-left:4px;background:var(--bb);color:var(--blu)">0</span></button>
       </div>
       <div class="content">
         <div class="note note-crit" id="review-note" style="display:none">
           <i class="ti ti-alert-circle"></i>
-          <div>Only <strong id="review-confirmed">1</strong> of <strong id="review-total">1,205</strong> matches confirmed. Price comparisons are estimated until you verify them here. Open both links, confirm it's the same product, then approve or reject.</div>
+          <div>Only <strong id="review-confirmed">1</strong> of <strong id="review-total">1,205</strong> matches confirmed. Open both links, confirm it's the same product, then approve or reject.</div>
         </div>
         <div id="review-list"><div class="loading"><span class="spinner"></span></div></div>
         <div id="review-pagination" style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--t2)"></div>
@@ -505,10 +514,12 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
           <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('their_price')">Their price</th>
           <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('diff')">Gap</th>
           <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('confidence')">Confidence</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('match_status')">Matches</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('reviewed_at')">Last reviewed</th>
           <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('availability')">Stock</th>
           <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortSkusTable('scraped_at')">Scraped</th>
           <th style="position:sticky;top:0;z-index:2;background:var(--surface)"></th>
-        </tr></thead><tbody id="sku-tbody"><tr><td colspan="11"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table>
+        </tr></thead><tbody id="sku-tbody"><tr><td colspan="13"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table>
       </div>
       <!-- pagination — fixed at bottom, never scrolls away -->
       <div id="sku-pagination" style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-top:1px solid var(--border);font-size:11px;color:var(--t2);background:var(--surface);flex-shrink:0"></div>
@@ -871,6 +882,16 @@ const el = (tag, attrs={}, ...children) => {
 function debounce(fn, ms) {
   let t;
   return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+
+function matchStatusMini(ms) {
+  /* Shows compact status pills: ✓2 🤖3 👁1 for human/auto/review counts */
+  const parts = [];
+  if (ms.human    > 0) parts.push(`<span style="display:inline-flex;align-items:center;gap:2px;background:var(--gb);color:var(--grn);border-radius:4px;padding:1px 5px;font-size:11px;font-weight:500" title="${ms.human} human verified"><i class="ti ti-user-check" style="font-size:11px"></i>${ms.human}</span>`);
+  if (ms.auto     > 0) parts.push(`<span style="display:inline-flex;align-items:center;gap:2px;background:var(--bb);color:var(--blu);border-radius:4px;padding:1px 5px;font-size:11px" title="${ms.auto} AI matched"><i class="ti ti-robot" style="font-size:11px"></i>${ms.auto}</span>`);
+  if (ms.review   > 0) parts.push(`<span style="display:inline-flex;align-items:center;gap:2px;background:var(--ab);color:var(--amb);border-radius:4px;padding:1px 5px;font-size:11px" title="${ms.review} need review"><i class="ti ti-eye" style="font-size:11px"></i>${ms.review}</span>`);
+  if (ms.rejected > 0) parts.push(`<span style="display:inline-flex;align-items:center;gap:2px;background:var(--bg);color:var(--t3);border-radius:4px;padding:1px 5px;font-size:11px" title="${ms.rejected} rejected"><i class="ti ti-x" style="font-size:11px"></i>${ms.rejected}</span>`);
+  return parts.length ? `<div style="display:flex;gap:3px;flex-wrap:wrap">${parts.join('')}</div>` : '<span style="color:var(--t3);font-size:12px">—</span>';
 }
 
 function thumbUrl(url, w=120, h=120) {
@@ -1410,7 +1431,7 @@ async function loadSKUs() {
 
     if (!rows.length) {
       $('skus-sub').textContent = `${skuTotal.toLocaleString()} SKUs`;
-      $('sku-tbody').innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--t2);padding:20px">No matches found</td></tr>';
+      $('sku-tbody').innerHTML = '<tr><td colspan="13" style="text-align:center;color:var(--t2);padding:20px">No matches found</td></tr>';
       $('sku-pagination').innerHTML = '';
       return;
     }
@@ -1424,6 +1445,36 @@ async function loadSKUs() {
       unit_qty:  skuMetaMap[r.sku_id]?.unit_qty  || r.unit_qty  || 1,
     }));
     skusAllData = enriched;
+
+    /* Fetch match status summary per SKU for the Matches column */
+    if (!window._matchSummary) {
+      sb.from('competitor_matches')
+        .select('sku_id,match_source,match_status,reviewed_at,human_reviewed')
+        .then(({ data: cm }) => {
+          if (!cm) return;
+          const summary = {};
+          cm.forEach(r => {
+            if (!summary[r.sku_id]) summary[r.sku_id] = { human:0, auto:0, review:0, rejected:0, last_reviewed:null };
+            const s = summary[r.sku_id];
+            if (r.match_status === 'rejected')                                    s.rejected++;
+            else if (r.match_source === 'human' || r.human_reviewed)              s.human++;
+            else if (r.match_source === 'scraper_auto' || r.match_status === 'matched') s.auto++;
+            else                                                                   s.review++;
+            if (r.reviewed_at && (!s.last_reviewed || r.reviewed_at > s.last_reviewed))
+              s.last_reviewed = r.reviewed_at;
+          });
+          window._matchSummary = summary;
+          /* Re-render if skus page is currently active */
+          if ($('p-skus')?.classList.contains('active') && skusData.length) {
+            const enriched2 = skusData.map(r => ({ ...r, _ms: summary[r.sku_id] || null }));
+            skusData = enriched2;
+            renderSkusRows(enriched2);
+          }
+        });
+    }
+
+    const enrichedWithMs = enriched.map(r => ({ ...r, _ms: window._matchSummary?.[r.sku_id] || null }));
+    skusAllData = enrichedWithMs;
 
     /* Populate competitor dropdown once from all active competitors */
     const cf = $('fComp');
@@ -1451,7 +1502,7 @@ async function loadSKUs() {
 
     applySkuCompetitorFilter();
   } catch (e) {
-    $('sku-tbody').innerHTML = `<tr><td colspan="11" style="color:var(--red);padding:8px">${e.message}</td></tr>`;
+    $('sku-tbody').innerHTML = `<tr><td colspan="13" style="color:var(--red);padding:8px">${e.message}</td></tr>`;
   }
 }
 
@@ -1502,9 +1553,206 @@ function filterSKUs() {
 }
 
 /* ════════════════════════════════════════
-   REVIEW QUEUE
+   MATCH MANAGER
 ════════════════════════════════════════ */
 let reviewAllRows = [];
+let matchTab = 'review';  /* review | auto | human | rejected */
+
+function setMatchTab(tab) {
+  matchTab = tab;
+  reviewPage = 1;
+  ['review','auto','human','rejected'].forEach(t => {
+    $('mtab-'+t)?.classList.toggle('active', t === tab);
+  });
+  filterReview();
+}
+
+async function loadReview() {
+  $('review-list').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+  try {
+    /* Fetch all matches in one shot — all statuses */
+    const { data: matches, error } = await sb.from('competitor_matches')
+      .select('id,sku_id,competitor_id,competitor_url,competitor_title,competitor_image_url,confidence,notes,match_status,match_source,human_reviewed,reviewed_at,updated_at,skus(sku_id,short_title,price_ex_vat,product_url,image_url,slug,unit_qty),competitors(id,name,domain,vat_status)')
+      .order('updated_at', { ascending: false })
+      .limit(2000);
+
+    if (error) throw new Error(error.message);
+
+    /* Fetch latest snapshot prices for all matched SKUs */
+    const skuIds = [...new Set((matches||[]).map(m => m.sku_id))];
+    let snapMap = {};
+    if (skuIds.length) {
+      const { data: snaps } = await sb.from('latest_snapshots')
+        .select('sku_id,competitor_id,competitor_price,competitor_vat,availability')
+        .in('sku_id', skuIds);
+      (snaps||[]).forEach(s => { snapMap[`${s.sku_id}__${s.competitor_id}`] = s; });
+    }
+
+    reviewAllRows = (matches||[]).map(m => ({
+      ...m,
+      _snap: snapMap[`${m.sku_id}__${m.competitor_id}`] || null,
+    }));
+
+    /* Update tab counts */
+    const counts = { review: 0, auto: 0, human: 0, rejected: 0 };
+    reviewAllRows.forEach(r => {
+      if (r.match_status === 'rejected')                             counts.rejected++;
+      else if (r.match_source === 'human' || r.human_reviewed)       counts.human++;
+      else if (r.match_source === 'scraper_auto' || (r.match_status === 'matched' && !r.human_reviewed)) counts.auto++;
+      else                                                            counts.review++;
+    });
+    Object.entries(counts).forEach(([k,v]) => {
+      const el = $('mtab-n-'+k);
+      if (el) el.textContent = v.toLocaleString();
+    });
+
+    /* Update nav badge to Needs Review count only */
+    const nb = $('nav-review-badge');
+    if (nb) { nb.textContent = counts.review; nb.style.display = counts.review > 0 ? '' : 'none'; }
+
+    /* Populate competitor dropdown */
+    const cf = $('review-comp-filter');
+    if (cf && cf.options.length === 1) {
+      const { data: comps } = await sb.from('competitors').select('id,name').eq('active',true).order('name');
+      (comps||[]).forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.id; opt.textContent = c.name;
+        cf.appendChild(opt);
+      });
+    }
+
+    filterReview();
+  } catch (e) {
+    $('review-list').innerHTML = `<div style="color:var(--red);padding:8px">${e.message}</div>`;
+  }
+}
+
+function filterReview() {
+  const q    = ($('review-search')?.value || '').toLowerCase().trim();
+  const comp = $('review-comp-filter')?.value || '';
+
+  /* Filter by active tab */
+  let rows = reviewAllRows.filter(r => {
+    if (matchTab === 'rejected') return r.match_status === 'rejected';
+    if (matchTab === 'human')    return r.match_source === 'human' || (r.human_reviewed && r.match_status !== 'rejected');
+    if (matchTab === 'auto')     return !r.human_reviewed && r.match_status === 'matched';
+    /* needs review tab */      return r.match_status === 'review' && !r.human_reviewed;
+  });
+
+  /* Text + competitor filters */
+  if (q) rows = rows.filter(r =>
+    r.sku_id?.toLowerCase().includes(q) ||
+    (r.skus?.short_title||'').toLowerCase().includes(q) ||
+    (r.competitors?.name||'').toLowerCase().includes(q) ||
+    (r.competitor_title||'').toLowerCase().includes(q)
+  );
+  if (comp) rows = rows.filter(r => String(r.competitor_id) === String(comp));
+
+  const showing = rows.length;
+  const tabLabel = { review:'needs review', auto:'AI matched', human:'human verified', rejected:'rejected' }[matchTab];
+  $('review-sub').textContent = (q||comp) ? `${showing} matches (filtered)` : `${showing} ${tabLabel}`;
+
+  /* Show/hide the guidance note only on Needs Review tab */
+  const noteEl = $('review-note');
+  if (noteEl) noteEl.style.display = (matchTab === 'review' && rows.length > 0) ? '' : 'none';
+
+  if (!rows.length) {
+    const emptyMsg = {
+      review:   ['ti-circle-check','var(--grn)','All caught up — no matches need review'],
+      auto:     ['ti-robot','var(--blu)','No AI-matched pairs yet'],
+      human:    ['ti-user-check','var(--grn)','No human-verified matches yet'],
+      rejected: ['ti-x','var(--t3)','No rejected matches'],
+    }[matchTab];
+    $('review-list').innerHTML = `<div style="text-align:center;color:var(--t2);padding:40px">
+      <i class="ti ${emptyMsg[0]}" style="font-size:28px;display:block;margin-bottom:8px;color:${emptyMsg[1]}"></i>
+      ${q||comp ? 'No matches for that filter' : emptyMsg[2]}
+    </div>`;
+    $('review-pagination').innerHTML = '';
+    return;
+  }
+
+  /* Paginate */
+  const lim   = reviewLimit === 999999 ? rows.length : reviewLimit;
+  const start = (reviewPage - 1) * lim;
+  const page  = rows.slice(start, start + lim);
+  const from  = start + 1;
+  const to    = start + page.length;
+
+  /* Render cards for Needs Review; table for other tabs */
+  if (matchTab === 'review') {
+    $('review-list').innerHTML = page.map(r => renderReviewCard(r)).join('');
+  } else {
+    $('review-list').innerHTML = renderMatchTable(page, matchTab);
+  }
+
+  $('review-pagination').innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span>${from}–${to} of ${showing}</span>
+      <select onchange="reviewLimit=+this.value===0?999999:+this.value;reviewPage=1;filterReview()" style="padding:3px 6px;border-radius:5px;border:1px solid var(--bm);background:var(--surface);font-size:11px">
+        <option value="50">50/page</option><option value="100">100/page</option><option value="250">250/page</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:6px">
+      ${reviewPage>1 ? `<button class="btn sm" onclick="reviewPage--;filterReview()">← Prev</button>` : ''}
+      ${to<showing  ? `<button class="btn sm" onclick="reviewPage++;filterReview()">Next →</button>` : ''}
+    </div>`;
+}
+
+function renderMatchTable(rows, tab) {
+  const isRejected = tab === 'rejected';
+  const dateLabel  = tab === 'human' ? 'Verified' : tab === 'rejected' ? 'Rejected' : 'Matched';
+  return `<table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="background:var(--surface);border-bottom:1px solid var(--border)">
+      <th style="padding:8px 12px;text-align:left;font-weight:600">SKU</th>
+      <th style="padding:8px 12px;text-align:left;font-weight:600">Product</th>
+      <th style="padding:8px 12px;text-align:left;font-weight:600">Competitor</th>
+      <th style="padding:8px 12px;text-align:left;font-weight:600">Matched URL</th>
+      <th style="padding:8px 12px;text-align:left;font-weight:600">Confidence</th>
+      <th style="padding:8px 12px;text-align:left;font-weight:600">${dateLabel}</th>
+      ${!isRejected ? '<th style="padding:8px 12px"></th>' : ''}
+    </tr></thead>
+    <tbody>${rows.map(r => {
+      const sku  = r.skus  || {};
+      const comp = r.competitors || {};
+      const date = r.reviewed_at || r.updated_at;
+      return `<tr style="border-bottom:1px solid var(--border)" class="tr-link" onclick="go('sku-detail',{skuId:'${r.sku_id}',fromPanel:'review'})">
+        <td style="padding:8px 12px;font-family:'SF Mono',monospace;color:var(--blu)">${r.sku_id}</td>
+        <td style="padding:8px 12px;color:var(--t2);max-width:180px;white-space:normal;line-height:1.3">${sku.short_title||'—'}</td>
+        <td style="padding:8px 12px">${comp.name||'—'}</td>
+        <td style="padding:8px 12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          ${r.competitor_url ? `<a href="${r.competitor_url}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:12px;color:var(--blu)">${r.competitor_url.replace('https://','').slice(0,50)}</a>` : '<span style="color:var(--t3)">No URL</span>'}
+        </td>
+        <td style="padding:8px 12px">${confWidget(r.confidence)}</td>
+        <td style="padding:8px 12px;font-size:12px;color:var(--t3)">${ts(date)}</td>
+        ${!isRejected ? `<td style="padding:8px 12px" onclick="event.stopPropagation()">
+          <button class="btn sm ghost" style="font-size:11px" onclick="rematchFromTable(${r.id},this)">
+            <i class="ti ti-rotate-clockwise"></i> Re-review
+          </button>
+        </td>` : ''}
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+}
+
+async function rematchFromTable(matchId, btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i>';
+  try {
+    await sb.from('competitor_matches').update({
+      match_status:   'review',
+      match_source:   'scraper_search',
+      human_reviewed: false,
+      reviewed_at:    null,
+    }).eq('id', matchId);
+    reviewAllRows = reviewAllRows.filter(r => r.id !== matchId);
+    filterReview();
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    alert(e.message);
+  }
+}
 
 async function loadReview() {
   $('review-list').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
@@ -1696,8 +1944,16 @@ async function reviewDecision(matchId, decision, btn) {
   btn.disabled = true;
   try {
     await authPost(`/review/${matchId}`, { decision });
+    /* Write match_source=human directly — Edge Function doesn't set it */
+    await sb.from('competitor_matches').update({
+      match_source:   'human',
+      human_reviewed: true,
+      reviewed_at:    new Date().toISOString(),
+    }).eq('id', matchId);
     const row = $(`rev-${matchId}`);
     if (row) { row.style.opacity = '.4'; row.style.pointerEvents = 'none'; btn.textContent = decision === 'approve' ? '✓ Confirmed' : 'Rejected'; }
+    /* Remove from local cache so filter counts update */
+    reviewAllRows = reviewAllRows.filter(r => r.id !== matchId);
     loadDashboard();
   } catch (e) { btn.disabled = false; alert(e.message); }
 }
@@ -1733,7 +1989,7 @@ async function saveCorrectUrl(matchId, btn) {
   try {
     /* Update the competitor_matches URL then reject */
     const { error } = await sb.from('competitor_matches')
-      .update({ competitor_url: newUrl, match_status: 'rejected', human_reviewed: true, reviewed_at: new Date().toISOString() })
+      .update({ competitor_url: newUrl, match_status: 'rejected', match_source: 'human', human_reviewed: true, reviewed_at: new Date().toISOString() })
       .eq('id', matchId);
     if (error) throw new Error(error.message);
     const row = $(`rev-${matchId}`);
@@ -2615,6 +2871,8 @@ function sortSkusTable(col) {
       if (col === 'their_price')   { const raw = r.competitor_price ? parseFloat(r.competitor_price) : null; const vat = r.competitor_vat || r.competitor_vat_default || 'unknown'; return raw ? normalisePrice(raw, vat) : 999999; }
       if (col === 'diff')          return parseFloat(r.diff_pct_normalised??r.diff_pct??0);
       if (col === 'confidence')   return parseFloat(r.confidence??0);
+      if (col === 'match_status') { const ms = r._ms; if (!ms) return 0; return (ms.human*3) + (ms.auto*2) + (ms.review); }
+      if (col === 'reviewed_at')  { return r._ms?.last_reviewed ? new Date(r._ms.last_reviewed).getTime() : 0; }
       if (col === 'availability')  return (r.availability||'').toLowerCase();
       if (col === 'scraped_at')    return r.scraped_at ? new Date(r.scraped_at).getTime() : 0;
       return '';
@@ -2664,6 +2922,10 @@ function renderSkusRows(rows) {
         ${showPerUnit ? `<div style="font-size:12px;color:var(--t2)" title="Pack of ${unitQty} vs per-unit comparison">per unit · pack: <span class="${diffClass(packDiff)}">${diffLabel(packDiff)}</span></div>` : ''}
       </td>
       <td>${confWidget(r.confidence)}</td>
+      <td style="white-space:nowrap">
+        ${r._ms ? matchStatusMini(r._ms) : '<span style="color:var(--t3);font-size:12px">—</span>'}
+      </td>
+      <td style="font-size:12px;color:var(--t3)">${r._ms?.last_reviewed ? ts(r._ms.last_reviewed) : '—'}</td>
       <td>${stockBadge(r.availability)}</td>
       <td style="color:var(--t3)">${ts(r.scraped_at)}</td>
       <td style="white-space:nowrap"><button class="btn sm ghost" onclick="event.stopPropagation();openDrawer('${r.sku_id}','${(r.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(r.our_price)}','skus')" style="font-size:11px;padding:4px 8px">Quick view</button></td>
@@ -2831,6 +3093,7 @@ async function saveMatchUrl(rowId, skuId, competitorId, btn) {
       competitor_id:   competitorId,
       competitor_url:  url,
       match_status:    'matched',
+      match_source:    'human',
       human_reviewed:  true,
       reviewed_at:     new Date().toISOString(),
       updated_at:      new Date().toISOString(),
