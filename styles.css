@@ -23,7 +23,7 @@ a:hover{text-decoration-color:var(--blu)}
 /* ── Topbar ── */
 .topbar{grid-column:1/-1;background:#111110;display:flex;align-items:center;padding:0 14px;gap:10px;border-bottom:2px solid var(--orange);z-index:20;flex-shrink:0}
 .topbar-divider{width:1px;height:18px;background:rgba(255,255,255,.12);flex-shrink:0}
-.topbar-product{color:rgba(255,255,255,.55);font-size:13px;letter-spacing:.06em;text-transform:uppercase;flex-shrink:0}
+.topbar-product{color:rgba(255,255,255,.5);font-size:13px;letter-spacing:.04em;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .topbar-r{margin-left:auto;display:flex;align-items:center;gap:8px}
 .pulse{width:6px;height:6px;border-radius:50%;background:#4ade80;flex-shrink:0;animation:blink 2.4s infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
@@ -34,16 +34,11 @@ a:hover{text-decoration-color:var(--blu)}
 #header-email{color:rgba(255,255,255,.5);font-size:12px}
 
 /* ── Topbar logos ── */
-.logo-full{height:22px;display:flex;align-items:center;flex-shrink:0;overflow:hidden;transition:opacity .15s .05s,width .22s;width:auto}
-.logo-full img{height:22px;width:auto;display:block}
-.logo-icon{height:22px;width:0;opacity:0;display:block;flex-shrink:0;overflow:hidden;transition:opacity .15s .05s,width .22s}
-.logo-icon img{height:22px;width:auto;display:block}
+#topbar-logo{display:flex;align-items:center;flex-shrink:0}
+#topbar-logo img{height:22px;width:auto;display:block}
 .logo{background:var(--orange);border-radius:4px;padding:3px 8px;display:inline-flex;align-items:center;gap:0;flex-shrink:0}
 .logo .uk{color:#fff;font-weight:800;font-size:13px;border-right:1.5px solid rgba(255,255,255,.35);padding-right:5px;margin-right:4px}
 .logo .pos{color:#fff;font-weight:800;font-size:13px}
-/* Collapsed desktop: swap logos */
-.shell.nav-collapsed .logo-full{opacity:0;width:0;pointer-events:none}
-.shell.nav-collapsed .logo-icon{opacity:1;width:26px}
 
 /* ── Mobile hamburger (hidden on desktop) ── */
 .mob-hamburger{display:none;background:none;border:none;cursor:pointer;color:rgba(255,255,255,.75);padding:5px;border-radius:4px;align-items:center;justify-content:center;flex-shrink:0}
@@ -91,9 +86,7 @@ a:hover{text-decoration-color:var(--blu)}
   .shell.nav-collapsed .sidebar .nbadge{opacity:1;width:auto;padding:1px 6px}
   .shell.nav-collapsed .sidebar .sidebar-foot{opacity:1;height:auto;padding:12px;border-top:1px solid var(--border)}
   .shell.nav-collapsed .sidebar .nav-item:hover .nav-tip{display:none}
-  /* Undo logo swap on mobile */
-  .shell.nav-collapsed .logo-full{opacity:1;width:auto;pointer-events:auto}
-  .shell.nav-collapsed .logo-icon{opacity:0;width:0}
+
   /* Show hamburger, hide desktop toggle */
   .mob-hamburger{display:inline-flex}
   .sidebar-toggle-btn{display:none !important}
