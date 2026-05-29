@@ -17,10 +17,12 @@
 
   <!-- TOPBAR -->
   <div class="topbar">
-    <div class="logo"><span class="uk">UK</span><span class="pos">POS</span></div>
+    <img src="logo-full.png" alt="UKPOS PriceWatch Pro" class="logo-full" onerror="this.style.display='none'">
+    <img src="logo-icon.png" alt="UKPOS" class="logo-icon" onerror="this.style.display='none'">
     <span class="topbar-product">PriceWatch Pro</span>
     <div class="topbar-r">
-      <span class="pulse"></span>
+      <button class="tbtn" onclick="toggleSidebar()" id="sidebar-toggle-btn" title="Collapse sidebar" aria-label="Toggle sidebar"><i class="ti ti-layout-sidebar-left-collapse" id="sidebar-toggle-icon" style="font-size:14px"></i></button>
+      <span style="width:1px;height:18px;background:rgba(255,255,255,.12);margin:0 2px"></span>
       <span class="topbar-status" id="sync-status">Loading…</span>
       <button class="tbtn" onclick="manualRefresh()"><i class="ti ti-refresh" style="font-size:12px"></i> Refresh</button>
       <span style="width:1px;height:18px;background:rgba(255,255,255,.12);margin:0 2px"></span>
@@ -31,17 +33,19 @@
   </div>
 
   <!-- SIDEBAR -->
-  <nav class="sidebar">
-    <div class="nav-sect">Work to do</div>
-    <div class="nav-item" id="nav-alerts" onclick="go('alerts')"><i class="ti ti-bell"></i> Price alerts <span class="nbadge nb-r" id="nav-alerts-badge" style="display:none">0</span></div>
-    <div class="nav-item" id="nav-review" onclick="go('review')"><i class="ti ti-eye-check"></i> Match manager <span class="nbadge nb-a" id="nav-review-badge" style="display:none">0</span></div>
-    <div class="nav-sect">Explore</div>
-    <div class="nav-item" id="nav-skus" onclick="go('skus')"><i class="ti ti-tag"></i> All SKUs</div>
-    <div class="nav-item" id="nav-bycat" onclick="go('bycat')"><i class="ti ti-package"></i> By category</div>
-    <div class="nav-item" id="nav-bycomp" onclick="go('bycomp')"><i class="ti ti-building-store"></i> By competitor</div>
-    <div class="nav-sect">System</div>
-    <div class="nav-item" id="nav-schedule" onclick="go('schedule')"><i class="ti ti-clock"></i> Sync schedule</div>
-    <div class="nav-item" id="nav-settings" onclick="go('settings')"><i class="ti ti-settings-2"></i> Settings</div>
+  <nav class="sidebar" id="sidebar">
+    <div class="sb-nav">
+      <div class="nav-sect">Work to do</div>
+      <div class="nav-item" id="nav-alerts" onclick="go('alerts')" title="Price alerts"><i class="ti ti-bell"></i> <span class="nav-label">Price alerts</span> <span class="nbadge nb-r" id="nav-alerts-badge" style="display:none">0</span><span class="nav-tip">Price alerts</span></div>
+      <div class="nav-item" id="nav-review" onclick="go('review')" title="Match manager"><i class="ti ti-eye-check"></i> <span class="nav-label">Match manager</span> <span class="nbadge nb-a" id="nav-review-badge" style="display:none">0</span><span class="nav-tip">Match manager</span></div>
+      <div class="nav-sect">Explore</div>
+      <div class="nav-item" id="nav-skus" onclick="go('skus')" title="All SKUs"><i class="ti ti-tag"></i> <span class="nav-label">All SKUs</span><span class="nav-tip">All SKUs</span></div>
+      <div class="nav-item" id="nav-bycat" onclick="go('bycat')" title="By category"><i class="ti ti-package"></i> <span class="nav-label">By category</span><span class="nav-tip">By category</span></div>
+      <div class="nav-item" id="nav-bycomp" onclick="go('bycomp')" title="By competitor"><i class="ti ti-building-store"></i> <span class="nav-label">By competitor</span><span class="nav-tip">By competitor</span></div>
+      <div class="nav-sect">System</div>
+      <div class="nav-item" id="nav-schedule" onclick="go('schedule')" title="Sync schedule"><i class="ti ti-clock"></i> <span class="nav-label">Sync schedule</span><span class="nav-tip">Sync schedule</span></div>
+      <div class="nav-item" id="nav-settings" onclick="go('settings')" title="Settings"><i class="ti ti-settings-2"></i> <span class="nav-label">Settings</span><span class="nav-tip">Settings</span></div>
+    </div>
     <div class="sidebar-foot" id="sidebar-foot">Loading…</div>
   </nav>
 
@@ -540,6 +544,39 @@ function applyThresholdCSS() {
   document.getElementById('thresh-red-label2') && (document.getElementById('thresh-red-label2').textContent = T.red);
   document.getElementById('thresh-amb-label') && (document.getElementById('thresh-amb-label').textContent = T.amb);
 }
+
+function toggleSidebar() {
+  const shell   = $('view-app');
+  const sidebar = $('sidebar');
+  const icon    = $('sidebar-toggle-icon');
+  const btn     = $('sidebar-toggle-btn');
+  const collapsed = sidebar.classList.toggle('nav-collapsed');
+  shell.classList.toggle('nav-collapsed', collapsed);
+  icon.className = collapsed
+    ? 'ti ti-layout-sidebar-left-expand'
+    : 'ti ti-layout-sidebar-left-collapse';
+  btn.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+  try { localStorage.setItem('pw_sidebar_collapsed', collapsed ? '1' : '0'); } catch(e) {}
+}
+
+/* Restore sidebar state on load */
+(function restoreSidebar() {
+  try {
+    if (localStorage.getItem('pw_sidebar_collapsed') === '1') {
+      /* Defer until DOM is ready */
+      document.addEventListener('DOMContentLoaded', () => {
+        const sb = document.getElementById('sidebar');
+        const shell = document.getElementById('view-app');
+        const icon  = document.getElementById('sidebar-toggle-icon');
+        const btn   = document.getElementById('sidebar-toggle-btn');
+        if (sb) sb.classList.add('nav-collapsed');
+        if (shell) shell.classList.add('nav-collapsed');
+        if (icon) icon.className = 'ti ti-layout-sidebar-left-expand';
+        if (btn) btn.title = 'Expand sidebar';
+      });
+    }
+  } catch(e) {}
+})();
 
 /* ════════════════════════════════════════
    HELPERS
