@@ -319,24 +319,12 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
 .drc-diff{font-size:12px;font-weight:600;text-align:right;min-width:46px}
 
 /* ── Auth screens ── */
-.auth-shell{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:999}
-.auth-card{width:100%;max-width:420px;background:var(--surface);border:1px solid var(--border);border-radius:var(--rl);padding:28px 32px}
-.auth-logo{text-align:center;margin-bottom:20px}
-.auth-tabs{display:flex;gap:2px;background:var(--bg);padding:3px;border-radius:var(--r);margin-bottom:18px}
-.auth-tab{flex:1;padding:7px 10px;border:none;background:transparent;color:var(--t2);cursor:pointer;border-radius:5px;font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;font-family:inherit;transition:all .1s}
-.auth-tab.active{background:var(--surface);color:var(--text)}
-.auth-field{margin-bottom:12px}
-.auth-field label{display:block;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--t2);margin-bottom:5px}
-.auth-field input{width:100%;padding:9px 11px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);color:var(--text);font-size:13px;font-family:inherit;outline:none;transition:border-color .1s}
-.auth-field input:focus{border-color:var(--orange)}
-.auth-submit{width:100%;padding:10px;background:var(--orange);color:#fff;border:none;border-radius:var(--r);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;cursor:pointer;font-family:inherit;margin-top:4px;transition:background .1s}
-.auth-submit:hover{background:#c73d16}
-.auth-submit:disabled{opacity:.5;cursor:not-allowed}
+
 .auth-msg{padding:8px 11px;border-radius:var(--r);font-size:14px;margin-top:10px;line-height:1.4}
 .auth-msg.err{background:var(--rb);color:var(--red);border:1px solid var(--rbd)}
 .auth-msg.ok{background:var(--gb);color:var(--grn);border:1px solid var(--gbd)}
 .auth-msg.info{background:var(--bb);color:#042c53;border:1px solid var(--bbd)}
-.auth-link{background:none;border:none;color:var(--blu);cursor:pointer;font-size:14px;font-family:inherit;text-decoration:underline;text-decoration-color:rgba(24,95,165,.3);margin-top:8px;display:block}
+
 
 /* ── Loading ── */
 .loading{display:flex;align-items:center;justify-content:center;padding:40px;color:var(--t2);gap:8px;font-size:12px}
@@ -351,64 +339,6 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
 </style>
 </head>
 <body>
-
-<!-- ════════════════ AUTH VIEWS ════════════════ -->
-<div id="view-loading" class="auth-shell">
-  <div class="auth-card" style="text-align:center">
-    <div class="auth-logo">
-      <div class="logo" style="display:inline-flex;margin-bottom:10px"><span class="uk">UK</span><span class="pos">POS</span></div>
-      <div style="font-size:17px;font-weight:500">PriceWatch Pro</div>
-      <div style="font-size:11px;color:var(--t2);text-transform:uppercase;letter-spacing:.08em;margin-top:2px">Competitive price intelligence</div>
-    </div>
-    <div class="loading"><span class="spinner"></span> Loading…</div>
-  </div>
-</div>
-
-<div id="view-login" class="auth-shell" style="display:none">
-  <div class="auth-card">
-    <div class="auth-logo">
-      <div class="logo" style="display:inline-flex;margin-bottom:10px"><span class="uk">UK</span><span class="pos">POS</span></div>
-      <div style="font-size:17px;font-weight:500">PriceWatch Pro</div>
-      <div style="font-size:11px;color:var(--t2);text-transform:uppercase;letter-spacing:.08em;margin-top:2px">Competitive price intelligence</div>
-    </div>
-    <div class="auth-tabs">
-      <button id="tab-login" class="auth-tab active" onclick="showAuthTab('login')">Sign in</button>
-      <button id="tab-register" class="auth-tab" onclick="showAuthTab('register')">Request access</button>
-    </div>
-    <form id="form-login" onsubmit="handleLogin(event)">
-      <div class="auth-field"><label>Email</label><input id="login-email" type="email" required autocomplete="email" placeholder="you@ukpos.com"></div>
-      <div class="auth-field"><label>Password</label><input id="login-password" type="password" required autocomplete="current-password"></div>
-      <button type="submit" class="auth-submit" id="login-btn">Sign in</button>
-      <button type="button" class="auth-link" onclick="handleForgotPassword()">Forgot password?</button>
-      <div id="login-msg"></div>
-    </form>
-    <form id="form-register" style="display:none" onsubmit="handleRequestAccess(event)">
-      <p style="font-size:11px;color:var(--t2);margin-bottom:14px;line-height:1.5">Submit your work email — the administrator will review and send a set-password link once approved.</p>
-      <div class="auth-field"><label>Work email</label><input id="reg-email" type="email" required placeholder="you@ukpos.com"></div>
-      <div class="auth-field"><label>Full name (optional)</label><input id="reg-name" type="text" placeholder="Jane Smith"></div>
-      <button type="submit" class="auth-submit" id="reg-btn">Submit request</button>
-      <div id="reg-msg"></div>
-    </form>
-  </div>
-</div>
-
-<div id="view-pending" class="auth-shell" style="display:none">
-  <div class="auth-card" style="text-align:center">
-    <div class="auth-logo"><div class="logo" style="display:inline-flex;margin-bottom:10px"><span class="uk">UK</span><span class="pos">POS</span></div><div style="font-size:17px;font-weight:500">PriceWatch Pro</div></div>
-    <div style="font-size:14px;font-weight:500;margin-bottom:8px">Awaiting approval</div>
-    <p style="font-size:12px;color:var(--t2);margin-bottom:16px;line-height:1.5">Your request is in the queue. You'll receive an email when the administrator approves your account.</p>
-    <button class="btn sm" onclick="signOut()">Sign out</button>
-  </div>
-</div>
-
-<div id="view-rejected" class="auth-shell" style="display:none">
-  <div class="auth-card" style="text-align:center">
-    <div class="auth-logo"><div class="logo" style="display:inline-flex;margin-bottom:10px"><span class="uk">UK</span><span class="pos">POS</span></div><div style="font-size:17px;font-weight:500">PriceWatch Pro</div></div>
-    <div style="font-size:14px;font-weight:500;margin-bottom:8px">Request declined</div>
-    <p style="font-size:12px;color:var(--t2);margin-bottom:16px">Contact the administrator if you believe this is an error.</p>
-    <button class="btn sm" onclick="signOut()">Sign out</button>
-  </div>
-</div>
 
 <!-- ════════════════ MAIN APP ════════════════ -->
 <div id="view-app" class="shell" style="display:none">
@@ -536,6 +466,9 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
       <!-- filters — fixed, never scrolls away -->
       <div style="background:var(--surface);border-bottom:1px solid var(--border);padding:10px 14px;flex-shrink:0">
         <div class="filter-row" style="margin:0">
+          <!-- Honeypot: Chrome fills these instead of the real search input -->
+          <input type="text" name="username" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0" tabindex="-1" aria-hidden="true" autocomplete="username">
+          <input type="password" name="password" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0" tabindex="-1" aria-hidden="true" autocomplete="current-password">
           <input type="search" class="search" id="skuQ" placeholder="Search SKU ID, product name, competitor…" oninput="debounce(filterSKUs,400)()" autocomplete="off" spellcheck="false">
           <select id="fDiff" onchange="filterSKUs()">
             <option value="">All differentials</option>
@@ -1109,7 +1042,11 @@ function go(name, opts = {}) {
   if (navKey && $('nav-' + navKey)) $('nav-' + navKey).classList.add('active');
 
   /* Panel-specific init */
-  if (name === 'skus') { const q = $('skuQ'); if (q && q.value === (currentUser?.email||'')) q.value = ''; if (!skusLoaded) { skusLoaded = true; loadSKUs(); } }
+  if (name === 'skus') {
+    const q = $('skuQ');
+    if (q) q.value = '';
+    if (!skusLoaded) { skusLoaded = true; loadSKUs(); }
+  }
   if (name === 'review')      loadReview();
   if (name === 'bycat')       loadByCategory();
   if (name === 'bycomp')      loadByCompetitor();
@@ -1148,63 +1085,58 @@ function goSett(tab) {
   const sn = $('sn-' + tab); if (sn) sn.classList.add('active');
 }
 
+async function signOut() {
+  if (sb) await sb.auth.signOut();
+  window.location.href = 'login.html';
+}
+
 /* ════════════════════════════════════════
-   AUTH
+   SESSION GUARD
+   login.html handles all auth — we just
+   verify session exists and redirect if not
 ════════════════════════════════════════ */
-function showView(v) {
-  ['view-loading','view-login','view-pending','view-rejected','view-app'].forEach(id => {
-    const el = $(id);
-    if (!el) return;
-    if (id !== v) { el.style.display = 'none'; return; }
-    /* view-app is .shell which needs display:grid, auth screens are block */
-    el.style.display = (id === 'view-app') ? 'grid' : '';
-  });
-}
-
-function showAuthTab(which) {
-  $('tab-login').classList.toggle('active', which === 'login');
-  $('tab-register').classList.toggle('active', which === 'register');
-  $('form-login').style.display    = which === 'login'    ? '' : 'none';
-  $('form-register').style.display = which === 'register' ? '' : 'none';
-  $('login-msg').innerHTML = '';
-  $('reg-msg').innerHTML = '';
-}
-
 async function bootstrap() {
   sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
   const { data: { session } } = await sb.auth.getSession();
-  if (!session) { showView('view-login'); return; }
+  if (!session) {
+    sessionStorage.setItem('pw_redirect', window.location.href);
+    window.location.href = 'login.html';
+    return;
+  }
   await onSignedIn(session);
 
   sb.auth.onAuthStateChange(async (event, session) => {
-    /* Always invalidate cached token on any auth event */
     cachedToken = session?.access_token || null;
-    if (event === 'SIGNED_OUT' || !session) { currentUser = null; currentProfile = null; showView('view-login'); return; }
-    if (['SIGNED_IN','TOKEN_REFRESHED','USER_UPDATED','INITIAL_SESSION'].includes(event)) await onSignedIn(session);
+    if (event === 'SIGNED_OUT' || !session) {
+      window.location.href = 'login.html';
+      return;
+    }
+    if (['SIGNED_IN','TOKEN_REFRESHED','USER_UPDATED','INITIAL_SESSION'].includes(event)) {
+      await onSignedIn(session);
+    }
   });
 }
 
 async function onSignedIn(session) {
   currentUser  = session.user;
-  cachedToken  = session.access_token || null;  /* prime cache immediately */
+  cachedToken  = session.access_token || null;
   const { data: profiles } = await sb.from('profiles').select('*').eq('id', session.user.id).limit(1);
-  if (!profiles || !profiles.length) { showView('view-pending'); return; }
+  if (!profiles?.length || profiles[0].status === 'pending' || profiles[0].status === 'rejected') {
+    window.location.href = 'login.html';
+    return;
+  }
   currentProfile = profiles[0];
   $('header-email').textContent = currentProfile.email || '—';
   $('ma-email').value = currentProfile.email || '';
   $('ma-name').value  = currentProfile.full_name || '';
 
-  if (currentProfile.status === 'pending')  { showView('view-pending'); return; }
-  if (currentProfile.status === 'rejected') { showView('view-rejected'); return; }
-
-  showView('view-app');
+  $('view-app').style.display = 'grid';
   if (currentProfile.role === 'super_admin') {
     const usersTab = $('sn-users');
     if (usersTab) usersTab.style.display = '';
   }
   loadDashboard();
   restoreRoute();
-  /* Pre-fetch SKU list in the background so By Category loads instantly */
   if (!allSkus.length) {
     sb.from('skus')
       .select('sku_id,short_title,price_ex_vat,product_url,availability,cat_l4,cat_l5,image_url,slug')
@@ -1213,44 +1145,6 @@ async function onSignedIn(session) {
       .then(({ data }) => { if (data) allSkus = data; });
   }
   setInterval(() => { if ($('p-alerts').classList.contains('active')) loadDashboard(); }, 5 * 60 * 1000);
-}
-
-async function handleLogin(e) {
-  e.preventDefault();
-  $('login-btn').disabled = true;
-  const { error } = await sb.auth.signInWithPassword({ email: $('login-email').value.trim(), password: $('login-password').value });
-  $('login-btn').disabled = false;
-  if (error) showMsg('login-msg', error.message, 'err');
-}
-
-async function handleForgotPassword() {
-  const email = $('login-email').value.trim();
-  if (!email) { showMsg('login-msg', 'Enter your email above first.', 'info'); return; }
-  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + '/' });
-  if (error) showMsg('login-msg', error.message, 'err');
-  else showMsg('login-msg', 'Check your inbox for a reset link.', 'ok');
-}
-
-async function handleRequestAccess(e) {
-  e.preventDefault();
-  $('reg-btn').disabled = true;
-  const email = $('reg-email').value.trim().toLowerCase();
-  const full_name = $('reg-name').value.trim();
-  const domain = email.split('@')[1] || '';
-  if (!ALLOWED_DOMAINS.includes(domain)) {
-    showMsg('reg-msg', 'Only @ukpos.com email addresses are permitted.', 'err');
-    $('reg-btn').disabled = false;
-    return;
-  }
-  const { error } = await sb.from('access_requests').upsert({ email, full_name }, { onConflict: 'email' });
-  $('reg-btn').disabled = false;
-  if (error) { showMsg('reg-msg', error.message || 'Request failed.', 'err'); return; }
-  showMsg('reg-msg', 'Request submitted — you will be notified once approved.', 'ok');
-  $('form-register').reset();
-}
-
-async function signOut() {
-  if (sb) await sb.auth.signOut();
 }
 
 function openMyAccount() { go('settings'); goSett('account'); }
