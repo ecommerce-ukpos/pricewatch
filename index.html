@@ -120,8 +120,8 @@
       <!-- Status tabs -->
       <div style="display:flex;gap:0;padding:0 14px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;overflow-x:auto">
         <button class="mtab active" id="mtab-review"   onclick="setMatchTab('review')"  >Needs review   <span class="nbadge nb-a" id="mtab-n-review"   style="margin-left:5px">0</span></button>
+        <button class="mtab"        id="mtab-human"    onclick="setMatchTab('human')"   >Confirmed      <span class="nbadge nb-g" id="mtab-n-human"    style="margin-left:5px">0</span></button>
         <button class="mtab"        id="mtab-auto"     onclick="setMatchTab('auto')"    >AI matched     <span class="nbadge nb-g" id="mtab-n-auto"     style="margin-left:5px">0</span></button>
-        <button class="mtab"        id="mtab-human"    onclick="setMatchTab('human')"   >Human verified <span class="nbadge nb-g" id="mtab-n-human"    style="margin-left:5px">0</span></button>
         <button class="mtab"        id="mtab-rejected" onclick="setMatchTab('rejected')">Rejected       <span class="nbadge"    id="mtab-n-rejected" style="margin-left:5px;background:var(--bb);color:var(--blu)">0</span></button>
       </div>
       <!-- table — scrollable -->
@@ -1334,14 +1334,14 @@ function filterReview() {
   if (comp) rows = rows.filter(r => r.competitors?.name === comp);
 
   const showing = rows.length;
-  const tabLabel = {review:'needs review',auto:'AI matched',human:'human verified',rejected:'rejected'}[matchTab];
+  const tabLabel = {review:'needs review',auto:'AI matched',human:'confirmed',rejected:'rejected'}[matchTab];
   $('review-sub').textContent = (q||comp) ? `${showing} matches (filtered)` : `${showing} ${tabLabel}`;
 
   if (!rows.length) {
     const msgs = {
       review:   ['ti-circle-check','var(--grn)','All caught up — no matches need review'],
       auto:     ['ti-robot','var(--blu)','No AI-matched pairs yet'],
-      human:    ['ti-user-check','var(--grn)','No human-verified matches yet'],
+      human:    ['ti-user-check','var(--grn)','No confirmed matches yet'],
       rejected: ['ti-x','var(--t3)','No rejected matches'],
     };
     const [icon, color, text] = msgs[matchTab];
@@ -1383,7 +1383,6 @@ function renderReviewRows(rows) {
   $('review-tbody').innerHTML = rows.map(r => {
     const sku   = r.skus        || {};
     const comp  = r.competitors || {};
-    /* latest_snapshots can be array or object depending on Supabase version */
     const snap  = r._snap || {};
 
     const ourPriceEx = sku.price_ex_vat ? parseFloat(sku.price_ex_vat) : null;
@@ -1392,38 +1391,39 @@ function renderReviewRows(rows) {
     const ourUrl     = sku.product_url || (sku.slug ? `https://www.ukpos.com/${sku.slug}?vat=0` : '#');
     const ourThumb   = thumbUrl(sku.image_url||'', 50, 50);
 
-    const theirRaw   = snap.competitor_price ? parseFloat(snap.competitor_price) : null;
-    const theirVat   = snap.competitor_vat || snap.competitor_vat_default || comp.vat_status || 'unknown';
-    const theirEx    = theirRaw ? normalisePrice(theirRaw, theirVat) : null;
-    const compQty    = null; /* will come from scraper comp_qty when available */
-    const theirPerU  = (unitQty && theirEx) ? theirEx / unitQty : null;
+    const theirRaw  = snap.competitor_price ? parseFloat(snap.competitor_price) : null;
+    const theirVat  = snap.competitor_vat || snap.competitor_vat_default || comp.vat_status || 'unknown';
+    const theirEx   = theirRaw ? normalisePrice(theirRaw, theirVat) : null;
+    const theirPerU = (unitQty && theirEx) ? theirEx / unitQty : null;
 
-    const diff       = snap.diff_pct_normalised ?? snap.diff_pct;
+    const diff = snap.diff_pct_normalised ?? snap.diff_pct;
+
     const statusPill = {
       review:   `<span style="background:var(--ab);color:var(--amb);border-radius:4px;padding:2px 7px;font-size:11px;font-weight:500">Needs review</span>`,
       matched:  r.human_reviewed
-                ? `<span style="background:var(--gb);color:var(--grn);border-radius:4px;padding:2px 7px;font-size:11px;font-weight:500">✓ Human verified</span>`
+                ? `<span style="background:var(--gb);color:var(--grn);border-radius:4px;padding:2px 7px;font-size:11px;font-weight:500">✓ Confirmed</span>`
                 : `<span style="background:var(--bb);color:var(--blu);border-radius:4px;padding:2px 7px;font-size:11px;font-weight:500">🤖 AI matched</span>`,
       rejected: `<span style="background:var(--bg);color:var(--t3);border-radius:4px;padding:2px 7px;font-size:11px;border:1px solid var(--border)">Rejected</span>`,
     }[r.match_status] || '—';
 
-    /* Action buttons — vary by tab */
+    /* ── Action cell ── */
     const actions = matchTab === 'review' ? `
-      <div style="display:flex;gap:4px;flex-wrap:wrap;min-width:180px">
+      <div style="display:flex;gap:4px;flex-wrap:wrap">
         <button class="btn sm prim"   style="font-size:11px;padding:3px 7px" onclick="event.stopPropagation();quickApprove(${r.id},this)"><i class="ti ti-check"></i> Confirm</button>
-        <button class="btn sm danger" style="font-size:11px;padding:3px 7px" onclick="event.stopPropagation();showRejectOptions(${r.id})"><i class="ti ti-x"></i> Reject</button>
-        <button class="btn sm ghost"  style="font-size:11px;padding:3px 7px" onclick="event.stopPropagation();skipReviewRow(${r.id})"><i class="ti ti-skip-forward"></i></button>
+        <button class="btn sm"        style="font-size:11px;padding:3px 7px" onclick="event.stopPropagation();showUpdateUrl(${r.id})"><i class="ti ti-link"></i> Update URL</button>
+        <button class="btn sm danger" style="font-size:11px;padding:3px 7px" onclick="event.stopPropagation();quickRejectNoProduct(${r.id},this)" title="Competitor doesn't sell this product"><i class="ti ti-x"></i> Reject</button>
       </div>
-      <div id="rrow-reject-${r.id}" style="display:none;margin-top:6px">
-        <input id="rrow-url-${r.id}" type="text" placeholder="Correct URL (optional)" autocomplete="new-password" spellcheck="false"
-          style="width:100%;padding:5px 8px;font-size:11px;border:1px solid var(--bm);border-radius:var(--r);font-family:inherit;outline:none;margin-bottom:4px">
-        <div style="display:flex;gap:4px">
-          <button class="btn sm prim"   style="font-size:11px" onclick="event.stopPropagation();quickReject(${r.id},this,true)"><i class="ti ti-device-floppy"></i> Save &amp; reject</button>
-          <button class="btn sm danger" style="font-size:11px" onclick="event.stopPropagation();quickReject(${r.id},this,false)">Reject</button>
-          <button class="btn sm ghost"  style="font-size:11px" onclick="event.stopPropagation();hideRejectOptions(${r.id})">Cancel</button>
+      <div id="rrow-update-${r.id}" style="display:none;margin-top:6px">
+        <div style="font-size:11px;color:var(--t2);margin-bottom:4px">Paste the correct competitor product URL:</div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap">
+          <input id="rrow-url-${r.id}" type="text" value="${(r.competitor_url||'').replace(/"/g,'&quot;')}" placeholder="https://competitor.com/product"
+            autocomplete="new-password" spellcheck="false"
+            style="flex:1;min-width:200px;padding:5px 8px;font-size:11px;border:1px solid var(--bm);border-radius:var(--r);font-family:inherit;outline:none">
+          <button class="btn sm prim"  style="font-size:11px" onclick="event.stopPropagation();quickReject(${r.id},this,true)"><i class="ti ti-device-floppy"></i> Save</button>
+          <button class="btn sm ghost" style="font-size:11px" onclick="event.stopPropagation();hideUpdateUrl(${r.id})">Cancel</button>
         </div>
       </div>` : matchTab !== 'rejected' ? `
-      <button class="btn sm ghost" style="font-size:11px" onclick="event.stopPropagation();revertToReview(${r.id},this)" title="Move back to Needs Review">
+      <button class="btn sm ghost" style="font-size:11px" onclick="event.stopPropagation();revertToReview(${r.id},this)">
         <i class="ti ti-rotate-clockwise"></i> Re-review
       </button>` : '';
 
@@ -1436,11 +1436,11 @@ function renderReviewRows(rows) {
         </div>
       </td>
 
-      <!-- SKU ID + product name, both linked to UKPOS -->
+      <!-- SKU ID + product name — both link to UKPOS -->
       <td style="min-width:140px">
         <a href="${ourUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()"
-          style="font-family:'SF Mono',monospace;font-size:12px;color:var(--blu);display:block;text-decoration:none">
-          ${r.sku_id} <i class="ti ti-external-link" style="font-size:10px"></i>
+          style="display:inline-flex;align-items:center;gap:4px;font-family:'SF Mono',monospace;font-size:12px;color:var(--blu);text-decoration:none;font-weight:600">
+          ${r.sku_id}<i class="ti ti-arrow-up-right" style="font-size:13px"></i>
         </a>
         <a href="${ourUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()"
           style="font-size:12px;color:var(--t2);display:block;line-height:1.3;text-decoration:none;margin-top:2px">
@@ -1448,28 +1448,35 @@ function renderReviewRows(rows) {
         </a>
       </td>
 
-      <!-- Our price + per unit -->
+      <!-- Our price + per unit (yellow highlight) -->
       <td style="white-space:nowrap;font-weight:500">
         ${ourPriceEx ? fmtPrice(ourPriceEx) : '—'} <span class="vat vex" style="font-size:10px">ex</span>
-        ${ourPerUnit ? `<div style="font-size:11px;color:var(--t2)">${fmtPrice(ourPerUnit)}/unit</div>` : ''}
+        ${ourPerUnit ? `<div style="font-size:11px;font-weight:600;background:#fef08a;color:#854d0e;border-radius:3px;padding:1px 5px;display:inline-block;margin-top:2px">${fmtPrice(ourPerUnit)}/unit</div>` : ''}
       </td>
 
-      <!-- Competitor name + their URL -->
-      <td style="min-width:120px">
-        <div style="font-weight:500">${comp.name||'—'}</div>
+      <!-- Competitor name + URL — whole cell links to competitor URL -->
+      <td style="min-width:140px;padding:0">
         ${r.competitor_url
           ? `<a href="${r.competitor_url}" target="_blank" rel="noopener" onclick="event.stopPropagation()"
-              style="font-size:11px;color:var(--t3);display:block;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:none">
-              <i class="ti ti-external-link" style="font-size:10px"></i> ${r.competitor_url.replace('https://','').slice(0,45)}
+              style="display:block;padding:8px 10px;text-decoration:none;height:100%">
+              <div style="font-weight:600;color:var(--blu);display:flex;align-items:center;gap:4px">
+                ${comp.name||'—'}<i class="ti ti-arrow-up-right" style="font-size:13px;flex-shrink:0"></i>
+              </div>
+              <div style="font-size:11px;color:var(--t3);margin-top:2px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                ${r.competitor_url.replace('https://','').replace('http://','').slice(0,50)}
+              </div>
              </a>`
-          : `<span style="font-size:11px;color:var(--t3)">No URL set</span>`}
+          : `<div style="padding:8px 10px">
+              <div style="font-weight:500;color:var(--t2)">${comp.name||'—'}</div>
+              <div style="font-size:11px;color:var(--t3);margin-top:2px">No URL set</div>
+             </div>`}
       </td>
 
-      <!-- Their price + per unit -->
+      <!-- Their price + per unit (yellow highlight) -->
       <td style="white-space:nowrap;font-weight:500">
         ${theirEx
           ? `${fmtPrice(theirEx)} ${vatPill(theirVat)}
-             ${theirPerU ? `<div style="font-size:11px;color:var(--t2)">${fmtPrice(theirPerU)}/unit</div>` : ''}`
+             ${theirPerU ? `<div style="font-size:11px;font-weight:600;background:#fef08a;color:#854d0e;border-radius:3px;padding:1px 5px;display:inline-block;margin-top:2px">${fmtPrice(theirPerU)}/unit</div>` : ''}`
           : `<span style="color:var(--t3);font-size:12px">Not yet scraped</span>`}
       </td>
 
@@ -1479,13 +1486,13 @@ function renderReviewRows(rows) {
       <!-- Confidence -->
       <td>${confWidget(r.confidence)}</td>
 
-      <!-- Actions (Confirm/Reject/Skip or Re-review) -->
-      <td onclick="event.stopPropagation()" style="min-width:200px">${actions}</td>
+      <!-- Actions -->
+      <td onclick="event.stopPropagation()" style="min-width:220px">${actions}</td>
 
-      <!-- Match status pill -->
+      <!-- Match status -->
       <td style="white-space:nowrap">${statusPill}</td>
 
-      <!-- Last matched/reviewed date -->
+      <!-- Last matched/reviewed -->
       <td style="font-size:12px;color:var(--t3);white-space:nowrap">${ts(r.reviewed_at||r.updated_at)}</td>
 
       <!-- Stock -->
@@ -1527,9 +1534,28 @@ function sortReviewTable(col) {
   renderReviewPage();
 }
 
-function showRejectOptions(id)   { $(`rrow-reject-${id}`).style.display = ''; $(`rrow-url-${id}`)?.focus(); }
-function hideRejectOptions(id)   { $(`rrow-reject-${id}`).style.display = 'none'; }
-function skipReviewRow(id)       { const el = $(`rrow-${id}`); if (el) el.style.display = 'none'; }
+function showUpdateUrl(id)  { $(`rrow-update-${id}`).style.display = ''; $(`rrow-url-${id}`)?.focus(); }
+function hideUpdateUrl(id)  { $(`rrow-update-${id}`).style.display = 'none'; }
+function showRejectOptions(id) { showUpdateUrl(id); }  /* legacy alias */
+function hideRejectOptions(id) { hideUpdateUrl(id); }  /* legacy alias */
+
+/* Reject with URL saved (Update URL → Save) */
+async function quickRejectNoProduct(matchId, btn) {
+  /* Competitor doesn't sell this product at all — clear the URL */
+  const orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i>';
+  try {
+    await authPost(`/review/${matchId}`, { decision: 'reject' });
+    await sb.from('competitor_matches').update({
+      match_source: 'human', human_reviewed: true,
+      reviewed_at:  new Date().toISOString(),
+      competitor_url: null,
+    }).eq('id', matchId);
+    const r = reviewAllRows.find(r => r.id === matchId);
+    if (r) { r.match_status='rejected'; r.human_reviewed=true; r.match_source='human'; r.reviewed_at=new Date().toISOString(); r.competitor_url=null; }
+    updateMatchTabCounts(); filterReview(); loadDashboard();
+  } catch(e) { btn.disabled=false; btn.innerHTML=orig; alert(e.message); }
+}
 
 async function quickApprove(matchId, btn) {
   const orig = btn.innerHTML;
