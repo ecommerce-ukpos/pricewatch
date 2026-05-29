@@ -123,11 +123,20 @@ STOP_WORDS = {
 # ── Query building ─────────────────────────────────────────────────────────────
 
 def build_search_query(sku: dict) -> str:
-    title = sku["short_title"]
-    clean = re.sub(r"\bx\s*\d+\b", "", title, flags=re.I)
+    title  = sku["short_title"]
+    sku_id = sku.get("sku_id", "")
+    if re.search(r"-(PRINTED|BRANDED)$", sku_id, re.I):
+        title = re.sub(r"\bcustom[- ]?print(?:ed)?\b",          "", title, flags=re.I)
+        title = re.sub(r"\bwith[- ]?print(?:ed)?[- ]?poster\b", "", title, flags=re.I)
+        title = re.sub(r"\bInc(?:\.)?[- ]?Printed\b",           "", title, flags=re.I)
+        title = re.sub(r"\bCustom[- ]?Printed\b",               "", title, flags=re.I)
+        title = re.sub(r"\bPrinted\b",                          "", title, flags=re.I)
+        title = re.sub(r"\bBespoke[- ]?Brand(?:ing|ed)?\b",     "", title, flags=re.I)
+        title = re.sub(r"\bBranded\b",                          "", title, flags=re.I)
+    clean = re.sub(r"\bx\s*\d+\b",         "", title, flags=re.I)
     clean = re.sub(r"\bpack\s+of\s+\d+\b", "", clean, flags=re.I)
-    clean = re.sub(r"\b\d+\s*pack\b", "", clean, flags=re.I)
-    clean = re.sub(r"\s+", " ", clean).strip().rstrip("-—–").strip()
+    clean = re.sub(r"\b\d+\s*pack\b",      "", clean, flags=re.I)
+    clean = re.sub(r"\s{2,}", " ", clean).strip().rstrip("-—–").strip()
     return clean
 
 
