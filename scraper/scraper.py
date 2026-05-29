@@ -2,29 +2,6 @@
 scraper/scraper.py
 ──────────────────
 Nightly price comparison scraper for PriceWatch Pro.
-
-Matching strategy (in priority order per SKU × competitor):
-  1. Existing confirmed URL in competitor_matches → scrape directly
-  2. Google Shopping search → find competitor's listing, extract price + URL
-  3. Google Web search (site:competitor.com product name) → scrape that page
-  4. Bing Web search fallback if Google blocks
-
-Per-competitor special handling:
-  - harrisonproducts.com  → BigCommerce SKU lookup via ?sku= parameter
-  - discountdisplays.co.uk → x-html="getFormattedBasePrice()" span selector
-
-Environment variables:
-    SUPABASE_URL
-    SUPABASE_SERVICE_KEY
-    SCRAPER_WORKERS          (default: 2)
-    SCRAPER_PAGE_TIMEOUT_MS  (default: 30000)
-    SCRAPER_DELAY_MIN        (default: 8)
-    SCRAPER_DELAY_MAX        (default: 15)
-    SCRAPER_SKU_LIMIT        (default: 250)
-    SCRAPER_COMPETITOR_LIMIT (default: 23)
-    SCRAPER_MODE             (default: matched) — matched | full | skus
-    SCRAPER_SKUS             comma-separated SKU IDs (mode=skus only)
-    LOG_LEVEL                (default: INFO)
 """
 
 import asyncio
@@ -56,9 +33,8 @@ DELAY_MIN          = float(os.getenv("SCRAPER_DELAY_MIN", "8"))
 DELAY_MAX          = float(os.getenv("SCRAPER_DELAY_MAX", "15"))
 SKU_LIMIT          = int(os.getenv("SCRAPER_SKU_LIMIT", "250"))
 COMPETITOR_LIMIT   = int(os.getenv("SCRAPER_COMPETITOR_LIMIT", "23"))
-SCRAPER_MODE       = os.getenv("SCRAPER_MODE", "matched")  # matched | full | skus
+SCRAPER_MODE       = os.getenv("SCRAPER_MODE", "matched")
 
-# Competitor domains with special handling
 BIGCOMMERCE_DOMAINS = {"harrisonproducts.com"}
 DISCOUNT_DISPLAYS_DOMAIN = "discountdisplays.co.uk"
 
@@ -123,8 +99,17 @@ STOP_WORDS = {
 # ── Query building ─────────────────────────────────────────────────────────────
 
 def build_search_query(sku: dict) -> str:
+    """
+    Build a clean search query from a SKU title.
+
+    For printed/branded SKUs (sku_id ending in -PRINTED or -BRANDED),
+    competitors stock the base product without custom print — strip all
+    custom-print/branding language so we find their equivalent.
+    Also strips pack-quantity noise from all SKUs.
+    """
     title  = sku["short_title"]
     sku_id = sku.get("sku_id", "")
+
     if re.search(r"-(PRINTED|BRANDED)$", sku_id, re.I):
         title = re.sub(r"\bcustom[- ]?print(?:ed)?\b",          "", title, flags=re.I)
         title = re.sub(r"\bwith[- ]?print(?:ed)?[- ]?poster\b", "", title, flags=re.I)
@@ -133,6 +118,7 @@ def build_search_query(sku: dict) -> str:
         title = re.sub(r"\bPrinted\b",                          "", title, flags=re.I)
         title = re.sub(r"\bBespoke[- ]?Brand(?:ing|ed)?\b",     "", title, flags=re.I)
         title = re.sub(r"\bBranded\b",                          "", title, flags=re.I)
+
     clean = re.sub(r"\bx\s*\d+\b",         "", title, flags=re.I)
     clean = re.sub(r"\bpack\s+of\s+\d+\b", "", clean, flags=re.I)
     clean = re.sub(r"\b\d+\s*pack\b",      "", clean, flags=re.I)
@@ -202,7 +188,6 @@ def diff_pct(our: float, their: float) -> float:
 def normalise_price(price: float, vat: str) -> float:
     return round(price / 1.2, 2) if vat == "inc" else price
 
-# Pack quantity patterns — matches "x 100", "x100", "pack of 50", "50 pack", "pack of 1" etc.
 PACK_QTY_PATTERNS = [
     r"\bx\s*(\d+)\b",
     r"\bpack\s+of\s+(\d+)\b",
@@ -216,7 +201,6 @@ PACK_QTY_PATTERNS = [
 ]
 
 def extract_pack_qty(title: str) -> Optional[int]:
-    """Extract pack quantity from a product title. Returns None if not found or qty=1."""
     if not title:
         return None
     t = title.lower()
@@ -224,12 +208,11 @@ def extract_pack_qty(title: str) -> Optional[int]:
         m = re.search(pattern, t, re.I)
         if m:
             qty = int(m.group(1))
-            if 2 <= qty <= 10000:  # sanity bounds
+            if 2 <= qty <= 10000:
                 return qty
     return None
 
 def per_unit_price(price: float, qty: Optional[int]) -> float:
-    """Return price per single unit. If qty is None or 1, returns price unchanged."""
     if qty and qty > 1:
         return round(price / qty, 6)
     return price
@@ -237,7 +220,6 @@ def per_unit_price(price: float, qty: Optional[int]) -> float:
 IMAGE_REFRESH_DAYS = int(os.getenv("IMAGE_REFRESH_DAYS", "90"))
 
 def image_needs_refresh(existing_match: Optional[dict]) -> bool:
-    """True if match has no competitor image, or image is older than IMAGE_REFRESH_DAYS."""
     if not existing_match:
         return True
     if not existing_match.get("competitor_image_url"):
@@ -287,8 +269,6 @@ class PriceScraper:
             window.chrome = { runtime: {} };
         """)
         return ctx
-
-    # ── Strategy 1: Bing Shopping + Google Shopping ───────────────────────────
 
     async def search_google_shopping(
         self, context: BrowserContext, sku: dict, competitor_domain: str
@@ -381,8 +361,6 @@ class PriceScraper:
         log.debug(f"  Shopping: no result for {clean_dom} via any engine")
         return None
 
-    # ── Strategy 2: Google/Bing site search ───────────────────────────────────
-
     async def search_web(self, context: BrowserContext, sku: dict, competitor_domain: str) -> Optional[str]:
         query     = build_search_query(sku)
         clean_dom = competitor_domain.lstrip("www.")
@@ -413,23 +391,13 @@ class PriceScraper:
 
         return None
 
-    # ── BigCommerce SKU lookup (Harrison Products) ────────────────────────────
-
     async def bigcommerce_sku_lookup(
         self, context: BrowserContext, sku: dict, domain: str
     ) -> Optional[dict]:
-        """
-        BigCommerce stores expose products at /<slug>?sku=<sku_code>.
-        We try the UKPOS SKU ID directly, then stripped variants.
-        Returns dict with url, price, title, confidence — or None.
-        Results go to review queue (confidence capped at 70) for human approval.
-        """
         sku_id    = sku["sku_id"]
         base_url  = f"https://www.{domain}"
 
-        # Try the UKPOS SKU directly, then without common suffixes
         candidates = [sku_id]
-        # Also try stripping trailing letter variants (e.g. SA13A4 → SA13A, SA13)
         stripped = re.sub(r"[A-Z]\d*$", "", sku_id)
         if stripped and stripped != sku_id:
             candidates.append(stripped)
@@ -442,7 +410,6 @@ class PriceScraper:
                 await page.goto(search_url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
                 await page.wait_for_timeout(3000)
 
-                # Extract first product result link
                 links = await page.evaluate("""
                     () => {
                         const results = document.querySelectorAll(
@@ -455,7 +422,6 @@ class PriceScraper:
                 await page.close()
 
                 for product_url in links:
-                    # Visit the product page to get title + price + verify SKU match
                     ppage = await context.new_page()
                     try:
                         await ppage.goto(product_url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
@@ -464,13 +430,11 @@ class PriceScraper:
                         title     = (await ppage.title()).strip()
                         full_text = await ppage.inner_text("body")
 
-                        # Check if our SKU ID or a close match appears on the page
                         sku_found = (
                             sku_id.lower() in full_text.lower() or
                             candidate_sku.lower() in full_text.lower()
                         )
 
-                        # Try to get price from JSON-LD first, then meta, then main price
                         price = await self._extract_jsonld_price(ppage)
                         if not price: price = await self._extract_meta_price(ppage)
                         if not price: price = await self._extract_main_price(ppage)
@@ -479,9 +443,8 @@ class PriceScraper:
 
                         if price:
                             conf = fuzzy_confidence(sku, title, product_url)
-                            # Bonus for SKU appearing on page, but cap at 70 — always goes to review
                             if sku_found: conf = min(70, conf + 20)
-                            conf = min(70, conf)   # always review queue
+                            conf = min(70, conf)
 
                             log.info(
                                 f"  BigCommerce match: '{title[:50]}' "
@@ -506,13 +469,7 @@ class PriceScraper:
 
         return None
 
-    # ── Price extraction methods ──────────────────────────────────────────────
-
     async def _extract_main_price(self, page: Page) -> Optional[float]:
-        """
-        Smart main-price extraction using DOM scoring.
-        Filters out related/recommended sections and prefers cart-adjacent prices.
-        """
         try:
             result = await page.evaluate(r"""
                 () => {
@@ -528,7 +485,6 @@ class PriceScraper:
                         'add-to-cart', 'addtocart', 'add_to_cart', 'basket',
                         'buy-now', 'buynow', 'purchase', 'checkout',
                     ];
-
                     function isExcluded(el) {
                         let node = el;
                         for (let i = 0; i < 8; i++) {
@@ -540,7 +496,6 @@ class PriceScraper:
                         }
                         return false;
                     }
-
                     function hasCartButton(el) {
                         let node = el;
                         for (let i = 0; i < 10; i++) {
@@ -551,12 +506,10 @@ class PriceScraper:
                         }
                         return false;
                     }
-
                     function getFontSize(el) {
                         try { return parseFloat(window.getComputedStyle(el).fontSize) || 0; }
                         catch { return 0; }
                     }
-
                     const SELECTORS = [
                         "[itemprop='price']", ".price", ".product-price", ".our-price",
                         ".sale-price", "#product-price", "[class*='price']", "[data-price]",
@@ -564,10 +517,8 @@ class PriceScraper:
                         "p.price", ".product__price", ".pdp-price", ".main-price",
                         "[class*='product'][class*='price']",
                     ];
-
                     const seen = new Set();
                     const candidates = [];
-
                     for (const sel of SELECTORS) {
                         for (const el of document.querySelectorAll(sel)) {
                             if (seen.has(el)) continue;
@@ -581,7 +532,6 @@ class PriceScraper:
                             candidates.push({ price: val, hasCart: hasCartButton(el), fontSize: getFontSize(el) });
                         }
                     }
-
                     if (!candidates.length) return null;
                     candidates.sort((a, b) => {
                         if (a.hasCart !== b.hasCart) return a.hasCart ? -1 : 1;
@@ -595,12 +545,6 @@ class PriceScraper:
             return None
 
     async def _extract_alplas_price(self, page: Page) -> Optional[float]:
-        """
-        Alplas WooCommerce price structure:
-        .price_inner_container > .total_price_container > .price > span.amount
-        The first .price div contains the ex-VAT price, confirmed by adjacent
-        span.vat_span containing "ex VAT".
-        """
         try:
             result = await page.evaluate(r"""
                 () => {
@@ -610,13 +554,8 @@ class PriceScraper:
                         const val = parseFloat(m[0]);
                         return (val > 0.01 && val < 99999) ? val : null;
                     }
-
-                    // Primary: .price_inner_container total price, ex-VAT div
-                    const container = document.querySelector(
-                        '.price_inner_container .total_price_container'
-                    );
+                    const container = document.querySelector('.price_inner_container .total_price_container');
                     if (container) {
-                        // Find the .price div that has a sibling span.vat_span "ex VAT"
                         for (const priceDiv of container.querySelectorAll('.price')) {
                             const vatSpan = priceDiv.querySelector('.vat_span');
                             if (vatSpan && vatSpan.innerText.toLowerCase().includes('ex')) {
@@ -627,21 +566,17 @@ class PriceScraper:
                                 }
                             }
                         }
-                        // Fallback: first .amount inside total_price_container
                         const first = container.querySelector('.price .amount bdi, .price .amount');
                         if (first) {
                             const val = parsePrice(first.innerText || first.textContent);
                             if (val) return val;
                         }
                     }
-
-                    // Secondary: unit_container price (also ex-VAT)
                     const unit = document.querySelector('.unit_container .price .amount');
                     if (unit) {
                         const val = parsePrice(unit.innerText || unit.textContent);
                         if (val) return val;
                     }
-
                     return null;
                 }
             """)
@@ -650,11 +585,6 @@ class PriceScraper:
             return None
 
     async def _extract_pavement_signs_price(self, page: Page) -> Optional[float]:
-        """
-        PavementSigns.com ex-VAT price:
-        <span id="ContentPlaceHolder1_lblexVAT">£89</span>
-        Unique ID makes this trivial — no ambiguity possible.
-        """
         try:
             result = await page.evaluate(r"""
                 () => {
@@ -672,21 +602,7 @@ class PriceScraper:
             return None
 
     async def _extract_discount_displays_price(self, page: Page) -> Optional[float]:
-        """
-        Discount Displays main product price uses these specific classes:
-          font-regular text-gray-900 price label
-        with x-html="getFormattedBasePrice()" rendered by Alpine.js.
-
-        Related product prices are static HTML and appear immediately in the DOM.
-        The main price is Alpine-rendered — we must wait for it to be non-empty.
-
-        Priority:
-          1. span/element with class containing all of: price, label, text-gray-900
-          2. [x-html*="getFormattedBasePrice"] after waiting for Alpine
-          3. .price inside [x-data] scope, excluding related sections
-        """
         try:
-            # Wait for Alpine to render the main price span
             try:
                 await page.wait_for_function(
                     """() => {
@@ -698,7 +614,7 @@ class PriceScraper:
                     timeout=8000
                 )
             except Exception:
-                pass  # Continue anyway
+                pass
 
             result = await page.evaluate(r"""
                 () => {
@@ -708,16 +624,8 @@ class PriceScraper:
                         const val = parseFloat(m[0]);
                         return (val > 0.50 && val < 99999) ? val : null;
                     }
-
-                    // Strategy 1: main product price container
-                    // Class is "price-excl-taxinline-block" (deliberate typo in their HTML)
-                    // Contains span.price with x-html="getFormattedBasePrice()"
-                    // Related product prices are inside .js_slides carousel — excluded here
-                    const mainContainer = document.querySelector(
-                        '[class*="price-excl-taxinline-block"]'
-                    );
+                    const mainContainer = document.querySelector('[class*="price-excl-taxinline-block"]');
                     if (mainContainer) {
-                        // Make sure it's NOT inside the related products carousel
                         const inCarousel = mainContainer.closest('.js_slides, [class*="js_slide"]');
                         if (!inCarousel) {
                             const priceSpan = mainContainer.querySelector('[x-html*="getFormattedBasePrice"], span.price');
@@ -727,29 +635,22 @@ class PriceScraper:
                             }
                         }
                     }
-
-                    // Strategy 2: x-html getFormattedBasePrice NOT inside carousel
                     for (const el of document.querySelectorAll('[x-html*="getFormattedBasePrice"]')) {
                         if (el.closest('.js_slides, [class*="js_slide"]')) continue;
                         const val = parsePrice(el.innerText || el.textContent);
                         if (val) return val;
                     }
-
-                    // Strategy 3: price-excluding-tax active NOT inside carousel
                     for (const el of document.querySelectorAll('.price-excluding-tax.active')) {
                         if (el.closest('.js_slides, [class*="js_slide"]')) continue;
                         const val = parsePrice(el.innerText || el.textContent);
                         if (val) return val;
                     }
-
                     return null;
                 }
             """)
             return float(result) if result else None
         except Exception:
             return None
-
-    # ── Category page detection ───────────────────────────────────────────────
 
     CATEGORY_URL_SIGNALS = [
         "/collections/", "/categories/", "/category/", "/c/",
@@ -770,7 +671,6 @@ class PriceScraper:
         return False
 
     async def _extract_shopify_json_price(self, url: str, context: BrowserContext) -> Optional[float]:
-        """Shopify /products/[slug].js endpoint — fast price without full page render."""
         try:
             base = url.split("?")[0].rstrip("/")
             if "/products/" not in base:
@@ -835,14 +735,12 @@ class PriceScraper:
             "title": "", "url": url, "error": None, "og_image": None,
         }
 
-        # ── Skip category/listing pages early ─────────────────────────────────
         if self._is_category_url(url):
             result["error"] = "Category page — no single product price"
             result["availability"] = "unavailable"
             log.debug(f"  Skipping category page: {url}")
             return result
 
-        # ── Shopify JSON endpoint (fast, no JS render needed) ─────────────────
         shopify_price = await self._extract_shopify_json_price(url, context)
 
         page = await context.new_page()
@@ -855,7 +753,6 @@ class PriceScraper:
             result["availability"] = "out_of_stock" if detect_oos(full_text) else "in_stock"
             result["title"]        = (await page.title()).strip()
 
-            # ── OG image — only when due for quarterly refresh ─────────────────
             if fetch_image:
                 try:
                     og_image = await page.evaluate("""
@@ -875,7 +772,6 @@ class PriceScraper:
             if not price: price = await self._extract_jsonld_price(page)
             if not price: price = await self._extract_meta_price(page)
 
-            # ── Discount Displays specific selector ────────────────────────────
             if not price and DISCOUNT_DISPLAYS_DOMAIN in competitor_domain:
                 price = await self._extract_discount_displays_price(page)
             if not price and 'alplas.com' in competitor_domain:
@@ -883,7 +779,6 @@ class PriceScraper:
             if not price and 'pavementsigns.com' in competitor_domain:
                 price = await self._extract_pavement_signs_price(page)
 
-            # ── Generic smart extraction for everyone else ─────────────────────
             if not price:
                 price = await self._extract_main_price(page)
 
@@ -895,8 +790,6 @@ class PriceScraper:
         finally:
             await page.close()
         return result
-
-    # ── Main per-SKU × competitor logic ───────────────────────────────────────
 
     async def process_sku_competitor(
         self,
@@ -937,7 +830,6 @@ class PriceScraper:
             vat_hint   = "unknown"
             confidence = 0
 
-            # ── Path A: existing confirmed URL — scrape directly ───────────────
             if url:
                 log.debug(f"  Path A — existing URL: {url}")
                 result     = await self.scrape_product_page(ctx, url, domain, fetch_image=image_needs_refresh(existing_match))
@@ -950,7 +842,6 @@ class PriceScraper:
                 snapshot["_og_image"]     = result.get("og_image")
 
             else:
-                # ── Path B: BigCommerce SKU lookup (Harrison Products) ─────────
                 if any(d in domain for d in BIGCOMMERCE_DOMAINS):
                     log.debug(f"  Path B (BigCommerce) — SKU lookup for {sku['sku_id']}")
                     bc_result = await self.bigcommerce_sku_lookup(ctx, sku, domain)
@@ -962,7 +853,6 @@ class PriceScraper:
                         vat_hint   = bc_result.get("vat_hint", "unknown")
                         snapshot["availability"] = "in_stock" if price else "unavailable"
 
-                # ── Path C: Google/Bing Shopping ───────────────────────────────
                 if not url:
                     shopping = await self.search_google_shopping(ctx, sku, competitor["domain"])
                     if shopping and shopping.get("url"):
@@ -983,7 +873,6 @@ class PriceScraper:
                             snapshot["error_message"] = result["error"]
                             snapshot["_og_image"]     = result.get("og_image")
 
-                # ── Path D: Site web search fallback ───────────────────────────
                 if not url:
                     url = await self.search_web(ctx, sku, competitor["domain"])
                     if url:
@@ -999,7 +888,6 @@ class PriceScraper:
                         snapshot["error_message"] = "No URL found via any method"
                         return snapshot
 
-            # ── Populate snapshot ──────────────────────────────────────────────
             snapshot["competitor_url"] = url
             snapshot["confidence"]     = confidence
             snapshot["_comp_title"]    = comp_title
@@ -1011,36 +899,13 @@ class PriceScraper:
                 our_price = float(sku["price_ex_vat"])
                 their_ex  = normalise_price(price, snapshot["competitor_vat"])
 
-                # ── Per-unit normalisation ─────────────────────────────────────
-                # If pack quantities differ on either side, normalise both prices
-                # to per-unit before computing diff_pct_normalised.
-                # Cases:
-                #   our_qty=100, comp_qty=1   → we sell pack, they sell single
-                #   our_qty=1,   comp_qty=100 → we sell single, they sell pack
-                #   our_qty=100, comp_qty=100 → like-for-like, no normalisation
-                #   our_qty=1,   comp_qty=1   → both singles, no normalisation
-                # Establish pack quantities. TITLES are authoritative for the
-                # maths. Our side: prefer a pack qty parsed from our own title
-                # (e.g. "…x 100"), because the skus.unit_qty column is often
-                # stale or defaulted to 1. Fall back to the column only when the
-                # title yields no pack signal.
                 our_title_qty = extract_pack_qty(sku.get("short_title", "")) or 1
                 our_col_qty   = sku.get("unit_qty") or 1
                 our_qty  = our_title_qty if our_title_qty > 1 else our_col_qty
                 comp_qty = extract_pack_qty(comp_title) or 1
 
-                # Persist the competitor's detected pack qty so the dashboard can
-                # show a true per-unit comparison. Stored as-is (1 when no pack
-                # signal found in their title).
                 snapshot["competitor_unit_qty"] = comp_qty
 
-                # ── Price-gap review flag (NEVER drives the maths) ─────────────
-                # A large raw price gap CAN indicate an undetected pack-size
-                # mismatch — but it can equally mean a genuinely cheaper rival,
-                # a VAT-basis error, or a clearance price. So we only RAISE A
-                # FLAG for human review; we never infer a multiple or normalise
-                # by it. Trigger: qtys look like singles on both sides yet the
-                # raw per-item prices differ by enough to look pack-like.
                 if our_qty == comp_qty and their_ex and our_price:
                     ratio = max(our_price, their_ex) / min(our_price, their_ex)
                     if ratio >= 1.5:
@@ -1083,8 +948,6 @@ class PriceScraper:
             await ctx.close()
 
         return snapshot
-
-    # ── DB writes ──────────────────────────────────────────────────────────────
 
     async def write_snapshot(self, snapshot: dict):
         row = {k: v for k, v in snapshot.items() if not k.startswith("_")}
