@@ -17,12 +17,16 @@
 
   <!-- TOPBAR -->
   <div class="topbar">
-    <img src="logo-full.png" alt="UKPOS PriceWatch Pro" class="logo-full" onerror="this.style.display='none'">
-    <img src="logo-icon.png" alt="UKPOS" class="logo-icon" onerror="this.style.display='none'">
-    <span class="topbar-product">PriceWatch Pro</span>
+    <button class="mob-hamburger" onclick="toggleMobileSidebar()" aria-label="Open menu" title="Open menu"><i class="ti ti-menu-2" style="font-size:18px"></i></button>
+    <img src="logo-full.png" alt="UKPOS PriceWatch Pro" class="logo-full"
+      onerror="this.style.display='none';document.getElementById('logo-text-fallback').style.display='inline-flex'">
+    <div class="logo" id="logo-text-fallback" style="display:none"><span class="uk">UK</span><span class="pos">POS</span></div>
+    <img src="logo-icon.png" alt="UKPOS" class="logo-icon"
+      onerror="this.style.display='none'">
     <div class="topbar-r">
       <button class="tbtn" onclick="toggleSidebar()" id="sidebar-toggle-btn" title="Collapse sidebar" aria-label="Toggle sidebar"><i class="ti ti-layout-sidebar-left-collapse" id="sidebar-toggle-icon" style="font-size:14px"></i></button>
       <span style="width:1px;height:18px;background:rgba(255,255,255,.12);margin:0 2px"></span>
+      <span class="pulse"></span>
       <span class="topbar-status" id="sync-status">Loading…</span>
       <button class="tbtn" onclick="manualRefresh()"><i class="ti ti-refresh" style="font-size:12px"></i> Refresh</button>
       <span style="width:1px;height:18px;background:rgba(255,255,255,.12);margin:0 2px"></span>
@@ -31,6 +35,9 @@
       <button class="tbtn" onclick="signOut()"><i class="ti ti-logout" style="font-size:12px"></i> Sign out</button>
     </div>
   </div>
+
+  <!-- Mobile sidebar overlay -->
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleMobileSidebar()"></div>
 
   <!-- SIDEBAR -->
   <nav class="sidebar" id="sidebar">
@@ -558,6 +565,20 @@ function toggleSidebar() {
   btn.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
   try { localStorage.setItem('pw_sidebar_collapsed', collapsed ? '1' : '0'); } catch(e) {}
 }
+
+function toggleMobileSidebar() {
+  const sidebar  = $('sidebar');
+  const overlay  = $('sidebar-overlay');
+  const isOpen   = sidebar.classList.toggle('mob-open');
+  overlay.classList.toggle('open', isOpen);
+}
+
+/* Close mobile sidebar when a nav item is clicked */
+document.addEventListener('click', e => {
+  if (e.target.closest('.nav-item') && $('sidebar')?.classList.contains('mob-open')) {
+    toggleMobileSidebar();
+  }
+});
 
 /* Restore sidebar state on load */
 (function restoreSidebar() {
