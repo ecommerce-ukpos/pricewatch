@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PriceWatch Pro — Sign in</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><text y='20' font-size='20'>📊</text></svg>">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --orange:#E8481C;
+  --bg:#f5f4f0;--surface:#fff;--border:rgba(0,0,0,.08);--bm:rgba(0,0,0,.13);
+  --text:#1a1a18;--t2:#6b6a64;
+  --red:#A32D2D;--rb:#fcebeb;
+  --grn:#3B6D11;--gb:#eaf3de;
+  --blu:#185FA5;
+  --r:8px;--rl:12px;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);font-size:13px;line-height:1.5;height:100vh;display:flex;align-items:center;justify-content:center}
+.card{width:100%;max-width:420px;background:var(--surface);border:1px solid var(--border);border-radius:var(--rl);padding:28px 32px}
+.logo{display:inline-flex;align-items:baseline;font-size:20px;font-weight:800;letter-spacing:-.02em;margin-bottom:10px}
+.uk{color:var(--orange)}.pos{color:var(--text)}
+.logo-wrap{text-align:center;margin-bottom:20px}
+.tabs{display:flex;gap:2px;background:var(--bg);padding:3px;border-radius:var(--r);margin-bottom:18px}
+.tab{flex:1;padding:7px 10px;border:none;background:transparent;color:var(--t2);cursor:pointer;border-radius:5px;font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;font-family:inherit;transition:all .1s}
+.tab.active{background:var(--surface);color:var(--text)}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--t2);margin-bottom:5px}
+.field input{width:100%;padding:9px 11px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);color:var(--text);font-size:13px;font-family:inherit;outline:none;transition:border-color .1s}
+.field input:focus{border-color:var(--orange)}
+.submit{width:100%;padding:10px;background:var(--orange);color:#fff;border:none;border-radius:var(--r);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;cursor:pointer;font-family:inherit;margin-top:4px;transition:background .1s}
+.submit:hover{background:#c73d16}
+.submit:disabled{opacity:.5;cursor:not-allowed}
+.link-btn{background:none;border:none;color:var(--blu);cursor:pointer;font-size:14px;font-family:inherit;text-decoration:underline;text-decoration-color:rgba(24,95,165,.3);margin-top:8px;display:block}
+.msg{margin-top:10px;padding:8px 10px;border-radius:var(--r);font-size:13px;display:none}
+.msg.err{background:var(--rb);color:var(--red);display:block}
+.msg.ok{background:var(--gb);color:var(--grn);display:block}
+.msg.info{background:#e6f1fb;color:var(--blu);display:block}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="logo-wrap">
+    <div class="logo"><span class="uk">UK</span><span class="pos">POS</span></div>
+    <div style="font-size:17px;font-weight:500">PriceWatch Pro</div>
+    <div style="font-size:11px;color:var(--t2);text-transform:uppercase;letter-spacing:.08em;margin-top:2px">Competitive price intelligence</div>
+  </div>
+
+  <!-- Tab switcher -->
+  <div class="tabs">
+    <button id="tab-login"    class="tab active"  onclick="showTab('login')">Sign in</button>
+    <button id="tab-register" class="tab"         onclick="showTab('register')">Request access</button>
+  </div>
+
+  <!-- Login form -->
+  <form id="form-login" onsubmit="handleLogin(event)">
+    <div class="field">
+      <label>Email</label>
+      <input id="login-email" type="email" required autocomplete="email" placeholder="you@ukpos.com">
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input id="login-password" type="password" required autocomplete="current-password">
+    </div>
+    <button type="submit" class="submit" id="login-btn">Sign in</button>
+    <button type="button" class="link-btn" onclick="handleForgotPassword()">Forgot password?</button>
+    <div id="login-msg" class="msg"></div>
+  </form>
+
+  <!-- Register form -->
+  <form id="form-register" style="display:none" onsubmit="handleRequestAccess(event)">
+    <p style="font-size:11px;color:var(--t2);margin-bottom:14px;line-height:1.5">Submit your work email — the administrator will review and send a set-password link once approved.</p>
+    <div class="field">
+      <label>Work email</label>
+      <input id="reg-email" type="email" required placeholder="you@ukpos.com">
+    </div>
+    <div class="field">
+      <label>Full name (optional)</label>
+      <input id="reg-name" type="text" placeholder="Jane Smith" autocomplete="name">
+    </div>
+    <button type="submit" class="submit" id="reg-btn">Submit request</button>
+    <div id="reg-msg" class="msg"></div>
+  </form>
+
+  <!-- Pending approval state -->
+  <div id="view-pending" style="display:none;text-align:center">
+    <div style="font-size:14px;font-weight:500;margin-bottom:8px">Awaiting approval</div>
+    <p style="font-size:12px;color:var(--t2);margin-bottom:16px;line-height:1.5">Your request is in the queue. You'll receive an email when the administrator approves your account.</p>
+    <button class="submit" onclick="signOut()">Sign out</button>
+  </div>
+
+  <!-- Rejected state -->
+  <div id="view-rejected" style="display:none;text-align:center">
+    <div style="font-size:14px;font-weight:500;margin-bottom:8px">Request declined</div>
+    <p style="font-size:12px;color:var(--t2);margin-bottom:16px">Contact the administrator if you believe this is an error.</p>
+    <button class="submit" onclick="signOut()">Sign out</button>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL   = 'https://uaqakssusydpjzrcznhb.supabase.co';
+const SUPABASE_ANON  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhcWFrc3N1c3lkcGp6cmN6bmhiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3NDM3ODUsImV4cCI6MjA5NDMxOTc4NX0.OM0XBJsFb6hlLKXLoNpahuH4zzGcnNR3W-bzKfKPZ-w';
+const ALLOWED_DOMAINS = ['ukpos.com'];
+
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+/* ── If already authenticated, go straight to the app ── */
+(async () => {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) await checkProfileAndRedirect(session);
+})();
+
+sb.auth.onAuthStateChange(async (event, session) => {
+  if (event === 'SIGNED_IN' && session) await checkProfileAndRedirect(session);
+});
+
+async function checkProfileAndRedirect(session) {
+  const { data: profiles } = await sb.from('profiles').select('status').eq('id', session.user.id).limit(1);
+  const profile = profiles?.[0];
+  if (!profile || profile.status === 'pending') {
+    showState('pending'); return;
+  }
+  if (profile.status === 'rejected') {
+    showState('rejected'); return;
+  }
+  /* Approved — redirect to app, preserving any hash */
+  const dest = sessionStorage.getItem('pw_redirect') || 'index.html';
+  sessionStorage.removeItem('pw_redirect');
+  window.location.href = dest;
+}
+
+function showState(state) {
+  document.getElementById('form-login').style.display    = 'none';
+  document.getElementById('form-register').style.display = 'none';
+  document.querySelector('.tabs').style.display          = 'none';
+  document.getElementById('view-pending').style.display  = state === 'pending'  ? '' : 'none';
+  document.getElementById('view-rejected').style.display = state === 'rejected' ? '' : 'none';
+}
+
+function showTab(which) {
+  document.getElementById('tab-login').classList.toggle('active', which === 'login');
+  document.getElementById('tab-register').classList.toggle('active', which === 'register');
+  document.getElementById('form-login').style.display    = which === 'login'    ? '' : 'none';
+  document.getElementById('form-register').style.display = which === 'register' ? '' : 'none';
+  document.getElementById('login-msg').className = 'msg';
+  document.getElementById('reg-msg').className   = 'msg';
+}
+
+function showMsg(id, text, type) {
+  const el = document.getElementById(id);
+  el.textContent  = text;
+  el.className    = `msg ${type}`;
+}
+
+async function handleLogin(e) {
+  e.preventDefault();
+  const btn = document.getElementById('login-btn');
+  btn.disabled  = true;
+  btn.innerHTML = '<span class="spinner"></span>Signing in…';
+  const { error } = await sb.auth.signInWithPassword({
+    email:    document.getElementById('login-email').value.trim(),
+    password: document.getElementById('login-password').value,
+  });
+  btn.disabled  = false;
+  btn.innerHTML = 'Sign in';
+  if (error) showMsg('login-msg', error.message, 'err');
+}
+
+async function handleForgotPassword() {
+  const email = document.getElementById('login-email').value.trim();
+  if (!email) { showMsg('login-msg', 'Enter your email above first.', 'info'); return; }
+  const { error } = await sb.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin + '/index.html',
+  });
+  if (error) showMsg('login-msg', error.message, 'err');
+  else showMsg('login-msg', 'Check your inbox for a reset link.', 'ok');
+}
+
+async function handleRequestAccess(e) {
+  e.preventDefault();
+  const btn   = document.getElementById('reg-btn');
+  const email = document.getElementById('reg-email').value.trim().toLowerCase();
+  const name  = document.getElementById('reg-name').value.trim();
+  const domain = email.split('@')[1] || '';
+  if (!ALLOWED_DOMAINS.includes(domain)) {
+    showMsg('reg-msg', 'Only @ukpos.com email addresses are permitted.', 'err');
+    return;
+  }
+  btn.disabled  = true;
+  btn.innerHTML = '<span class="spinner"></span>Submitting…';
+  const { error } = await sb.from('access_requests').upsert({ email, full_name: name }, { onConflict: 'email' });
+  btn.disabled  = false;
+  btn.innerHTML = 'Submit request';
+  if (error) { showMsg('reg-msg', error.message || 'Request failed.', 'err'); return; }
+  showMsg('reg-msg', 'Request submitted — you will be notified once approved.', 'ok');
+  document.getElementById('form-register').reset();
+}
+
+async function signOut() {
+  await sb.auth.signOut();
+  window.location.reload();
+}
+</script>
+</body>
+</html>
