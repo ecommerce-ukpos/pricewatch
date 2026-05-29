@@ -23,7 +23,7 @@ a:hover{text-decoration-color:var(--blu)}
 /* ── Topbar ── */
 .topbar{grid-column:1/-1;background:#111110;display:flex;align-items:center;padding:0 14px;gap:10px;border-bottom:2px solid var(--orange);z-index:20;flex-shrink:0}
 .topbar-divider{width:1px;height:18px;background:rgba(255,255,255,.12);flex-shrink:0}
-.topbar-product{color:rgba(255,255,255,.5);font-size:13px;letter-spacing:.04em;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.topbar-product{color:white;font-size:22px;letter-spacing:.0em;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:Calibri,sans-serif;font-weight:bolder}
 .topbar-r{margin-left:auto;display:flex;align-items:center;gap:8px}
 .pulse{width:6px;height:6px;border-radius:50%;background:#4ade80;flex-shrink:0;animation:blink 2.4s infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
