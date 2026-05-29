@@ -7,6 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><text y='20' font-size='20'>📊</text></svg>">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.0.0/dist/tabler-icons.min.css">
 </head>
 <body>
 
@@ -31,7 +32,14 @@
     </div>
     <div class="field">
       <label>Password</label>
-      <input id="login-password" type="password" required autocomplete="current-password">
+      <div style="position:relative">
+        <input id="login-password" type="password" required autocomplete="current-password" style="width:100%;padding-right:38px">
+        <button type="button" onclick="togglePassword()" id="pw-toggle"
+          style="position:absolute;right:0;top:0;bottom:0;width:36px;background:none;border:none;cursor:pointer;color:var(--t2);display:flex;align-items:center;justify-content:center;border-radius:0 var(--r) var(--r) 0;transition:color .1s"
+          title="Show password" aria-label="Show password">
+          <i class="ti ti-eye" id="pw-toggle-icon" style="font-size:15px"></i>
+        </button>
+      </div>
     </div>
     <button type="submit" class="submit" id="login-btn">Sign in</button>
     <button type="button" class="link-btn" onclick="handleForgotPassword()">Forgot password?</button>
@@ -121,6 +129,16 @@ function showMsg(id, text, type) {
   const el = document.getElementById(id);
   el.textContent  = text;
   el.className    = `msg ${type}`;
+}
+
+function togglePassword() {
+  const input = document.getElementById('login-password');
+  const icon  = document.getElementById('pw-toggle-icon');
+  const btn   = document.getElementById('pw-toggle');
+  const show  = input.type === 'password';
+  input.type  = show ? 'text' : 'password';
+  icon.className = show ? 'ti ti-eye-off' : 'ti ti-eye';
+  btn.title = show ? 'Hide password' : 'Show password';
 }
 
 async function handleLogin(e) {
