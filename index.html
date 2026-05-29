@@ -1627,74 +1627,87 @@ async function loadReview() {
   }
 }
 
-function filterReview() {
-  const q    = ($('review-search')?.value || '').toLowerCase().trim();
-  const comp = $('review-comp-filter')?.value || '';
+function renderReviewCard(r) {
+  const sku      = r.skus || {};
+  const comp     = r.competitors || {};
+  const snap     = r._snap || {};
+  const ourUrl   = sku.product_url || (sku.slug ? `https://www.ukpos.com/${sku.slug}?vat=0` : '#');
+  const ourImg   = thumbUrl(sku.image_url || '', 112, 112);
+  const compImg  = r.competitor_image_url
+    ? thumbUrl(r.competitor_image_url, 112, 112)
+    : `https://www.google.com/s2/favicons?domain=${comp.domain||''}&sz=64`;
+  const ourPrice = sku.price_ex_vat ? parseFloat(sku.price_ex_vat) : null;
+  const theirRaw = snap.competitor_price ? parseFloat(snap.competitor_price) : null;
+  const theirEx  = theirRaw ? normalisePrice(theirRaw, snap.competitor_vat || comp.vat_status || 'unknown') : null;
+  const compVat  = snap.competitor_vat || comp.vat_status || 'unknown';
 
-  /* Filter by active tab — logic matches actual DB values */
-  let rows = reviewAllRows.filter(r => {
-    if (matchTab === 'rejected') return r.match_status === 'rejected';
-    if (matchTab === 'human')    return r.match_status === 'matched' && r.human_reviewed === true;
-    if (matchTab === 'auto')     return r.match_status === 'matched' && r.human_reviewed === false;
-    /* needs review */           return r.match_status === 'review'  && r.human_reviewed === false;
-  });
+  return `<div class="rev-card" id="rev-${r.id}">
 
-  /* Text + competitor filters */
-  if (q) rows = rows.filter(r =>
-    r.sku_id?.toLowerCase().includes(q) ||
-    (r.skus?.short_title||'').toLowerCase().includes(q) ||
-    (r.competitors?.name||'').toLowerCase().includes(q) ||
-    (r.competitor_title||'').toLowerCase().includes(q)
-  );
-  if (comp) rows = rows.filter(r => String(r.competitor_id) === String(comp));
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:6px">
+        <div style="display:flex;align-items:center;gap:8px">
+          ${confWidget(r.confidence)}
+          ${r.notes ? `<span style="font-size:10px;color:var(--t2);background:var(--bb);padding:2px 7px;border-radius:10px"><i class="ti ti-info-circle" style="font-size:10px"></i> ${r.notes}</span>` : ''}
+        </div>
+        <div style="font-size:10px;color:var(--t3)">${r.match_method||r.match_source||''}</div>
+      </div>
 
-  const showing = rows.length;
-  const tabLabel = { review:'needs review', auto:'AI matched', human:'human verified', rejected:'rejected' }[matchTab];
-  $('review-sub').textContent = (q||comp) ? `${showing} matches (filtered)` : `${showing} ${tabLabel}`;
+      <div class="rev-pair">
+        <div class="rev-side">
+          <div class="rs-label" style="color:var(--blu)">UKPOS</div>
+          <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px">
+            <div style="width:56px;height:56px;border:1px solid var(--border);border-radius:6px;overflow:hidden;flex-shrink:0;background:var(--bb);display:flex;align-items:center;justify-content:center">
+              ${ourImg ? `<img src="${ourImg}" style="width:100%;height:100%;object-fit:contain" onerror="this.style.display='none'">` : '<i class="ti ti-photo" style="font-size:20px;color:var(--t3)"></i>'}
+            </div>
+            <div style="flex:1;min-width:0">
+              <a href="#sku/${r.sku_id}" onclick="event.preventDefault();go('sku-detail',{skuId:'${r.sku_id}',fromPanel:'review'})" style="font-family:'SF Mono',monospace;font-size:11px;color:var(--blu);text-decoration:none">${r.sku_id}</a>
+              <div class="rs-name" style="margin-top:2px">${sku.short_title||r.sku_id}</div>
+            </div>
+          </div>
+          <a class="rs-url" href="${ourUrl}" target="_blank" rel="noopener"><i class="ti ti-external-link" style="font-size:10px"></i> ${ourUrl.replace('https://','').slice(0,55)}</a>
+          <div class="rs-price" style="margin-top:6px">
+            ${ourPrice ? `<strong>${fmtPrice(ourPrice)}</strong> <span class="vat vex">ex-VAT</span>` : '<span style="color:var(--t3)">No price</span>'}
+          </div>
+        </div>
 
-  /* Show/hide the guidance note only on Needs Review tab */
-  const noteEl = $('review-note');
-  if (noteEl) noteEl.style.display = (matchTab === 'review' && rows.length > 0) ? '' : 'none';
+        <div style="display:flex;align-items:center;justify-content:center;padding:0 8px;color:var(--t3);font-size:18px">⇄</div>
 
-  if (!rows.length) {
-    const emptyMsg = {
-      review:   ['ti-circle-check','var(--grn)','All caught up — no matches need review'],
-      auto:     ['ti-robot','var(--blu)','No AI-matched pairs yet'],
-      human:    ['ti-user-check','var(--grn)','No human-verified matches yet'],
-      rejected: ['ti-x','var(--t3)','No rejected matches'],
-    }[matchTab];
-    $('review-list').innerHTML = `<div style="text-align:center;color:var(--t2);padding:40px">
-      <i class="ti ${emptyMsg[0]}" style="font-size:28px;display:block;margin-bottom:8px;color:${emptyMsg[1]}"></i>
-      ${q||comp ? 'No matches for that filter' : emptyMsg[2]}
-    </div>`;
-    $('review-pagination').innerHTML = '';
-    return;
-  }
+        <div class="rev-side">
+          <div class="rs-label" style="color:var(--amb)">${comp.name||'Competitor'}</div>
+          <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px">
+            <div style="width:56px;height:56px;border:1px solid var(--border);border-radius:6px;overflow:hidden;flex-shrink:0;background:var(--bb);display:flex;align-items:center;justify-content:center">
+              ${r.competitor_image_url
+                ? `<img src="${compImg}" style="width:100%;height:100%;object-fit:contain" onerror="this.src='https://www.google.com/s2/favicons?domain=${comp.domain||''}&sz=64';this.style.width='32px';this.style.height='32px'">`
+                : `<img src="${compImg}" style="width:32px;height:32px;object-fit:contain" onerror="this.style.display='none'">`}
+            </div>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:11px;color:var(--t2)">${comp.domain||''}</div>
+              <div class="rs-name" style="margin-top:2px">${r.competitor_title||'—'}</div>
+            </div>
+          </div>
+          <a class="rs-url" href="${r.competitor_url||'#'}" target="_blank" rel="noopener"><i class="ti ti-external-link" style="font-size:10px"></i> ${(r.competitor_url||'No URL set').replace('https://','').slice(0,55)}</a>
+          <div class="rs-price" style="margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            ${theirEx ? `<strong>${fmtPrice(theirEx)}</strong> ${vatPill(compVat)}` : `<span style="color:var(--t3)">Not yet scraped</span> ${vatPill(compVat)}`}
+            ${snap.availability && snap.availability !== 'in_stock' ? stockBadge(snap.availability) : ''}
+          </div>
+        </div>
+      </div>
 
-  /* Paginate */
-  const lim   = reviewLimit === 999999 ? rows.length : reviewLimit;
-  const start = (reviewPage - 1) * lim;
-  const page  = rows.slice(start, start + lim);
-  const from  = start + 1;
-  const to    = start + page.length;
-
-  /* Render cards for Needs Review; table for other tabs */
-  if (matchTab === 'review') {
-    $('review-list').innerHTML = page.map(r => renderReviewCard(r)).join('');
-  } else {
-    $('review-list').innerHTML = renderMatchTable(page, matchTab);
-  }
-
-  $('review-pagination').innerHTML = `
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <span>${from}–${to} of ${showing}</span>
-      <select onchange="reviewLimit=+this.value===0?999999:+this.value;reviewPage=1;filterReview()" style="padding:3px 6px;border-radius:5px;border:1px solid var(--bm);background:var(--surface);font-size:11px">
-        <option value="50">50/page</option><option value="100">100/page</option><option value="250">250/page</option>
-      </select>
-    </div>
-    <div style="display:flex;gap:6px">
-      ${reviewPage>1 ? `<button class="btn sm" onclick="reviewPage--;filterReview()">← Prev</button>` : ''}
-      ${to<showing  ? `<button class="btn sm" onclick="reviewPage++;filterReview()">Next →</button>` : ''}
+      <div id="rev-actions-${r.id}" style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
+        <button class="btn sm prim" onclick="reviewDecision(${r.id},'approve',this)"><i class="ti ti-check"></i> Confirm match</button>
+        <button class="btn sm danger" onclick="showCorrectUrl(${r.id})"><i class="ti ti-x"></i> Reject</button>
+        <button class="btn sm ghost" onclick="skipReview(${r.id})"><i class="ti ti-skip-forward"></i> Skip</button>
+      </div>
+      <div id="rev-url-wrap-${r.id}" style="display:none;margin-top:8px">
+        <div style="font-size:11px;color:var(--t2);margin-bottom:6px">Paste the correct URL for this product (optional — leave blank to reject without one):</div>
+        <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+          <input id="rev-url-${r.id}" type="text" placeholder="https://competitor.com/correct-product-page"
+            autocomplete="new-password" spellcheck="false"
+            style="flex:1;min-width:200px;padding:6px 10px;font-size:11px;border:1px solid var(--bm);border-radius:var(--r);font-family:inherit;outline:none">
+          <button class="btn sm prim" onclick="saveCorrectUrl(${r.id},this)"><i class="ti ti-device-floppy"></i> Save URL &amp; reject</button>
+          <button class="btn sm danger" onclick="reviewDecision(${r.id},'reject',this)">Reject without URL</button>
+          <button class="btn sm ghost" onclick="cancelReject(${r.id})">Cancel</button>
+        </div>
+      </div>
     </div>`;
 }
 
@@ -1798,29 +1811,42 @@ function filterReview() {
   const q    = ($('review-search')?.value || '').toLowerCase().trim();
   const comp = $('review-comp-filter')?.value || '';
 
-  let rows = reviewAllRows;
-  if (q) {
-    rows = rows.filter(r =>
-      r.sku_id?.toLowerCase().includes(q) ||
-      (r.skus?.short_title||'').toLowerCase().includes(q) ||
-      (r.competitors?.name||'').toLowerCase().includes(q) ||
-      (r.competitor_title||'').toLowerCase().includes(q)
-    );
-  }
+  /* Filter by active tab */
+  let rows = reviewAllRows.filter(r => {
+    if (matchTab === 'rejected') return r.match_status === 'rejected';
+    if (matchTab === 'human')    return r.match_status === 'matched' && r.human_reviewed === true;
+    if (matchTab === 'auto')     return r.match_status === 'matched' && r.human_reviewed === false;
+    /* needs review */           return r.match_status === 'review'  && r.human_reviewed === false;
+  });
+
+  /* Text + competitor filters */
+  if (q) rows = rows.filter(r =>
+    r.sku_id?.toLowerCase().includes(q) ||
+    (r.skus?.short_title||'').toLowerCase().includes(q) ||
+    (r.competitors?.name||'').toLowerCase().includes(q) ||
+    (r.competitor_title||'').toLowerCase().includes(q)
+  );
   if (comp) rows = rows.filter(r => String(r.competitor_id) === String(comp));
 
-  const total   = reviewAllRows.length;
   const showing = rows.length;
-  $('review-sub').textContent = (q || comp)
-    ? `${showing} of ${total} matches (filtered)`
-    : `${total} matches awaiting confirmation`;
+  const tabLabel = { review:'needs review', auto:'AI matched', human:'human verified', rejected:'rejected' }[matchTab];
+  $('review-sub').textContent = (q||comp) ? `${showing} matches (filtered)` : `${showing} ${tabLabel}`;
+
+  const noteEl = $('review-note');
+  if (noteEl) noteEl.style.display = (matchTab === 'review' && rows.length > 0) ? '' : 'none';
 
   if (!rows.length) {
-    $('review-list').innerHTML = '<div style="text-align:center;color:var(--t2);padding:40px;font-size:12px">'
-      + (q || comp
-          ? '<i class="ti ti-search" style="font-size:24px;display:block;margin-bottom:8px;opacity:.3"></i>No matches for that filter'
-          : '<i class="ti ti-circle-check" style="font-size:24px;display:block;margin-bottom:8px;color:var(--grn)"></i>Queue is empty')
-      + '</div>';
+    const msgs = {
+      review:   ['ti-circle-check','var(--grn)','All caught up — no matches need review'],
+      auto:     ['ti-robot','var(--blu)','No AI-matched pairs yet'],
+      human:    ['ti-user-check','var(--grn)','No human-verified matches yet'],
+      rejected: ['ti-x','var(--t3)','No rejected matches'],
+    };
+    const [icon, color, text] = msgs[matchTab];
+    $('review-list').innerHTML = `<div style="text-align:center;color:var(--t2);padding:40px">
+      <i class="ti ${icon}" style="font-size:28px;display:block;margin-bottom:8px;color:${color}"></i>
+      ${q||comp ? 'No matches for that filter' : text}
+    </div>`;
     $('review-pagination').innerHTML = '';
     return;
   }
@@ -1831,114 +1857,23 @@ function filterReview() {
   const from  = start + 1;
   const to    = start + page.length;
 
-  $('review-list').innerHTML = page.map(r => {
-    const sku      = r.skus || {};
-    const comp     = r.competitors || {};
-    const snap     = r._snap || {};
-    const ourUrl   = sku.product_url || (sku.slug ? `https://www.ukpos.com/${sku.slug}?vat=0` : '#');
-    const ourImg   = thumbUrl(sku.image_url || '', 112, 112);
-    const compImg  = r.competitor_image_url
-      ? thumbUrl(r.competitor_image_url, 112, 112)
-      : `https://www.google.com/s2/favicons?domain=${comp.domain||''}&sz=64`;
-    const ourPrice = sku.price_ex_vat ? parseFloat(sku.price_ex_vat) : null;
-    const theirRaw = snap.competitor_price ? parseFloat(snap.competitor_price) : null;
-    const theirEx  = theirRaw ? normalisePrice(theirRaw, snap.competitor_vat || comp.vat_status || 'unknown') : null;
-    const compVat  = snap.competitor_vat || comp.vat_status || 'unknown';
-
-    return `<div class="rev-card" id="rev-${r.id}">
-
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:6px">
-        <div style="display:flex;align-items:center;gap:8px">
-          ${confWidget(r.confidence)}
-          ${r.notes ? `<span style="font-size:10px;color:var(--t2);background:var(--bb);padding:2px 7px;border-radius:10px"><i class="ti ti-info-circle" style="font-size:10px"></i> ${r.notes}</span>` : ''}
-        </div>
-        <div style="font-size:10px;color:var(--t3)">${r.match_method||''}</div>
-      </div>
-
-      <div class="rev-pair">
-
-        <!-- UKPOS side -->
-        <div class="rev-side">
-          <div class="rs-label" style="color:var(--blu)">UKPOS</div>
-          <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px">
-            <div style="width:56px;height:56px;border:1px solid var(--border);border-radius:6px;overflow:hidden;flex-shrink:0;background:var(--bb);display:flex;align-items:center;justify-content:center">
-              ${ourImg
-                ? `<img src="${ourImg}" style="width:100%;height:100%;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
-                : ''}<i class="ti ti-photo" style="font-size:20px;color:var(--t3);${ourImg?'display:none':''}"></i>
-            </div>
-            <div style="flex:1;min-width:0">
-              <a href="#sku/${r.sku_id}" onclick="event.preventDefault();go('sku-detail',{skuId:'${r.sku_id}',fromPanel:'review'})" style="font-family:'SF Mono',monospace;font-size:11px;color:var(--blu);text-decoration:none">${r.sku_id}</a>
-              <div class="rs-name" style="margin-top:2px">${sku.short_title||r.sku_id}</div>
-            </div>
-          </div>
-          <a class="rs-url" href="${ourUrl}" target="_blank" rel="noopener" title="${ourUrl}">
-            <i class="ti ti-external-link" style="font-size:10px"></i> ${ourUrl.replace('https://','').slice(0,55)}
-          </a>
-          <div class="rs-price" style="margin-top:6px">
-            ${ourPrice ? `<strong>${fmtPrice(ourPrice)}</strong> <span class="vat vex">ex-VAT</span>` : '<span style="color:var(--t3)">No price</span>'}
-          </div>
-        </div>
-
-        <div style="display:flex;align-items:center;justify-content:center;padding:0 8px;color:var(--t3);font-size:18px">⇄</div>
-
-        <!-- Competitor side -->
-        <div class="rev-side">
-          <div class="rs-label" style="color:var(--amb)">${comp.name||'Competitor'}</div>
-          <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px">
-            <div style="width:56px;height:56px;border:1px solid var(--border);border-radius:6px;overflow:hidden;flex-shrink:0;background:var(--bb);display:flex;align-items:center;justify-content:center">
-              ${r.competitor_image_url
-                ? `<img src="${compImg}" style="width:100%;height:100%;object-fit:contain" onerror="this.src='https://www.google.com/s2/favicons?domain=${comp.domain||''}&sz=64';this.style.width='32px';this.style.height='32px'">`
-                : `<img src="${compImg}" style="width:32px;height:32px;object-fit:contain" onerror="this.style.display='none'">`}
-            </div>
-            <div style="flex:1;min-width:0">
-              <div style="font-size:11px;color:var(--t2)">${comp.domain||''}</div>
-              <div class="rs-name" style="margin-top:2px">${r.competitor_title||'—'}</div>
-            </div>
-          </div>
-          <a class="rs-url" href="${r.competitor_url||'#'}" target="_blank" rel="noopener" title="${r.competitor_url||''}">
-            <i class="ti ti-external-link" style="font-size:10px"></i> ${(r.competitor_url||'No URL set').replace('https://','').slice(0,55)}
-          </a>
-          <div class="rs-price" style="margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-            ${theirEx
-              ? `<strong>${fmtPrice(theirEx)}</strong> ${vatPill(compVat)}`
-              : `<span style="color:var(--t3)">Not yet scraped</span> ${vatPill(compVat)}`}
-            ${snap.availability && snap.availability !== 'in_stock' ? stockBadge(snap.availability) : ''}
-          </div>
-        </div>
-
-      </div>
-
-      <div id="rev-actions-${r.id}" style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
-        <button class="btn sm prim" onclick="reviewDecision(${r.id},'approve',this)"><i class="ti ti-check"></i> Confirm match</button>
-        <button class="btn sm danger" onclick="showCorrectUrl(${r.id})"><i class="ti ti-x"></i> Reject</button>
-        <button class="btn sm ghost" onclick="skipReview(${r.id})"><i class="ti ti-skip-forward"></i> Skip</button>
-      </div>
-      <div id="rev-url-wrap-${r.id}" style="display:none;margin-top:8px">
-        <div style="font-size:11px;color:var(--t2);margin-bottom:6px">Paste the correct URL for this product (optional — leave blank to reject without one):</div>
-        <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
-          <input id="rev-url-${r.id}" type="text" placeholder="https://competitor.com/correct-product-page"
-            autocomplete="new-password" spellcheck="false"
-            style="flex:1;min-width:200px;padding:6px 10px;font-size:11px;border:1px solid var(--bm);border-radius:var(--r);font-family:inherit;outline:none">
-          <button class="btn sm prim" onclick="saveCorrectUrl(${r.id},this)"><i class="ti ti-device-floppy"></i> Save URL &amp; reject</button>
-          <button class="btn sm danger" onclick="reviewDecision(${r.id},'reject',this)">Reject without URL</button>
-          <button class="btn sm ghost" onclick="cancelReject(${r.id})">Cancel</button>
-        </div>
-      </div>
-    </div>`;
-  }).join('');
+  $('review-list').innerHTML = matchTab === 'review'
+    ? page.map(r => renderReviewCard(r)).join('')
+    : renderMatchTable(page, matchTab);
 
   $('review-pagination').innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <span>${from}–${to} of ${showing}${q||comp?' (filtered)':''}</span>
+      <span>${from}–${to} of ${showing}</span>
       <select onchange="reviewLimit=+this.value===0?999999:+this.value;reviewPage=1;filterReview()" style="padding:3px 6px;border-radius:5px;border:1px solid var(--bm);background:var(--surface);font-size:11px">
         <option value="50">50/page</option><option value="100">100/page</option><option value="250">250/page</option>
       </select>
     </div>
     <div style="display:flex;gap:6px">
-      ${reviewPage>1?`<button class="btn sm" onclick="reviewPage--;filterReview()">← Prev</button>`:''}
-      ${to<showing?`<button class="btn sm" onclick="reviewPage++;filterReview()">Next →</button>`:''}
+      ${reviewPage>1 ? `<button class="btn sm" onclick="reviewPage--;filterReview()">← Prev</button>` : ''}
+      ${to<showing  ? `<button class="btn sm" onclick="reviewPage++;filterReview()">Next →</button>` : ''}
     </div>`;
 }
+
 
 async function reviewDecision(matchId, decision, btn) {
   btn.disabled = true;
