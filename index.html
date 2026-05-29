@@ -17,21 +17,14 @@
 
   <!-- TOPBAR -->
   <div class="topbar">
-    <!-- Mobile only: hamburger (hidden on desktop via CSS) -->
+    <!-- Mobile only: hamburger -->
     <button class="mob-hamburger" id="mob-hamburger-btn" onclick="toggleMobileSidebar()" aria-label="Toggle menu">
       <i class="ti ti-menu-2" id="mob-hamburger-icon" style="font-size:18px"></i>
     </button>
-    <!-- Full logo (visible when sidebar expanded) -->
-    <img src="logo-full.png" alt="UKPOS" class="logo-full" id="logo-full-img"
-      onload="this.style.opacity='1';document.getElementById('logo-text-fallback').style.display='none'"
-      onerror="this.style.display='none'" style="opacity:0;transition:opacity .2s">
-    <div class="logo logo-full" id="logo-text-fallback"><span class="uk">UK</span><span class="pos">POS</span></div>
-    <!-- Icon logo (visible when sidebar collapsed, desktop only) -->
-    <img src="logo-icon.png" alt="UKPOS" class="logo-icon" id="logo-icon-img"
-      onload="this.style.opacity='1'"
-      onerror="this.style.display='none';document.getElementById('logo-icon-fallback').style.display='flex'"
-      style="opacity:0;transition:opacity .2s">
-    <div class="logo logo-icon" id="logo-icon-fallback"><span class="uk" style="border:none;padding:0;margin:0">UK</span></div>
+    <!-- Logos: JS picks which one to show -->
+    <div id="topbar-logo">
+      <div class="logo"><span class="uk">UK</span><span class="pos">POS</span></div>
+    </div>
     <!-- Product name -->
     <span class="topbar-product">PriceWatch Pro</span>
     <div class="topbar-r">
@@ -568,6 +561,23 @@ function applyThresholdCSS() {
 
 function isMobile() { return window.innerWidth <= 768; }
 
+/* Sets the correct logo in #topbar-logo */
+function setTopbarLogo(collapsed) {
+  const el = document.getElementById('topbar-logo');
+  if (!el) return;
+  const src = (!collapsed || isMobile()) ? 'logo-full.png' : 'logo-icon.png';
+  const fallback = (!collapsed || isMobile())
+    ? '<div class="logo"><span class="uk">UK</span><span class="pos">POS</span></div>'
+    : '<div class="logo" style="padding:3px 5px"><span class="uk" style="border:none;padding:0;margin:0">UK</span></div>';
+  const img = new Image();
+  img.alt = 'UKPOS';
+  img.style.cssText = 'height:22px;width:auto;display:block';
+  img.onload  = () => { el.innerHTML = ''; el.appendChild(img); };
+  img.onerror = () => { el.innerHTML = fallback; };
+  img.src = src;
+}
+
+/* Desktop: collapse/expand sidebar */
 function toggleSidebar() {
   const shell     = $('view-app');
   const icon      = $('sidebar-toggle-icon');
@@ -575,42 +585,46 @@ function toggleSidebar() {
   const collapsed = shell.classList.toggle('nav-collapsed');
   icon.className  = collapsed ? 'ti ti-layout-sidebar-left-expand' : 'ti ti-layout-sidebar-left-collapse';
   btn.title       = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+  setTopbarLogo(collapsed);
   try { localStorage.setItem('pw_sidebar_collapsed', collapsed ? '1' : '0'); } catch(e) {}
 }
 
+/* Mobile: slide sidebar in/out */
 function toggleMobileSidebar() {
-  const sidebar  = $('sidebar');
-  const overlay  = $('sidebar-overlay');
-  const icon     = $('mob-hamburger-icon');
-  const isOpen   = sidebar.classList.toggle('mob-open');
+  const sidebar = $('sidebar');
+  const overlay = $('sidebar-overlay');
+  const icon    = $('mob-hamburger-icon');
+  const isOpen  = sidebar.classList.toggle('mob-open');
   overlay.classList.toggle('open', isOpen);
-  /* Swap hamburger icon: ☰ closed → ✕ open */
   if (icon) icon.className = isOpen ? 'ti ti-x' : 'ti ti-menu-2';
 }
 
-/* Close mobile sidebar when a nav item is clicked */
+/* Close mobile sidebar on nav click */
 document.addEventListener('click', e => {
   if (e.target.closest('.nav-item') && $('sidebar')?.classList.contains('mob-open')) {
     toggleMobileSidebar();
   }
 });
 
-/* Restore desktop sidebar state — defaults to OPEN */
-(function restoreSidebar() {
+/* Init: open by default, only collapse if user explicitly collapsed before */
+(function initSidebar() {
   try {
-    if (!isMobile() && localStorage.getItem('pw_sidebar_collapsed') === '1') {
-      const apply = () => {
-        const shell = document.getElementById('view-app');
-        const icon  = document.getElementById('sidebar-toggle-icon');
-        const btn   = document.getElementById('sidebar-toggle-btn');
-        if (shell) shell.classList.add('nav-collapsed');
-        if (icon)  icon.className = 'ti ti-layout-sidebar-left-expand';
-        if (btn)   btn.title = 'Expand sidebar';
-      };
-      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', apply);
-      else apply();
+    const wasCollapsed = !isMobile() && localStorage.getItem('pw_sidebar_collapsed') === '1';
+    if (wasCollapsed) {
+      const shell = document.getElementById('view-app');
+      const icon  = document.getElementById('sidebar-toggle-icon');
+      const btn   = document.getElementById('sidebar-toggle-btn');
+      if (shell) shell.classList.add('nav-collapsed');
+      if (icon)  icon.className = 'ti ti-layout-sidebar-left-expand';
+      if (btn)   btn.title = 'Expand sidebar';
     }
-  } catch(e) {}
+    /* Always set logo after DOM is interactive */
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => setTopbarLogo(wasCollapsed));
+    } else {
+      setTopbarLogo(wasCollapsed);
+    }
+  } catch(e) { setTopbarLogo(false); }
 })();
 
 /* ════════════════════════════════════════
