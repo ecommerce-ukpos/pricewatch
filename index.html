@@ -450,20 +450,31 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
         </div>
       </div>
       <!-- Status tabs -->
-      <div style="display:flex;gap:2px;padding:0 14px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0">
-        <button class="mtab active" id="mtab-review"    onclick="setMatchTab('review')"   >Needs review    <span class="nbadge nb-a" id="mtab-n-review"   style="margin-left:4px">0</span></button>
-        <button class="mtab"        id="mtab-auto"      onclick="setMatchTab('auto')"     >AI matched      <span class="nbadge nb-g" id="mtab-n-auto"     style="margin-left:4px">0</span></button>
-        <button class="mtab"        id="mtab-human"     onclick="setMatchTab('human')"    >Human verified  <span class="nbadge nb-g" id="mtab-n-human"    style="margin-left:4px">0</span></button>
-        <button class="mtab"        id="mtab-rejected"  onclick="setMatchTab('rejected')" >Rejected        <span class="nbadge"    id="mtab-n-rejected" style="margin-left:4px;background:var(--bb);color:var(--blu)">0</span></button>
+      <div style="display:flex;gap:0;padding:0 14px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;overflow-x:auto">
+        <button class="mtab active" id="mtab-review"   onclick="setMatchTab('review')"  >Needs review   <span class="nbadge nb-a" id="mtab-n-review"   style="margin-left:5px">0</span></button>
+        <button class="mtab"        id="mtab-auto"     onclick="setMatchTab('auto')"    >AI matched     <span class="nbadge nb-g" id="mtab-n-auto"     style="margin-left:5px">0</span></button>
+        <button class="mtab"        id="mtab-human"    onclick="setMatchTab('human')"   >Human verified <span class="nbadge nb-g" id="mtab-n-human"    style="margin-left:5px">0</span></button>
+        <button class="mtab"        id="mtab-rejected" onclick="setMatchTab('rejected')">Rejected       <span class="nbadge"    id="mtab-n-rejected" style="margin-left:5px;background:var(--bb);color:var(--blu)">0</span></button>
       </div>
-      <div class="content">
-        <div class="note note-crit" id="review-note" style="display:none">
-          <i class="ti ti-alert-circle"></i>
-          <div>Only <strong id="review-confirmed">1</strong> of <strong id="review-total">1,205</strong> matches confirmed. Open both links, confirm it's the same product, then approve or reject.</div>
-        </div>
-        <div id="review-list"><div class="loading"><span class="spinner"></span></div></div>
-        <div id="review-pagination" style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--t2)"></div>
+      <!-- table — scrollable -->
+      <div style="flex:1;overflow-y:auto;overflow-x:auto;min-height:0">
+        <table id="review-table" style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>
+          <th style="width:58px;position:sticky;top:0;z-index:2;background:var(--surface)"></th>
+          <th class="sortable" style="border-left:3px solid transparent;position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortReviewTable('sku_id')">SKU / Product</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortReviewTable('our_price')">Our price</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortReviewTable('competitor_name')">Competitor / URL</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortReviewTable('their_price')">Their price</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortReviewTable('diff')">Gap</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortReviewTable('confidence')">Confidence</th>
+          <th style="position:sticky;top:0;z-index:2;background:var(--surface);min-width:220px">Action</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortReviewTable('match_source')">Status</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortReviewTable('reviewed_at')">Last matched</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortReviewTable('availability')">Stock</th>
+          <th class="sortable" style="position:sticky;top:0;z-index:2;background:var(--surface)" onclick="sortReviewTable('scraped_at')">Scraped</th>
+          <th style="position:sticky;top:0;z-index:2;background:var(--surface)"></th>
+        </tr></thead><tbody id="review-tbody"><tr><td colspan="13"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table>
       </div>
+      <div id="review-pagination" style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-top:1px solid var(--border);font-size:11px;color:var(--t2);background:var(--surface);flex-shrink:0"></div>
     </div>
 
     <!-- ── ALL SKUs ── -->
@@ -838,7 +849,6 @@ const ALLOWED_DOMAINS = ['ukpos.com'];
 
 let sb, currentUser, currentProfile;
 let skuPage = 1, skuLimit = 50, skuTotal = 0;
-let reviewPage = 1, reviewLimit = 50;
 let alertTab = 'crit';
 let currentCompId = null, currentCompName = null, currentCompSlug = null;
 let currentSkuId = null;
@@ -1555,285 +1565,96 @@ function filterSKUs() {
 /* ════════════════════════════════════════
    MATCH MANAGER
 ════════════════════════════════════════ */
-let reviewAllRows = [];
-let matchTab = 'review';  /* review | auto | human | rejected */
+let matchTab     = 'review';
+let reviewPage   = 1;
+let reviewLimit  = 50;
+let reviewAllRows = [];   /* full dataset from DB join */
+let reviewData    = [];   /* filtered+sorted working set */
 
 function setMatchTab(tab) {
-  matchTab = tab;
+  matchTab   = tab;
   reviewPage = 1;
-  ['review','auto','human','rejected'].forEach(t => {
-    $('mtab-'+t)?.classList.toggle('active', t === tab);
-  });
+  ['review','auto','human','rejected'].forEach(t =>
+    $('mtab-'+t)?.classList.toggle('active', t === tab)
+  );
   filterReview();
 }
 
 async function loadReview() {
-  $('review-list').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+  $('review-tbody').innerHTML = `<tr><td colspan="11"><div class="loading"><span class="spinner"></span></div></td></tr>`;
+
+  /* Populate competitor dropdown once */
+  const cf = $('review-comp-filter');
+  if (cf && cf.options.length === 1) {
+    const { data: comps } = await sb.from('competitors').select('id,name').eq('active',true).order('name');
+    (comps||[]).forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.name; opt.textContent = c.name;
+      cf.appendChild(opt);
+    });
+  }
+
   try {
-    /* Fetch all matches in one shot — all statuses */
-    const { data: matches, error } = await sb.from('competitor_matches')
-      .select('id,sku_id,competitor_id,competitor_url,competitor_title,competitor_image_url,confidence,notes,match_status,match_source,human_reviewed,reviewed_at,updated_at,skus(sku_id,short_title,price_ex_vat,product_url,image_url,slug,unit_qty),competitors(id,name,domain,vat_status)')
+    /* Single join query — all data we need in one shot */
+    const { data, error } = await sb.from('competitor_matches')
+      .select(`
+        id, sku_id, competitor_id, competitor_url, competitor_title,
+        competitor_image_url, confidence, match_status, match_source,
+        human_reviewed, reviewed_at, updated_at, notes,
+        skus!inner(sku_id, short_title, price_ex_vat, product_url, image_url, slug, unit_qty),
+        competitors!inner(name, domain, vat_status),
+        latest_snapshots(competitor_price, competitor_vat, competitor_vat_default,
+                         diff_pct, diff_pct_normalised, availability, scraped_at)
+      `)
       .order('updated_at', { ascending: false })
-      .limit(2000);
+      .limit(3000);
 
     if (error) throw new Error(error.message);
-
-    /* Fetch latest snapshot prices for all matched SKUs */
-    const skuIds = [...new Set((matches||[]).map(m => m.sku_id))];
-    let snapMap = {};
-    if (skuIds.length) {
-      const { data: snaps } = await sb.from('latest_snapshots')
-        .select('sku_id,competitor_id,competitor_price,competitor_vat,availability')
-        .in('sku_id', skuIds);
-      (snaps||[]).forEach(s => { snapMap[`${s.sku_id}__${s.competitor_id}`] = s; });
-    }
-
-    reviewAllRows = (matches||[]).map(m => ({
-      ...m,
-      _snap: snapMap[`${m.sku_id}__${m.competitor_id}`] || null,
-    }));
-
-    /* Update tab counts — same logic as filterReview tabs */
-    const counts = { review: 0, auto: 0, human: 0, rejected: 0 };
-    reviewAllRows.forEach(r => {
-      if      (r.match_status === 'rejected')                               counts.rejected++;
-      else if (r.match_status === 'matched' && r.human_reviewed === true)   counts.human++;
-      else if (r.match_status === 'matched' && r.human_reviewed === false)  counts.auto++;
-      else if (r.match_status === 'review'  && r.human_reviewed === false)  counts.review++;
-    });
-    Object.entries(counts).forEach(([k,v]) => {
-      const el = $('mtab-n-'+k);
-      if (el) el.textContent = v.toLocaleString();
-    });
-
-    /* Update nav badge to Needs Review count only */
-    const nb = $('nav-review-badge');
-    if (nb) { nb.textContent = counts.review; nb.style.display = counts.review > 0 ? '' : 'none'; }
-
-    /* Populate competitor dropdown */
-    const cf = $('review-comp-filter');
-    if (cf && cf.options.length === 1) {
-      const { data: comps } = await sb.from('competitors').select('id,name').eq('active',true).order('name');
-      (comps||[]).forEach(c => {
-        const opt = document.createElement('option');
-        opt.value = c.id; opt.textContent = c.name;
-        cf.appendChild(opt);
-      });
-    }
-
+    reviewAllRows = data || [];
+    updateMatchTabCounts();
     filterReview();
-  } catch (e) {
-    $('review-list').innerHTML = `<div style="color:var(--red);padding:8px">${e.message}</div>`;
+  } catch(e) {
+    $('review-tbody').innerHTML = `<tr><td colspan="13" style="color:var(--red);padding:8px">${e.message}</td></tr>`;
   }
 }
 
-function renderReviewCard(r) {
-  const sku      = r.skus || {};
-  const comp     = r.competitors || {};
-  const snap     = r._snap || {};
-  const ourUrl   = sku.product_url || (sku.slug ? `https://www.ukpos.com/${sku.slug}?vat=0` : '#');
-  const ourImg   = thumbUrl(sku.image_url || '', 112, 112);
-  const compImg  = r.competitor_image_url
-    ? thumbUrl(r.competitor_image_url, 112, 112)
-    : `https://www.google.com/s2/favicons?domain=${comp.domain||''}&sz=64`;
-  const ourPrice = sku.price_ex_vat ? parseFloat(sku.price_ex_vat) : null;
-  const theirRaw = snap.competitor_price ? parseFloat(snap.competitor_price) : null;
-  const theirEx  = theirRaw ? normalisePrice(theirRaw, snap.competitor_vat || comp.vat_status || 'unknown') : null;
-  const compVat  = snap.competitor_vat || comp.vat_status || 'unknown';
-
-  return `<div class="rev-card" id="rev-${r.id}">
-
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:6px">
-        <div style="display:flex;align-items:center;gap:8px">
-          ${confWidget(r.confidence)}
-          ${r.notes ? `<span style="font-size:10px;color:var(--t2);background:var(--bb);padding:2px 7px;border-radius:10px"><i class="ti ti-info-circle" style="font-size:10px"></i> ${r.notes}</span>` : ''}
-        </div>
-        <div style="font-size:10px;color:var(--t3)">${r.match_method||r.match_source||''}</div>
-      </div>
-
-      <div class="rev-pair">
-        <div class="rev-side">
-          <div class="rs-label" style="color:var(--blu)">UKPOS</div>
-          <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px">
-            <div style="width:56px;height:56px;border:1px solid var(--border);border-radius:6px;overflow:hidden;flex-shrink:0;background:var(--bb);display:flex;align-items:center;justify-content:center">
-              ${ourImg ? `<img src="${ourImg}" style="width:100%;height:100%;object-fit:contain" onerror="this.style.display='none'">` : '<i class="ti ti-photo" style="font-size:20px;color:var(--t3)"></i>'}
-            </div>
-            <div style="flex:1;min-width:0">
-              <a href="#sku/${r.sku_id}" onclick="event.preventDefault();go('sku-detail',{skuId:'${r.sku_id}',fromPanel:'review'})" style="font-family:'SF Mono',monospace;font-size:11px;color:var(--blu);text-decoration:none">${r.sku_id}</a>
-              <div class="rs-name" style="margin-top:2px">${sku.short_title||r.sku_id}</div>
-            </div>
-          </div>
-          <a class="rs-url" href="${ourUrl}" target="_blank" rel="noopener"><i class="ti ti-external-link" style="font-size:10px"></i> ${ourUrl.replace('https://','').slice(0,55)}</a>
-          <div class="rs-price" style="margin-top:6px">
-            ${ourPrice ? `<strong>${fmtPrice(ourPrice)}</strong> <span class="vat vex">ex-VAT</span>` : '<span style="color:var(--t3)">No price</span>'}
-          </div>
-        </div>
-
-        <div style="display:flex;align-items:center;justify-content:center;padding:0 8px;color:var(--t3);font-size:18px">⇄</div>
-
-        <div class="rev-side">
-          <div class="rs-label" style="color:var(--amb)">${comp.name||'Competitor'}</div>
-          <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px">
-            <div style="width:56px;height:56px;border:1px solid var(--border);border-radius:6px;overflow:hidden;flex-shrink:0;background:var(--bb);display:flex;align-items:center;justify-content:center">
-              ${r.competitor_image_url
-                ? `<img src="${compImg}" style="width:100%;height:100%;object-fit:contain" onerror="this.src='https://www.google.com/s2/favicons?domain=${comp.domain||''}&sz=64';this.style.width='32px';this.style.height='32px'">`
-                : `<img src="${compImg}" style="width:32px;height:32px;object-fit:contain" onerror="this.style.display='none'">`}
-            </div>
-            <div style="flex:1;min-width:0">
-              <div style="font-size:11px;color:var(--t2)">${comp.domain||''}</div>
-              <div class="rs-name" style="margin-top:2px">${r.competitor_title||'—'}</div>
-            </div>
-          </div>
-          <a class="rs-url" href="${r.competitor_url||'#'}" target="_blank" rel="noopener"><i class="ti ti-external-link" style="font-size:10px"></i> ${(r.competitor_url||'No URL set').replace('https://','').slice(0,55)}</a>
-          <div class="rs-price" style="margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-            ${theirEx ? `<strong>${fmtPrice(theirEx)}</strong> ${vatPill(compVat)}` : `<span style="color:var(--t3)">Not yet scraped</span> ${vatPill(compVat)}`}
-            ${snap.availability && snap.availability !== 'in_stock' ? stockBadge(snap.availability) : ''}
-          </div>
-        </div>
-      </div>
-
-      <div id="rev-actions-${r.id}" style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
-        <button class="btn sm prim" onclick="reviewDecision(${r.id},'approve',this)"><i class="ti ti-check"></i> Confirm match</button>
-        <button class="btn sm danger" onclick="showCorrectUrl(${r.id})"><i class="ti ti-x"></i> Reject</button>
-        <button class="btn sm ghost" onclick="skipReview(${r.id})"><i class="ti ti-skip-forward"></i> Skip</button>
-      </div>
-      <div id="rev-url-wrap-${r.id}" style="display:none;margin-top:8px">
-        <div style="font-size:11px;color:var(--t2);margin-bottom:6px">Paste the correct URL for this product (optional — leave blank to reject without one):</div>
-        <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
-          <input id="rev-url-${r.id}" type="text" placeholder="https://competitor.com/correct-product-page"
-            autocomplete="new-password" spellcheck="false"
-            style="flex:1;min-width:200px;padding:6px 10px;font-size:11px;border:1px solid var(--bm);border-radius:var(--r);font-family:inherit;outline:none">
-          <button class="btn sm prim" onclick="saveCorrectUrl(${r.id},this)"><i class="ti ti-device-floppy"></i> Save URL &amp; reject</button>
-          <button class="btn sm danger" onclick="reviewDecision(${r.id},'reject',this)">Reject without URL</button>
-          <button class="btn sm ghost" onclick="cancelReject(${r.id})">Cancel</button>
-        </div>
-      </div>
-    </div>`;
-}
-
-function renderMatchTable(rows, tab) {
-  const isRejected = tab === 'rejected';
-  const dateLabel  = tab === 'human' ? 'Verified' : tab === 'rejected' ? 'Rejected' : 'Matched';
-  return `<table style="width:100%;border-collapse:collapse;font-size:13px">
-    <thead><tr style="background:var(--surface);border-bottom:1px solid var(--border)">
-      <th style="padding:8px 12px;text-align:left;font-weight:600">SKU</th>
-      <th style="padding:8px 12px;text-align:left;font-weight:600">Product</th>
-      <th style="padding:8px 12px;text-align:left;font-weight:600">Competitor</th>
-      <th style="padding:8px 12px;text-align:left;font-weight:600">Matched URL</th>
-      <th style="padding:8px 12px;text-align:left;font-weight:600">Confidence</th>
-      <th style="padding:8px 12px;text-align:left;font-weight:600">${dateLabel}</th>
-      ${!isRejected ? '<th style="padding:8px 12px"></th>' : ''}
-    </tr></thead>
-    <tbody>${rows.map(r => {
-      const sku  = r.skus  || {};
-      const comp = r.competitors || {};
-      const date = r.reviewed_at || r.updated_at;
-      return `<tr style="border-bottom:1px solid var(--border)" class="tr-link" onclick="go('sku-detail',{skuId:'${r.sku_id}',fromPanel:'review'})">
-        <td style="padding:8px 12px;font-family:'SF Mono',monospace;color:var(--blu)">${r.sku_id}</td>
-        <td style="padding:8px 12px;color:var(--t2);max-width:180px;white-space:normal;line-height:1.3">${sku.short_title||'—'}</td>
-        <td style="padding:8px 12px">${comp.name||'—'}</td>
-        <td style="padding:8px 12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-          ${r.competitor_url ? `<a href="${r.competitor_url}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:12px;color:var(--blu)">${r.competitor_url.replace('https://','').slice(0,50)}</a>` : '<span style="color:var(--t3)">No URL</span>'}
-        </td>
-        <td style="padding:8px 12px">${confWidget(r.confidence)}</td>
-        <td style="padding:8px 12px;font-size:12px;color:var(--t3)">${ts(date)}</td>
-        ${!isRejected ? `<td style="padding:8px 12px" onclick="event.stopPropagation()">
-          <button class="btn sm ghost" style="font-size:11px" onclick="rematchFromTable(${r.id},this)">
-            <i class="ti ti-rotate-clockwise"></i> Re-review
-          </button>
-        </td>` : ''}
-      </tr>`;
-    }).join('')}</tbody>
-  </table>`;
-}
-
-async function rematchFromTable(matchId, btn) {
-  const orig = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '<i class="ti ti-loader"></i>';
-  try {
-    await sb.from('competitor_matches').update({
-      match_status:   'review',
-      match_source:   'scraper_search',
-      human_reviewed: false,
-      reviewed_at:    null,
-    }).eq('id', matchId);
-    reviewAllRows = reviewAllRows.filter(r => r.id !== matchId);
-    filterReview();
-  } catch (e) {
-    btn.disabled = false;
-    btn.innerHTML = orig;
-    alert(e.message);
-  }
-}
-
-async function loadReview() {
-  $('review-list').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
-  try {
-    const d = await authFetch('/review?page=1&limit=500');
-    const matches = d.data || [];
-
-    /* Fetch latest snapshot price for every match in one query */
-    const matchIds = matches.map(m => `(sku_id.eq.${m.sku_id},competitor_id.eq.${m.competitor_id})`);
-    let snapMap = {};
-    if (matches.length) {
-      /* Supabase doesn't support tuple IN — fetch latest_snapshots for all relevant SKUs then filter */
-      const skuIds = [...new Set(matches.map(m => m.sku_id))];
-      const { data: snaps } = await sb.from('latest_snapshots')
-        .select('sku_id,competitor_id,competitor_price,competitor_vat,availability')
-        .in('sku_id', skuIds);
-      (snaps || []).forEach(s => { snapMap[`${s.sku_id}__${s.competitor_id}`] = s; });
-    }
-
-    /* Merge snapshot data into each match row */
-    reviewAllRows = matches.map(m => ({
-      ...m,
-      _snap: snapMap[`${m.sku_id}__${m.competitor_id}`] || null,
-    }));
-
-    /* Build competitor dropdown from ALL active competitors */
-    const cf = $('review-comp-filter');
-    if (cf && cf.options.length === 1) {
-      const { data: allComps } = await sb.from('competitors').select('id,name').eq('active',true).order('name');
-      (allComps || []).forEach(c => {
-        const opt = document.createElement('option');
-        opt.value = c.id; opt.textContent = c.name;
-        cf.appendChild(opt);
-      });
-    }
-    filterReview();
-  } catch (e) {
-    $('review-list').innerHTML = `<div style="color:var(--red);padding:8px">${e.message}</div>`;
-  }
+function updateMatchTabCounts() {
+  const counts = { review:0, auto:0, human:0, rejected:0 };
+  reviewAllRows.forEach(r => {
+    if      (r.match_status === 'rejected')                              counts.rejected++;
+    else if (r.match_status === 'matched' && r.human_reviewed === true)  counts.human++;
+    else if (r.match_status === 'matched' && r.human_reviewed === false) counts.auto++;
+    else if (r.match_status === 'review'  && r.human_reviewed === false) counts.review++;
+  });
+  Object.entries(counts).forEach(([k,v]) => {
+    const el = $('mtab-n-'+k); if (el) el.textContent = v.toLocaleString();
+  });
+  const nb = $('nav-review-badge');
+  if (nb) { nb.textContent = counts.review; nb.style.display = counts.review > 0 ? '' : 'none'; }
 }
 
 function filterReview() {
-  const q    = ($('review-search')?.value || '').toLowerCase().trim();
+  const q    = ($('review-search')?.value||'').toLowerCase().trim();
   const comp = $('review-comp-filter')?.value || '';
 
-  /* Filter by active tab */
   let rows = reviewAllRows.filter(r => {
     if (matchTab === 'rejected') return r.match_status === 'rejected';
     if (matchTab === 'human')    return r.match_status === 'matched' && r.human_reviewed === true;
     if (matchTab === 'auto')     return r.match_status === 'matched' && r.human_reviewed === false;
-    /* needs review */           return r.match_status === 'review'  && r.human_reviewed === false;
+    return r.match_status === 'review' && r.human_reviewed === false;
   });
 
-  /* Text + competitor filters */
   if (q) rows = rows.filter(r =>
     r.sku_id?.toLowerCase().includes(q) ||
     (r.skus?.short_title||'').toLowerCase().includes(q) ||
     (r.competitors?.name||'').toLowerCase().includes(q) ||
     (r.competitor_title||'').toLowerCase().includes(q)
   );
-  if (comp) rows = rows.filter(r => String(r.competitor_id) === String(comp));
+  if (comp) rows = rows.filter(r => r.competitors?.name === comp);
 
   const showing = rows.length;
-  const tabLabel = { review:'needs review', auto:'AI matched', human:'human verified', rejected:'rejected' }[matchTab];
+  const tabLabel = {review:'needs review',auto:'AI matched',human:'human verified',rejected:'rejected'}[matchTab];
   $('review-sub').textContent = (q||comp) ? `${showing} matches (filtered)` : `${showing} ${tabLabel}`;
-
-  const noteEl = $('review-note');
-  if (noteEl) noteEl.style.display = (matchTab === 'review' && rows.length > 0) ? '' : 'none';
 
   if (!rows.length) {
     const msgs = {
@@ -1843,37 +1664,230 @@ function filterReview() {
       rejected: ['ti-x','var(--t3)','No rejected matches'],
     };
     const [icon, color, text] = msgs[matchTab];
-    $('review-list').innerHTML = `<div style="text-align:center;color:var(--t2);padding:40px">
+    $('review-tbody').innerHTML = `<tr><td colspan="13"><div style="text-align:center;color:var(--t2);padding:40px">
       <i class="ti ${icon}" style="font-size:28px;display:block;margin-bottom:8px;color:${color}"></i>
       ${q||comp ? 'No matches for that filter' : text}
-    </div>`;
+    </div></td></tr>`;
     $('review-pagination').innerHTML = '';
     return;
   }
 
-  const lim   = reviewLimit === 999999 ? rows.length : reviewLimit;
-  const start = (reviewPage - 1) * lim;
-  const page  = rows.slice(start, start + lim);
-  const from  = start + 1;
-  const to    = start + page.length;
+  reviewData = rows;
+  renderReviewPage();
+}
 
-  $('review-list').innerHTML = matchTab === 'review'
-    ? page.map(r => renderReviewCard(r)).join('')
-    : renderMatchTable(page, matchTab);
+function renderReviewPage() {
+  const lim   = reviewLimit === 999999 ? reviewData.length : reviewLimit;
+  const start = (reviewPage-1) * lim;
+  const page  = reviewData.slice(start, start+lim);
+  const from  = start+1, to = start+page.length;
+
+  renderReviewRows(page);
 
   $('review-pagination').innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <span>${from}–${to} of ${showing}</span>
-      <select onchange="reviewLimit=+this.value===0?999999:+this.value;reviewPage=1;filterReview()" style="padding:3px 6px;border-radius:5px;border:1px solid var(--bm);background:var(--surface);font-size:11px">
+      <span>${from}–${to} of ${reviewData.length}</span>
+      <select onchange="reviewLimit=+this.value===0?999999:+this.value;reviewPage=1;renderReviewPage()"
+        style="padding:3px 6px;border-radius:5px;border:1px solid var(--bm);background:var(--surface);font-size:11px">
         <option value="50">50/page</option><option value="100">100/page</option><option value="250">250/page</option>
       </select>
     </div>
     <div style="display:flex;gap:6px">
-      ${reviewPage>1 ? `<button class="btn sm" onclick="reviewPage--;filterReview()">← Prev</button>` : ''}
-      ${to<showing  ? `<button class="btn sm" onclick="reviewPage++;filterReview()">Next →</button>` : ''}
+      ${reviewPage>1 ? `<button class="btn sm" onclick="reviewPage--;renderReviewPage()">← Prev</button>` : ''}
+      ${to<reviewData.length ? `<button class="btn sm" onclick="reviewPage++;renderReviewPage()">Next →</button>` : ''}
     </div>`;
 }
 
+function renderReviewRows(rows) {
+  $('review-tbody').innerHTML = rows.map(r => {
+    const sku   = r.skus        || {};
+    const comp  = r.competitors || {};
+    /* latest_snapshots can be array or object depending on Supabase version */
+    const snap  = Array.isArray(r.latest_snapshots) ? (r.latest_snapshots[0]||{}) : (r.latest_snapshots||{});
+
+    const ourPriceEx = sku.price_ex_vat ? parseFloat(sku.price_ex_vat) : null;
+    const unitQty    = sku.unit_qty && sku.unit_qty > 1 ? sku.unit_qty : null;
+    const ourPerUnit = (unitQty && ourPriceEx) ? ourPriceEx / unitQty : null;
+    const ourUrl     = sku.product_url || (sku.slug ? `https://www.ukpos.com/${sku.slug}?vat=0` : '#');
+    const ourThumb   = thumbUrl(sku.image_url||'', 50, 50);
+
+    const theirRaw   = snap.competitor_price ? parseFloat(snap.competitor_price) : null;
+    const theirVat   = snap.competitor_vat || snap.competitor_vat_default || comp.vat_status || 'unknown';
+    const theirEx    = theirRaw ? normalisePrice(theirRaw, theirVat) : null;
+    const compQty    = null; /* will come from scraper comp_qty when available */
+    const theirPerU  = (unitQty && theirEx) ? theirEx / unitQty : null;
+
+    const diff       = snap.diff_pct_normalised ?? snap.diff_pct;
+    const statusPill = {
+      review:   `<span style="background:var(--ab);color:var(--amb);border-radius:4px;padding:2px 7px;font-size:11px;font-weight:500">Needs review</span>`,
+      matched:  r.human_reviewed
+                ? `<span style="background:var(--gb);color:var(--grn);border-radius:4px;padding:2px 7px;font-size:11px;font-weight:500">✓ Human verified</span>`
+                : `<span style="background:var(--bb);color:var(--blu);border-radius:4px;padding:2px 7px;font-size:11px;font-weight:500">🤖 AI matched</span>`,
+      rejected: `<span style="background:var(--bg);color:var(--t3);border-radius:4px;padding:2px 7px;font-size:11px;border:1px solid var(--border)">Rejected</span>`,
+    }[r.match_status] || '—';
+
+    /* Action buttons — vary by tab */
+    const actions = matchTab === 'review' ? `
+      <div style="display:flex;gap:4px;flex-wrap:wrap;min-width:180px">
+        <button class="btn sm prim"   style="font-size:11px;padding:3px 7px" onclick="event.stopPropagation();quickApprove(${r.id},this)"><i class="ti ti-check"></i> Confirm</button>
+        <button class="btn sm danger" style="font-size:11px;padding:3px 7px" onclick="event.stopPropagation();showRejectOptions(${r.id})"><i class="ti ti-x"></i> Reject</button>
+        <button class="btn sm ghost"  style="font-size:11px;padding:3px 7px" onclick="event.stopPropagation();skipReviewRow(${r.id})"><i class="ti ti-skip-forward"></i></button>
+      </div>
+      <div id="rrow-reject-${r.id}" style="display:none;margin-top:6px">
+        <input id="rrow-url-${r.id}" type="text" placeholder="Correct URL (optional)" autocomplete="new-password" spellcheck="false"
+          style="width:100%;padding:5px 8px;font-size:11px;border:1px solid var(--bm);border-radius:var(--r);font-family:inherit;outline:none;margin-bottom:4px">
+        <div style="display:flex;gap:4px">
+          <button class="btn sm prim"   style="font-size:11px" onclick="event.stopPropagation();quickReject(${r.id},this,true)"><i class="ti ti-device-floppy"></i> Save &amp; reject</button>
+          <button class="btn sm danger" style="font-size:11px" onclick="event.stopPropagation();quickReject(${r.id},this,false)">Reject</button>
+          <button class="btn sm ghost"  style="font-size:11px" onclick="event.stopPropagation();hideRejectOptions(${r.id})">Cancel</button>
+        </div>
+      </div>` : matchTab !== 'rejected' ? `
+      <button class="btn sm ghost" style="font-size:11px" onclick="event.stopPropagation();revertToReview(${r.id},this)" title="Move back to Needs Review">
+        <i class="ti ti-rotate-clockwise"></i> Re-review
+      </button>` : '';
+
+    return `<tr class="${rowClass(diff)} tr-link" id="rrow-${r.id}" onclick="go('sku-detail',{skuId:'${r.sku_id}',fromPanel:'review'})">
+
+      <!-- Thumbnail -->
+      <td style="padding:4px 8px;width:58px">
+        <div style="width:50px;height:50px;border:1px solid var(--border);border-radius:5px;overflow:hidden;background:var(--bb);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          ${ourThumb ? `<img src="${ourThumb}" style="width:100%;height:100%;object-fit:contain" onerror="this.style.display='none'">` : `<i class="ti ti-photo" style="font-size:16px;color:var(--t3)"></i>`}
+        </div>
+      </td>
+
+      <!-- SKU ID + product name, both linked to UKPOS -->
+      <td style="min-width:140px">
+        <a href="${ourUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()"
+          style="font-family:'SF Mono',monospace;font-size:12px;color:var(--blu);display:block;text-decoration:none">
+          ${r.sku_id} <i class="ti ti-external-link" style="font-size:10px"></i>
+        </a>
+        <a href="${ourUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()"
+          style="font-size:12px;color:var(--t2);display:block;line-height:1.3;text-decoration:none;margin-top:2px">
+          ${sku.short_title||''}
+        </a>
+      </td>
+
+      <!-- Our price + per unit -->
+      <td style="white-space:nowrap;font-weight:500">
+        ${ourPriceEx ? fmtPrice(ourPriceEx) : '—'} <span class="vat vex" style="font-size:10px">ex</span>
+        ${ourPerUnit ? `<div style="font-size:11px;color:var(--t2)">${fmtPrice(ourPerUnit)}/unit</div>` : ''}
+      </td>
+
+      <!-- Competitor name + their URL -->
+      <td style="min-width:120px">
+        <div style="font-weight:500">${comp.name||'—'}</div>
+        ${r.competitor_url
+          ? `<a href="${r.competitor_url}" target="_blank" rel="noopener" onclick="event.stopPropagation()"
+              style="font-size:11px;color:var(--t3);display:block;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:none">
+              <i class="ti ti-external-link" style="font-size:10px"></i> ${r.competitor_url.replace('https://','').slice(0,45)}
+             </a>`
+          : `<span style="font-size:11px;color:var(--t3)">No URL set</span>`}
+      </td>
+
+      <!-- Their price + per unit -->
+      <td style="white-space:nowrap;font-weight:500">
+        ${theirEx
+          ? `${fmtPrice(theirEx)} ${vatPill(theirVat)}
+             ${theirPerU ? `<div style="font-size:11px;color:var(--t2)">${fmtPrice(theirPerU)}/unit</div>` : ''}`
+          : `<span style="color:var(--t3);font-size:12px">Not yet scraped</span>`}
+      </td>
+
+      <!-- Gap -->
+      <td>${diff != null ? `<span class="${diffClass(diff)}">${diffLabel(diff)}</span>` : '—'}</td>
+
+      <!-- Confidence -->
+      <td>${confWidget(r.confidence)}</td>
+
+      <!-- Actions (Confirm/Reject/Skip or Re-review) -->
+      <td onclick="event.stopPropagation()" style="min-width:200px">${actions}</td>
+
+      <!-- Match status pill -->
+      <td style="white-space:nowrap">${statusPill}</td>
+
+      <!-- Last matched/reviewed date -->
+      <td style="font-size:12px;color:var(--t3);white-space:nowrap">${ts(r.reviewed_at||r.updated_at)}</td>
+
+      <!-- Stock -->
+      <td>${stockBadge(snap.availability)}</td>
+
+      <!-- Last scraped -->
+      <td style="font-size:12px;color:var(--t3);white-space:nowrap">${ts(snap.scraped_at)}</td>
+
+      <!-- Quick view -->
+      <td><button class="btn sm ghost" onclick="event.stopPropagation();openDrawer('${r.sku_id}','${(sku.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(ourPriceEx)}','review')"
+        style="font-size:11px;padding:4px 8px">Quick view</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function sortReviewTable(col) {
+  const dir = (sortState.review?.col === col && sortState.review?.dir === 1) ? -1 : 1;
+  sortState.review = { col, dir };
+  updateSortHeaders('review-table', 'review', col);
+  const getV = r => {
+    const sku  = r.skus || {};
+    const comp = r.competitors || {};
+    const snap = Array.isArray(r.latest_snapshots) ? (r.latest_snapshots[0]||{}) : (r.latest_snapshots||{});
+    if (col === 'sku_id')          return r.sku_id||'';
+    if (col === 'short_title')     return (sku.short_title||'').toLowerCase();
+    if (col === 'competitor_name') return (comp.name||'').toLowerCase();
+    if (col === 'our_price')       return parseFloat(sku.price_ex_vat||0);
+    if (col === 'their_price')     { const raw = snap.competitor_price ? parseFloat(snap.competitor_price) : null; return raw ? normalisePrice(raw, snap.competitor_vat||'unknown') : 999999; }
+    if (col === 'diff')            return parseFloat(snap.diff_pct_normalised ?? snap.diff_pct ?? 0);
+    if (col === 'confidence')      return parseFloat(r.confidence||0);
+    if (col === 'match_source')    return r.match_source||'';
+    if (col === 'reviewed_at')     return r.reviewed_at ? new Date(r.reviewed_at).getTime() : 0;
+    if (col === 'availability')    return (snap.availability||'').toLowerCase();
+    if (col === 'scraped_at')      return snap.scraped_at ? new Date(snap.scraped_at).getTime() : 0;
+    return '';
+  };
+  reviewData.sort((a,b) => cmpVal(getV(a), getV(b), dir));
+  reviewPage = 1;
+  renderReviewPage();
+}
+
+function showRejectOptions(id)   { $(`rrow-reject-${id}`).style.display = ''; $(`rrow-url-${id}`)?.focus(); }
+function hideRejectOptions(id)   { $(`rrow-reject-${id}`).style.display = 'none'; }
+function skipReviewRow(id)       { const el = $(`rrow-${id}`); if (el) el.style.display = 'none'; }
+
+async function quickApprove(matchId, btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i>';
+  try {
+    await authPost(`/review/${matchId}`, { decision: 'approve' });
+    await sb.from('competitor_matches').update({ match_source:'human', human_reviewed:true, reviewed_at:new Date().toISOString() }).eq('id', matchId);
+    const r = reviewAllRows.find(r => r.id === matchId);
+    if (r) { r.match_status='matched'; r.human_reviewed=true; r.match_source='human'; r.reviewed_at=new Date().toISOString(); }
+    updateMatchTabCounts(); filterReview(); loadDashboard();
+  } catch(e) { btn.disabled=false; btn.innerHTML=orig; alert(e.message); }
+}
+
+async function quickReject(matchId, btn, saveUrl) {
+  const orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i>';
+  try {
+    const urlInput = $(`rrow-url-${matchId}`);
+    const newUrl   = saveUrl && urlInput ? urlInput.value.trim() : null;
+    const update   = { match_source:'human', human_reviewed:true, reviewed_at:new Date().toISOString() };
+    if (newUrl && newUrl.startsWith('http')) update.competitor_url = newUrl;
+    await authPost(`/review/${matchId}`, { decision: 'reject' });
+    await sb.from('competitor_matches').update(update).eq('id', matchId);
+    const r = reviewAllRows.find(r => r.id === matchId);
+    if (r) { r.match_status='rejected'; r.human_reviewed=true; r.match_source='human'; r.reviewed_at=new Date().toISOString(); if (newUrl) r.competitor_url=newUrl; }
+    updateMatchTabCounts(); filterReview(); loadDashboard();
+  } catch(e) { btn.disabled=false; btn.innerHTML=orig; alert(e.message); }
+}
+
+async function revertToReview(matchId, btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i>';
+  try {
+    await sb.from('competitor_matches').update({ match_status:'review', match_source:'scraper_search', human_reviewed:false, reviewed_at:null }).eq('id', matchId);
+    const r = reviewAllRows.find(r => r.id === matchId);
+    if (r) { r.match_status='review'; r.human_reviewed=false; r.match_source='scraper_search'; r.reviewed_at=null; }
+    updateMatchTabCounts(); filterReview();
+  } catch(e) { btn.disabled=false; btn.innerHTML=orig; alert(e.message); }
+}
 
 async function reviewDecision(matchId, decision, btn) {
   btn.disabled = true;
