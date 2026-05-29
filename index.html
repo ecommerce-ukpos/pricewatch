@@ -477,6 +477,9 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
             <option value="par">At parity</option>
             <option value="cheap">We're cheaper</option>
           </select>
+          <select id="fComp" onchange="filterSKUs()">
+            <option value="">All competitors</option>
+          </select>
           <select id="fVat" onchange="filterSKUs()">
             <option value="">All VAT statuses</option>
             <option value="ex">Ex-VAT confirmed</option>
@@ -1386,6 +1389,8 @@ function buildDistChart(m) {
 /* ════════════════════════════════════════
    SKU TABLE
 ════════════════════════════════════════ */
+let skusAllData = [];  /* full dataset for client-side competitor filter */
+
 async function loadSKUs() {
   const q     = $('skuQ')?.value || '';
   const diff  = $('fDiff')?.value || '';
@@ -1402,15 +1407,15 @@ async function loadSKUs() {
     const rows = d.data || [];
     if (d.total !== undefined) skuTotal = d.total;
     else if (rows.length < skuLimit) skuTotal = (skuPage-1)*skuLimit + rows.length;
-    $('skus-sub').textContent = `${skuTotal.toLocaleString()} SKUs`;
 
     if (!rows.length) {
+      $('skus-sub').textContent = `${skuTotal.toLocaleString()} SKUs`;
       $('sku-tbody').innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--t2);padding:20px">No matches found</td></tr>';
       $('sku-pagination').innerHTML = '';
       return;
     }
 
-    /* Enrich with image_url and unit_qty from allSkus cache (Edge Function doesn't return them) */
+    /* Enrich with image_url and unit_qty from allSkus cache */
     const skuMetaMap = {};
     (allSkus || []).forEach(s => { skuMetaMap[s.sku_id] = { image_url: s.image_url, unit_qty: s.unit_qty }; });
     const enriched = rows.map(r => ({
@@ -1418,12 +1423,60 @@ async function loadSKUs() {
       image_url: skuMetaMap[r.sku_id]?.image_url || r.image_url || null,
       unit_qty:  skuMetaMap[r.sku_id]?.unit_qty  || r.unit_qty  || 1,
     }));
+    skusAllData = enriched;
 
-    skusData = enriched;
-    sortState.skus = { col: null, dir: 1 };
-    updateSortHeaders('skus-table', 'skus', null);
-    renderSkusRows(enriched);
+    /* Populate competitor dropdown once from all active competitors */
+    const cf = $('fComp');
+    if (cf && cf.options.length === 1) {
+      if (window._allCompetitors?.length) {
+        window._allCompetitors.forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c.name; opt.textContent = c.name;
+          cf.appendChild(opt);
+        });
+      } else {
+        sb.from('competitors').select('name').eq('active',true).order('name').then(({ data }) => {
+          if (!data) return;
+          window._allCompetitors = data;
+          const cf2 = $('fComp');
+          if (!cf2) return;
+          data.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c.name; opt.textContent = c.name;
+            cf2.appendChild(opt);
+          });
+        });
+      }
+    }
 
+    applySkuCompetitorFilter();
+  } catch (e) {
+    $('sku-tbody').innerHTML = `<tr><td colspan="11" style="color:var(--red);padding:8px">${e.message}</td></tr>`;
+  }
+}
+
+function applySkuCompetitorFilter() {
+  const comp = $('fComp')?.value || '';
+  const rows = comp ? skusAllData.filter(r => r.competitor_name === comp) : skusAllData;
+
+  $('skus-sub').textContent = comp
+    ? `${rows.length.toLocaleString()} of ${skusAllData.length.toLocaleString()} SKUs matched by ${comp}`
+    : `${skuTotal.toLocaleString()} SKUs`;
+
+  if (!rows.length) {
+    $('sku-tbody').innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--t2);padding:20px">No SKUs matched by this competitor</td></tr>';
+    $('sku-pagination').innerHTML = '';
+    return;
+  }
+
+  skusData = rows;
+  sortState.skus = { col: null, dir: 1 };
+  updateSortHeaders('skus-table', 'skus', null);
+  renderSkusRows(rows);
+
+  if (comp) {
+    $('sku-pagination').innerHTML = `<span style="color:var(--t2)">${rows.length.toLocaleString()} SKUs matched by ${comp}</span><span></span>`;
+  } else {
     const from = (skuPage-1)*skuLimit+1, to = (skuPage-1)*skuLimit+rows.length;
     $('sku-pagination').innerHTML = `
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -1438,12 +1491,15 @@ async function loadSKUs() {
         ${skuPage>1?`<button class="btn sm" onclick="skuPage--;loadSKUs()">← Prev</button>`:''}
         ${rows.length===skuLimit?`<button class="btn sm" onclick="skuPage++;loadSKUs()">Next →</button>`:''}
       </div>`;
-  } catch (e) {
-    $('sku-tbody').innerHTML = `<tr><td colspan="11" style="color:var(--red);padding:8px">${e.message}</td></tr>`;
   }
 }
 
-function filterSKUs() { skuPage = 1; loadSKUs(); }
+function filterSKUs() {
+  const comp = $('fComp')?.value || '';
+  if (comp && skusAllData.length) { applySkuCompetitorFilter(); return; }
+  skuPage = 1;
+  loadSKUs();
+}
 
 /* ════════════════════════════════════════
    REVIEW QUEUE
@@ -2610,7 +2666,7 @@ function renderSkusRows(rows) {
       <td>${confWidget(r.confidence)}</td>
       <td>${stockBadge(r.availability)}</td>
       <td style="color:var(--t3)">${ts(r.scraped_at)}</td>
-      <td>→</td>
+      <td style="white-space:nowrap"><button class="btn sm ghost" onclick="event.stopPropagation();openDrawer('${r.sku_id}','${(r.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(r.our_price)}','skus')" style="font-size:11px;padding:4px 8px">Quick view</button></td>
     </tr>`;
   }).join('');
 }
