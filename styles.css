@@ -354,19 +354,29 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
 .auth-link{background:none;border:none;color:var(--blu);cursor:pointer;font-size:14px;font-family:inherit;text-decoration:underline;text-decoration-color:rgba(24,95,165,.3);margin-top:8px;display:block}
 
 /* ── Mobile sidebar ── */
-.mob-hamburger{display:none;background:none;border:none;cursor:pointer;color:rgba(255,255,255,.65);padding:4px;border-radius:4px;align-items:center;justify-content:center}
+.mob-hamburger{display:none;background:none;border:none;cursor:pointer;color:rgba(255,255,255,.65);padding:6px;border-radius:4px;align-items:center;justify-content:center;flex-shrink:0}
 .mob-hamburger:hover{background:rgba(255,255,255,.1)}
-.sidebar-overlay{display:none;position:fixed;top:48px;left:0;right:0;bottom:0;background:rgba(0,0,0,.4);z-index:9;backdrop-filter:blur(2px)}
+.sidebar-overlay{display:none;position:fixed;top:48px;left:0;right:0;bottom:0;background:rgba(0,0,0,.4);z-index:9}
 .sidebar-overlay.open{display:block}
 @media(max-width:768px){
   .shell{grid-template-columns:1fr !important;grid-template-rows:48px 1fr}
   .shell.nav-collapsed{grid-template-columns:1fr !important}
-  .sidebar{position:fixed;top:48px;left:0;height:calc(100vh - 48px);z-index:10;width:220px !important;transform:translateX(-100%);transition:transform .22s cubic-bezier(.4,0,.2,1);box-shadow:4px 0 24px rgba(0,0,0,.18)}
+  /* Sidebar slides in from left below the topbar */
+  .sidebar{position:fixed;top:48px;left:0;height:calc(100vh - 48px);z-index:10;width:240px !important;transform:translateX(-100%);transition:transform .22s cubic-bezier(.4,0,.2,1);box-shadow:4px 0 24px rgba(0,0,0,.18)}
   .sidebar.mob-open{transform:translateX(0)}
-  .sidebar.nav-collapsed{transform:translateX(-100%)}
+  /* nav-collapsed has no effect on mobile — sidebar is either open or off-screen */
+  .sidebar.nav-collapsed{width:240px !important;transform:translateX(-100%)}
+  .sidebar.nav-collapsed.mob-open{transform:translateX(0)}
+  .sidebar.nav-collapsed .nav-label{opacity:1;max-width:160px}
+  .sidebar.nav-collapsed .nav-sect{opacity:1;height:auto;padding:12px 12px 3px}
+  .sidebar.nav-collapsed .nbadge{opacity:1;width:auto;padding:1px 6px}
+  .sidebar.nav-collapsed .sidebar-foot{opacity:1;height:auto;padding:12px;border-top:1px solid var(--border)}
+  /* Logo: nav-collapsed does not hide the full logo on mobile */
+  .shell.nav-collapsed .logo-full{opacity:1;width:auto}
+  .shell.nav-collapsed .logo-icon{opacity:0;width:0}
+  /* Show hamburger, hide desktop collapse button */
   .mob-hamburger{display:inline-flex}
-  .sidebar-toggle-btn{display:none}
-  .topbar-product{display:block}
+  .sidebar-toggle-btn{display:none !important}
 }
 .loading{display:flex;align-items:center;justify-content:center;padding:40px;color:var(--t2);gap:8px;font-size:12px}
 .spinner{width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--orange);border-radius:50%;animation:spin .8s linear infinite}
