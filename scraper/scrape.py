@@ -4,8 +4,12 @@ scraper/scrape.py
 Automated price scraper — runs every 3 days via GitHub Actions.
 
 ONLY visits URLs already confirmed in competitor_matches
-(match_status = 'matched'). Never calls a search engine.
+(match_status = 'matched' OR 'amended'). Never calls a search engine.
 Fast, reliable, and free of CAPTCHA risk.
+
+'amended' rows are URLs manually corrected by a reviewer — they get scraped
+on the next run and, on success, transition to 'matched'. On any price
+result (even OOS), awaiting_scrape is reset to false.
 
 Per confirmed URL:
   - Scrapes price, VAT basis, availability, pack qty
@@ -454,8 +458,9 @@ async def scrape_match(
     match: dict,
     run_id: str,
 ) -> dict:
-    domain = competitor["domain"].lstrip("www.")
-    url    = match["competitor_url"]
+    domain         = competitor["domain"].lstrip("www.")
+    url            = match["competitor_url"]
+    was_amended    = match.get("match_status") == "amended"
 
     snapshot = {
         "sku_id":              sku["sku_id"],
@@ -473,6 +478,7 @@ async def scrape_match(
         "confidence":          match.get("confidence"),
         "error_message":       None,
         "_comp_title":         match.get("competitor_title"),
+        "_was_amended":        was_amended,
     }
 
     ctx = await new_stealth_context(browser)
@@ -520,6 +526,7 @@ async def scrape_match(
                     f"£{price:>7.2f} ({snapshot['competitor_vat']:7s}) "
                     f"our_qty={our_qty} comp_qty={comp_qty} "
                     f"→ per-unit diff {normalised_diff:+.1f}%"
+                    f"{' [amended→matched]' if was_amended else ''}"
                 )
             else:
                 normalised_diff = diff_pct(our_price, their_ex)
@@ -527,6 +534,7 @@ async def scrape_match(
                     f"  ✓ {competitor['domain']:35s} "
                     f"£{price:>7.2f} ({snapshot['competitor_vat']:7s}) "
                     f"diff {normalised_diff:+.1f}%"
+                    f"{' [amended→matched]' if was_amended else ''}"
                 )
 
             snapshot["competitor_price"]    = price
@@ -536,6 +544,7 @@ async def scrape_match(
             log.info(
                 f"  ✗ {competitor['domain']:35s} "
                 f"no price — {result.get('error', '')[:60]}"
+                f"{' [amended, no price found]' if was_amended else ''}"
             )
 
     except Exception as e:
@@ -560,11 +569,18 @@ async def run_scraper(trigger: str = "scheduled"):
 
     specific_skus = [s.strip() for s in os.getenv("SCRAPER_SKUS", "").split(",") if s.strip()]
 
-    # Load confirmed matches only
+    # ── Load confirmed matches AND amended matches ──────────────────────────────
+    # 'amended' rows are URLs manually corrected by a reviewer awaiting first scrape.
+    # They are scraped here exactly like 'matched' rows; on success they transition
+    # to 'matched' and awaiting_scrape is cleared.
     query = (
         sb.table("competitor_matches")
-        .select("sku_id, competitor_id, competitor_url, competitor_title, confidence, match_status, updated_at, competitor_image_url")
-        .eq("match_status", "matched")
+        .select(
+            "sku_id, competitor_id, competitor_url, competitor_title, "
+            "confidence, match_status, updated_at, competitor_image_url, "
+            "previous_url, awaiting_scrape"
+        )
+        .in_("match_status", ["matched", "amended"])
         .not_.is_("competitor_url", "null")
     )
     if specific_skus:
@@ -572,14 +588,18 @@ async def run_scraper(trigger: str = "scheduled"):
     matched_rows = query.execute().data
 
     if not matched_rows:
-        log.info("No confirmed matches found — nothing to scrape. Run discover.py first, then approve matches in the review queue.")
+        log.info("No confirmed/amended matches found — nothing to scrape.")
         sb.table("sync_runs").update({
             "status": "complete", "completed_at": datetime.now(timezone.utc).isoformat(),
             "skus_attempted": 0, "skus_succeeded": 0, "skus_failed": 0, "oos_flagged": 0,
         }).eq("id", run_id).execute()
         return
 
-    log.info(f"Scrape run {run_id} | {len(matched_rows)} confirmed matches | workers={WORKERS}")
+    amended_count = sum(1 for r in matched_rows if r["match_status"] == "amended")
+    log.info(
+        f"Scrape run {run_id} | {len(matched_rows)} confirmed matches "
+        f"({amended_count} amended/awaiting rescrape) | workers={WORKERS}"
+    )
 
     comps = {
         c["id"]: c for c in
@@ -592,7 +612,6 @@ async def run_scraper(trigger: str = "scheduled"):
         for row in sb.table("skus").select("*").in_("sku_id", matched_sku_ids[i:i+200]).execute().data:
             skus[row["sku_id"]] = row
 
-    # Build work items — only pairs where both sku and competitor exist
     work_items = [
         (skus[r["sku_id"]], comps[r["competitor_id"]], r)
         for r in matched_rows
@@ -601,12 +620,13 @@ async def run_scraper(trigger: str = "scheduled"):
 
     log.info(f"  {len(work_items)} work items")
 
-    stats = {"attempted": 0, "succeeded": 0, "failed": 0, "oos": 0}
+    stats = {"attempted": 0, "succeeded": 0, "failed": 0, "oos": 0, "amended_promoted": 0}
     sem   = asyncio.Semaphore(WORKERS)
 
     async def process_item(sku: dict, comp: dict, match: dict):
         async with sem:
             stats["attempted"] += 1
+            was_amended = match.get("match_status") == "amended"
             try:
                 snap = await scrape_match(browser, sb, sku, comp, match, run_id)
                 write_snapshot(sb, snap)
@@ -619,14 +639,36 @@ async def run_scraper(trigger: str = "scheduled"):
                     if snap["availability"] == "out_of_stock":
                         stats["oos"] += 1
 
-                # Update competitor_matches with refreshed title and image if we got them
-                updates = {"updated_at": datetime.now(timezone.utc).isoformat()}
+                # Build the competitor_matches update payload
+                match_updates = {"updated_at": datetime.now(timezone.utc).isoformat()}
+
                 if snap.get("_comp_title"):
-                    updates["competitor_title"] = snap["_comp_title"]
+                    match_updates["competitor_title"] = snap["_comp_title"]
                 if snap.get("_og_image"):
-                    updates["competitor_image_url"] = snap["_og_image"]
-                if len(updates) > 1:
-                    sb.table("competitor_matches").update(updates).eq(
+                    match_updates["competitor_image_url"] = snap["_og_image"]
+
+                # ── Promote 'amended' → 'matched' once we get any usable result ──
+                # We promote even on OOS — the URL is valid, price data exists.
+                # We only leave it as 'amended' if the page errored or was unavailable
+                # (suggesting the URL might still be wrong).
+                if was_amended:
+                    if snap["availability"] not in ("error", "unavailable"):
+                        match_updates["match_status"]    = "matched"
+                        match_updates["awaiting_scrape"] = False
+                        stats["amended_promoted"] += 1
+                        log.info(
+                            f"  ↑ {sku['sku_id']} × {comp['domain']} "
+                            f"amended→matched (availability={snap['availability']})"
+                        )
+                    else:
+                        # URL still looks bad — keep as amended so reviewer can see it
+                        log.warning(
+                            f"  ⚠ {sku['sku_id']} × {comp['domain']} "
+                            f"amended but page error/unavailable — keeping as amended"
+                        )
+
+                if len(match_updates) > 1:
+                    sb.table("competitor_matches").update(match_updates).eq(
                         "sku_id", sku["sku_id"]
                     ).eq("competitor_id", comp["id"]).execute()
 
@@ -647,7 +689,11 @@ async def run_scraper(trigger: str = "scheduled"):
         "skus_failed": stats["failed"], "oos_flagged": stats["oos"],
     }).eq("id", run_id).execute()
 
-    log.info(f"Run {run_id} complete — {stats}")
+    log.info(
+        f"Run {run_id} complete — attempted={stats['attempted']} "
+        f"succeeded={stats['succeeded']} failed={stats['failed']} "
+        f"oos={stats['oos']} amended_promoted={stats['amended_promoted']}"
+    )
 
 
 if __name__ == "__main__":
