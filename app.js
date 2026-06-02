@@ -8,7 +8,6 @@ const ALLOWED_DOMAINS = ['ukpos.com'];
 
 let sb, currentUser, currentProfile;
 let skuPage = 1, skuLimit = 50, skuTotal = 0;
-let reviewPage = 1, reviewLimit = 50;
 let alertTab = 'crit';
 let currentCompId = null, currentCompName = null, currentCompSlug = null;
 let currentSkuId = null;
@@ -16,7 +15,6 @@ let compViewMode = 'grid';
 let compSkusAll = [], compSkusFiltered = [];
 let drawerSkuId = null, drawerFromPanel = null;
 let distChart = null;
-let appBootstrapped = false; // true after first sign-in load; gates redundant alerts re-fetch
 
 /* Configurable thresholds — loaded from localStorage */
 let T = { red: 10, amb: 5, par: 2 };
@@ -33,6 +31,65 @@ function applyThresholdCSS() {
   document.getElementById('thresh-red-label2') && (document.getElementById('thresh-red-label2').textContent = T.red);
   document.getElementById('thresh-amb-label') && (document.getElementById('thresh-amb-label').textContent = T.amb);
 }
+
+function isMobile() { return window.innerWidth <= 768; }
+
+function setTopbarLogo(collapsed) {
+  const el = document.getElementById('topbar-logo');
+  if (!el) return;
+  const src = (!collapsed || isMobile()) ? 'logo-full.png' : 'logo-icon.png';
+  const img = new Image();
+  img.alt = 'UKPOS';
+  img.style.cssText = 'height:22px;width:auto;display:block';
+  img.onload  = () => { el.innerHTML = ''; el.appendChild(img); };
+  img.onerror = () => { el.innerHTML = ''; };
+  img.src = src;
+}
+
+function toggleSidebar() {
+  const shell     = $('view-app');
+  const icon      = $('sidebar-toggle-icon');
+  const btn       = $('sidebar-toggle-btn');
+  const collapsed = shell.classList.toggle('nav-collapsed');
+  icon.className  = collapsed ? 'ti ti-layout-sidebar-left-expand' : 'ti ti-layout-sidebar-left-collapse';
+  btn.title       = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+  setTopbarLogo(collapsed);
+  try { localStorage.setItem('pw_sidebar_collapsed', collapsed ? '1' : '0'); } catch(e) {}
+}
+
+function toggleMobileSidebar() {
+  const sidebar = $('sidebar');
+  const overlay = $('sidebar-overlay');
+  const icon    = $('mob-hamburger-icon');
+  const isOpen  = sidebar.classList.toggle('mob-open');
+  overlay.classList.toggle('open', isOpen);
+  if (icon) icon.className = isOpen ? 'ti ti-x' : 'ti ti-menu-2';
+}
+
+document.addEventListener('click', e => {
+  if (e.target.closest('.nav-item') && $('sidebar')?.classList.contains('mob-open')) {
+    toggleMobileSidebar();
+  }
+});
+
+(function initSidebar() {
+  try {
+    const wasCollapsed = !isMobile() && localStorage.getItem('pw_sidebar_collapsed') === '1';
+    if (wasCollapsed) {
+      const shell = document.getElementById('view-app');
+      const icon  = document.getElementById('sidebar-toggle-icon');
+      const btn   = document.getElementById('sidebar-toggle-btn');
+      if (shell) shell.classList.add('nav-collapsed');
+      if (icon)  icon.className = 'ti ti-layout-sidebar-left-expand';
+      if (btn)   btn.title = 'Expand sidebar';
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => setTopbarLogo(wasCollapsed));
+    } else {
+      setTopbarLogo(wasCollapsed);
+    }
+  } catch(e) { setTopbarLogo(false); }
+})();
 
 /* ════════════════════════════════════════
    HELPERS
@@ -55,6 +112,23 @@ function debounce(fn, ms) {
   return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
 }
 
+function matchStatusMini(ms) {
+  const parts = [];
+  if (ms.human    > 0) parts.push(`<span style="display:inline-flex;align-items:center;gap:2px;background:var(--gb);color:var(--grn);border-radius:4px;padding:1px 5px;font-size:11px;font-weight:500" title="${ms.human} human verified"><i class="ti ti-user-check" style="font-size:11px"></i>${ms.human}</span>`);
+  if (ms.auto     > 0) parts.push(`<span style="display:inline-flex;align-items:center;gap:2px;background:var(--bb);color:var(--blu);border-radius:4px;padding:1px 5px;font-size:11px" title="${ms.auto} AI matched"><i class="ti ti-robot" style="font-size:11px"></i>${ms.auto}</span>`);
+  if (ms.review   > 0) parts.push(`<span style="display:inline-flex;align-items:center;gap:2px;background:var(--ab);color:var(--amb);border-radius:4px;padding:1px 5px;font-size:11px" title="${ms.review} need review"><i class="ti ti-eye" style="font-size:11px"></i>${ms.review}</span>`);
+  if (ms.rejected > 0) parts.push(`<span style="display:inline-flex;align-items:center;gap:2px;background:var(--bg);color:var(--t3);border-radius:4px;padding:1px 5px;font-size:11px" title="${ms.rejected} rejected"><i class="ti ti-x" style="font-size:11px"></i>${ms.rejected}</span>`);
+  return parts.length ? `<div style="display:flex;gap:3px;flex-wrap:wrap">${parts.join('')}</div>` : '<span style="color:var(--t3);font-size:12px">—</span>';
+}
+
+function thumbUrl(url, w=120, h=120) {
+  if (!url) return '';
+  if (url.includes('supabase.co/storage/v1/object/public/')) {
+    return `${url}?width=${w}&height=${h}&resize=contain&quality=80`;
+  }
+  return url;
+}
+
 function ts(dt) {
   if (!dt) return '—';
   const d = new Date(dt);
@@ -72,13 +146,6 @@ function ts(dt) {
 function fmtPrice(p) {
   if (p === null || p === undefined) return '—';
   return '£' + parseFloat(p).toFixed(2);
-}
-
-function perUnitLabel(exPrice, qty) {
-  if (!exPrice || !qty || qty <= 1) return '';
-  const per = exPrice / qty;
-  const txt = per < 1 ? `£${per.toFixed(3)}` : `£${per.toFixed(2)}`;
-  return `<span style="font-size:10px;color:var(--t3);white-space:nowrap">${txt}/unit ×${qty}</span>`;
 }
 
 function normalisePrice(price, vat) {
@@ -151,39 +218,17 @@ function slugify(name) {
 let cachedToken = null;
 
 async function getToken() {
-  let { data: { session } } = await sb.auth.getSession();
-  const nearExpiry = session?.expires_at
-    ? (session.expires_at * 1000 - Date.now()) < 60_000
-    : false;
-  if (!session || nearExpiry) {
-    const { data } = await sb.auth.refreshSession();
-    if (data?.session) session = data.session;
-  }
+  if (cachedToken) return cachedToken;
+  const { data: { session } } = await sb.auth.getSession();
   cachedToken = session?.access_token || null;
   return cachedToken;
 }
 
-async function ensureFreshSession() {
-  const { data: { session } } = await sb.auth.getSession();
-  const nearExpiry = session?.expires_at
-    ? (session.expires_at * 1000 - Date.now()) < 60_000
-    : true;
-  if (nearExpiry) {
-    const { data } = await sb.auth.refreshSession();
-    cachedToken = data?.session?.access_token || null;
-  }
-}
-
-async function authFetch(path, opts = {}, _retried = false) {
+async function authFetch(path, opts = {}) {
   opts.headers = opts.headers || {};
   const token = await getToken();
   if (token) opts.headers['Authorization'] = 'Bearer ' + token;
   const res = await fetch(API_BASE + path, opts);
-  if (res.status === 401 && !_retried) {
-    cachedToken = null;
-    await sb.auth.refreshSession();
-    return authFetch(path, opts, true);
-  }
   if (!res.ok) throw new Error(`API ${path} → ${res.status}`);
   return res.json();
 }
@@ -242,34 +287,18 @@ function go(name, opts = {}) {
   }[name];
   if (navKey && $('nav-' + navKey)) $('nav-' + navKey).classList.add('active');
 
-  /* FIX 1 — reset panel content to spinner before every load so stale data
-     is never shown while the new fetch is in flight */
   if (name === 'skus') {
-    const q = $('skuQ'); if (q && q.value === (currentUser?.email||'')) q.value = '';
-    $('sku-tbody').innerHTML = '<tr><td colspan="10"><div class="loading"><span class="spinner"></span></div></td></tr>';
-    loadSKUs();
+    const q = $('skuQ');
+    if (q) q.value = '';
+    if (!skusLoaded) { skusLoaded = true; loadSKUs(); }
   }
-  if (name === 'alerts')      { if (appBootstrapped) loadDashboard(); }
-  if (name === 'review')      {
-    $('review-list').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
-    loadReview();
-  }
+  if (name === 'review')      loadReview();
   if (name === 'bycat')       loadByCategory();
-  if (name === 'bycomp')      {
-    $('bycomp-tbody').innerHTML = '<tr><td colspan="8"><div class="loading"><span class="spinner"></span></div></td></tr>';
-    loadByCompetitor();
-  }
-  if (name === 'schedule')    {
-    $('run-history').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
-    loadRuns();
-  }
+  if (name === 'bycomp')      loadByCompetitor();
+  if (name === 'schedule')    loadRuns();
   if (name === 'settings')    { goSett('configurables'); loadCompetitorSettings(); loadUsers(); }
   if (name === 'comp-detail') { loadCompDetail(opts); }
-  if (name === 'sku-detail')  {
-    $('sku-hero-content').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
-    $('sku-comp-tbody').innerHTML = '<tr><td colspan="10"><div class="loading"><span class="spinner"></span></div></td></tr>';
-    loadSkuDetail(opts);
-  }
+  if (name === 'sku-detail')  { loadSkuDetail(opts); }
 }
 
 function restoreRoute() {
@@ -300,37 +329,33 @@ function goSett(tab) {
   const sn = $('sn-' + tab); if (sn) sn.classList.add('active');
 }
 
+async function signOut() {
+  if (sb) await sb.auth.signOut();
+  window.location.href = 'login.html';
+}
+
 /* ════════════════════════════════════════
-   AUTH
+   SESSION GUARD
 ════════════════════════════════════════ */
-function showView(v) {
-  ['view-loading','view-login','view-pending','view-rejected','view-app'].forEach(id => {
-    const el = $(id);
-    if (!el) return;
-    if (id !== v) { el.style.display = 'none'; return; }
-    el.style.display = (id === 'view-app') ? 'grid' : '';
-  });
-}
-
-function showAuthTab(which) {
-  $('tab-login').classList.toggle('active', which === 'login');
-  $('tab-register').classList.toggle('active', which === 'register');
-  $('form-login').style.display    = which === 'login'    ? '' : 'none';
-  $('form-register').style.display = which === 'register' ? '' : 'none';
-  $('login-msg').innerHTML = '';
-  $('reg-msg').innerHTML = '';
-}
-
 async function bootstrap() {
   sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
   const { data: { session } } = await sb.auth.getSession();
-  if (!session) { showView('view-login'); return; }
+  if (!session) {
+    sessionStorage.setItem('pw_redirect', window.location.href);
+    window.location.href = 'login.html';
+    return;
+  }
   await onSignedIn(session);
 
   sb.auth.onAuthStateChange(async (event, session) => {
     cachedToken = session?.access_token || null;
-    if (event === 'SIGNED_OUT' || !session) { currentUser = null; currentProfile = null; showView('view-login'); return; }
-    if (['SIGNED_IN','TOKEN_REFRESHED','USER_UPDATED','INITIAL_SESSION'].includes(event)) await onSignedIn(session);
+    if (event === 'SIGNED_OUT' || !session) {
+      window.location.href = 'login.html';
+      return;
+    }
+    if (['SIGNED_IN','TOKEN_REFRESHED','USER_UPDATED','INITIAL_SESSION'].includes(event)) {
+      await onSignedIn(session);
+    }
   });
 }
 
@@ -338,23 +363,22 @@ async function onSignedIn(session) {
   currentUser  = session.user;
   cachedToken  = session.access_token || null;
   const { data: profiles } = await sb.from('profiles').select('*').eq('id', session.user.id).limit(1);
-  if (!profiles || !profiles.length) { showView('view-pending'); return; }
+  if (!profiles?.length || profiles[0].status === 'pending' || profiles[0].status === 'rejected') {
+    window.location.href = 'login.html';
+    return;
+  }
   currentProfile = profiles[0];
   $('header-email').textContent = currentProfile.email || '—';
   $('ma-email').value = currentProfile.email || '';
   $('ma-name').value  = currentProfile.full_name || '';
 
-  if (currentProfile.status === 'pending')  { showView('view-pending'); return; }
-  if (currentProfile.status === 'rejected') { showView('view-rejected'); return; }
-
-  showView('view-app');
+  $('view-app').style.display = 'grid';
   if (currentProfile.role === 'super_admin') {
     const usersTab = $('sn-users');
     if (usersTab) usersTab.style.display = '';
   }
   loadDashboard();
   restoreRoute();
-  appBootstrapped = true;
   if (!allSkus.length) {
     sb.from('skus')
       .select('sku_id,short_title,price_ex_vat,product_url,availability,cat_l4,cat_l5,image_url,slug')
@@ -365,44 +389,6 @@ async function onSignedIn(session) {
   setInterval(() => { if ($('p-alerts').classList.contains('active')) loadDashboard(); }, 5 * 60 * 1000);
 }
 
-async function handleLogin(e) {
-  e.preventDefault();
-  $('login-btn').disabled = true;
-  const { error } = await sb.auth.signInWithPassword({ email: $('login-email').value.trim(), password: $('login-password').value });
-  $('login-btn').disabled = false;
-  if (error) showMsg('login-msg', error.message, 'err');
-}
-
-async function handleForgotPassword() {
-  const email = $('login-email').value.trim();
-  if (!email) { showMsg('login-msg', 'Enter your email above first.', 'info'); return; }
-  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + '/' });
-  if (error) showMsg('login-msg', error.message, 'err');
-  else showMsg('login-msg', 'Check your inbox for a reset link.', 'ok');
-}
-
-async function handleRequestAccess(e) {
-  e.preventDefault();
-  $('reg-btn').disabled = true;
-  const email = $('reg-email').value.trim().toLowerCase();
-  const full_name = $('reg-name').value.trim();
-  const domain = email.split('@')[1] || '';
-  if (!ALLOWED_DOMAINS.includes(domain)) {
-    showMsg('reg-msg', 'Only @ukpos.com email addresses are permitted.', 'err');
-    $('reg-btn').disabled = false;
-    return;
-  }
-  const { error } = await sb.from('access_requests').upsert({ email, full_name }, { onConflict: 'email' });
-  $('reg-btn').disabled = false;
-  if (error) { showMsg('reg-msg', error.message || 'Request failed.', 'err'); return; }
-  showMsg('reg-msg', 'Request submitted — you will be notified once approved.', 'ok');
-  $('form-register').reset();
-}
-
-async function signOut() {
-  if (sb) await sb.auth.signOut();
-}
-
 function openMyAccount() { go('settings'); goSett('account'); }
 
 async function saveMyAccount() {
@@ -410,7 +396,6 @@ async function saveMyAccount() {
   const pw   = $('ma-password').value;
   $('ma-msg').style.display = 'none';
   try {
-    await ensureFreshSession();
     const { error: dbErr } = await sb.from('profiles').update({ full_name: name }).eq('id', currentProfile.id);
     if (dbErr) throw new Error(dbErr.message);
     if (pw) {
@@ -471,12 +456,6 @@ async function loadDashboard() {
     if (d.alerts?.length) $('alert-ts').textContent = `— ${d.alerts.length} active`;
     renderWorstTable(d.worst || []);
     buildDistChart(m);
-
-    const matched = d.matched_count || 0;
-    const total   = d.match_count   || 0;
-    $('review-confirmed').textContent = matched.toLocaleString();
-    $('review-total').textContent     = total.toLocaleString();
-    if (total > 0) $('review-note').style.display = '';
 
   } catch (e) {
     console.error('Dashboard load error:', e);
@@ -630,6 +609,8 @@ function buildDistChart(m) {
 /* ════════════════════════════════════════
    SKU TABLE
 ════════════════════════════════════════ */
+let skusAllData = [];
+
 async function loadSKUs() {
   const q     = $('skuQ')?.value || '';
   const diff  = $('fDiff')?.value || '';
@@ -646,19 +627,102 @@ async function loadSKUs() {
     const rows = d.data || [];
     if (d.total !== undefined) skuTotal = d.total;
     else if (rows.length < skuLimit) skuTotal = (skuPage-1)*skuLimit + rows.length;
-    $('skus-sub').textContent = `${skuTotal.toLocaleString()} SKUs`;
 
     if (!rows.length) {
-      $('sku-tbody').innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--t2);padding:20px">No matches found</td></tr>';
+      $('skus-sub').textContent = `${skuTotal.toLocaleString()} SKUs`;
+      $('sku-tbody').innerHTML = '<tr><td colspan="13" style="text-align:center;color:var(--t2);padding:20px">No matches found</td></tr>';
       $('sku-pagination').innerHTML = '';
       return;
     }
 
-    skusData = rows;
-    sortState.skus = { col: null, dir: 1 };
-    updateSortHeaders('skus-table', 'skus', null);
-    renderSkusRows(rows);
+    const skuMetaMap = {};
+    (allSkus || []).forEach(s => { skuMetaMap[s.sku_id] = { image_url: s.image_url, unit_qty: s.unit_qty }; });
+    const enriched = rows.map(r => ({
+      ...r,
+      image_url: skuMetaMap[r.sku_id]?.image_url || r.image_url || null,
+      unit_qty:  skuMetaMap[r.sku_id]?.unit_qty  || r.unit_qty  || 1,
+    }));
+    skusAllData = enriched;
 
+    if (!window._matchSummary) {
+      sb.from('competitor_matches')
+        .select('sku_id,match_source,match_status,reviewed_at,human_reviewed')
+        .then(({ data: cm }) => {
+          if (!cm) return;
+          const summary = {};
+          cm.forEach(r => {
+            if (!summary[r.sku_id]) summary[r.sku_id] = { human:0, auto:0, review:0, rejected:0, last_reviewed:null };
+            const s = summary[r.sku_id];
+            if (r.match_status === 'rejected')                                    s.rejected++;
+            else if (r.match_source === 'human' || r.human_reviewed)              s.human++;
+            else if (r.match_source === 'scraper_auto' || r.match_status === 'matched') s.auto++;
+            else                                                                   s.review++;
+            if (r.reviewed_at && (!s.last_reviewed || r.reviewed_at > s.last_reviewed))
+              s.last_reviewed = r.reviewed_at;
+          });
+          window._matchSummary = summary;
+          if ($('p-skus')?.classList.contains('active') && skusData.length) {
+            const enriched2 = skusData.map(r => ({ ...r, _ms: summary[r.sku_id] || null }));
+            skusData = enriched2;
+            renderSkusRows(enriched2);
+          }
+        });
+    }
+
+    const enrichedWithMs = enriched.map(r => ({ ...r, _ms: window._matchSummary?.[r.sku_id] || null }));
+    skusAllData = enrichedWithMs;
+
+    const cf = $('fComp');
+    if (cf && cf.options.length === 1) {
+      if (window._allCompetitors?.length) {
+        window._allCompetitors.forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c.name; opt.textContent = c.name;
+          cf.appendChild(opt);
+        });
+      } else {
+        sb.from('competitors').select('name').eq('active',true).order('name').then(({ data }) => {
+          if (!data) return;
+          window._allCompetitors = data;
+          const cf2 = $('fComp');
+          if (!cf2) return;
+          data.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c.name; opt.textContent = c.name;
+            cf2.appendChild(opt);
+          });
+        });
+      }
+    }
+
+    applySkuCompetitorFilter();
+  } catch (e) {
+    $('sku-tbody').innerHTML = `<tr><td colspan="13" style="color:var(--red);padding:8px">${e.message}</td></tr>`;
+  }
+}
+
+function applySkuCompetitorFilter() {
+  const comp = $('fComp')?.value || '';
+  const rows = comp ? skusAllData.filter(r => r.competitor_name === comp) : skusAllData;
+
+  $('skus-sub').textContent = comp
+    ? `${rows.length.toLocaleString()} of ${skusAllData.length.toLocaleString()} SKUs matched by ${comp}`
+    : `${skuTotal.toLocaleString()} SKUs`;
+
+  if (!rows.length) {
+    $('sku-tbody').innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--t2);padding:20px">No SKUs matched by this competitor</td></tr>';
+    $('sku-pagination').innerHTML = '';
+    return;
+  }
+
+  skusData = rows;
+  sortState.skus = { col: null, dir: 1 };
+  updateSortHeaders('skus-table', 'skus', null);
+  renderSkusRows(rows);
+
+  if (comp) {
+    $('sku-pagination').innerHTML = `<span style="color:var(--t2)">${rows.length.toLocaleString()} SKUs matched by ${comp}</span><span></span>`;
+  } else {
     const from = (skuPage-1)*skuLimit+1, to = (skuPage-1)*skuLimit+rows.length;
     $('sku-pagination').innerHTML = `
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -673,230 +737,388 @@ async function loadSKUs() {
         ${skuPage>1?`<button class="btn sm" onclick="skuPage--;loadSKUs()">← Prev</button>`:''}
         ${rows.length===skuLimit?`<button class="btn sm" onclick="skuPage++;loadSKUs()">Next →</button>`:''}
       </div>`;
-  } catch (e) {
-    $('sku-tbody').innerHTML = `<tr><td colspan="9" style="color:var(--red);padding:8px">${e.message}</td></tr>`;
   }
 }
 
-function filterSKUs() { skuPage = 1; loadSKUs(); }
+function filterSKUs() {
+  const comp = $('fComp')?.value || '';
+  if (comp && skusAllData.length) { applySkuCompetitorFilter(); return; }
+  skuPage = 1;
+  loadSKUs();
+}
 
 /* ════════════════════════════════════════
-   REVIEW QUEUE
+   MATCH MANAGER
 ════════════════════════════════════════ */
+let matchTab     = 'review';
+let reviewPage   = 1;
+let reviewLimit  = 50;
 let reviewAllRows = [];
-/* FIX 3a — sort state */
-let reviewSortCol = 'confidence';
-let reviewSortDir = 1; // 1 = asc, -1 = desc
+let reviewData    = [];
 
-async function loadReview() {
-  $('review-list').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
-  try {
-    const d = await authFetch('/review?page=1&limit=500');
-    const matches = d.data || [];
-
-    let snapMap = {};
-    if (matches.length) {
-      const skuIds = [...new Set(matches.map(m => m.sku_id))];
-      const { data: snaps } = await sb.from('latest_snapshots')
-        .select('sku_id,competitor_id,competitor_price,competitor_vat,availability')
-        .in('sku_id', skuIds);
-      (snaps || []).forEach(s => { snapMap[`${s.sku_id}__${s.competitor_id}`] = s; });
-    }
-
-    reviewAllRows = matches.map(m => ({
-      ...m,
-      _snap: snapMap[`${m.sku_id}__${m.competitor_id}`] || null,
-    }));
-
-    const cf = $('review-comp-filter');
-    if (cf && cf.options.length === 1) {
-      const { data: allComps } = await sb.from('competitors').select('id,name').eq('active',true).order('name');
-      (allComps || []).forEach(c => {
-        const opt = document.createElement('option');
-        opt.value = c.id; opt.textContent = c.name;
-        cf.appendChild(opt);
-      });
-    }
-    filterReview();
-  } catch (e) {
-    $('review-list').innerHTML = `<div style="color:var(--red);padding:8px">${e.message}</div>`;
-  }
-}
-
-/* FIX 3c — sort setter */
-function setReviewSort(val) {
-  const parts = val.split('_');
-  reviewSortDir = parts.pop() === 'desc' ? -1 : 1;
-  reviewSortCol = parts.join('_');
+function setMatchTab(tab) {
+  matchTab   = tab;
   reviewPage = 1;
+  ['review','auto','human','amended','rejected'].forEach(t =>
+    $('mtab-'+t)?.classList.toggle('active', t === tab)
+  );
   filterReview();
 }
 
+async function loadReview() {
+  $('review-tbody').innerHTML = `<tr><td colspan="11"><div class="loading"><span class="spinner"></span></div></td></tr>`;
+
+  const cf = $('review-comp-filter');
+  if (cf && cf.options.length === 1) {
+    const { data: comps } = await sb.from('competitors').select('id,name').eq('active',true).order('name');
+    (comps||[]).forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.name; opt.textContent = c.name;
+      cf.appendChild(opt);
+    });
+  }
+
+  try {
+    const [{ data: matches, error: err1 }, { data: snaps, error: err2 }] = await Promise.all([
+      sb.from('competitor_matches')
+        .select(`
+          id, sku_id, competitor_id, competitor_url, competitor_title,
+          competitor_image_url, confidence, match_status, match_source,
+          human_reviewed, reviewed_at, updated_at, notes, previous_url,
+          skus!inner(sku_id, short_title, price_ex_vat, product_url, image_url, slug, unit_qty),
+          competitors!inner(name, domain, vat_status)
+        `)
+        .order('updated_at', { ascending: false })
+        .limit(3000),
+      sb.from('latest_snapshots')
+        .select('sku_id, competitor_id, competitor_price, competitor_vat, competitor_vat_default, diff_pct, diff_pct_normalised, availability, scraped_at'),
+    ]);
+
+    if (err1) throw new Error(err1.message);
+    if (err2) throw new Error(err2.message);
+
+    const snapMap = {};
+    (snaps||[]).forEach(s => { snapMap[`${s.sku_id}__${s.competitor_id}`] = s; });
+
+    reviewAllRows = (matches||[]).map(m => ({
+      ...m,
+      _snap: snapMap[`${m.sku_id}__${m.competitor_id}`] || {},
+    }));
+
+    updateMatchTabCounts();
+    filterReview();
+  } catch(e) {
+    $('review-tbody').innerHTML = `<tr><td colspan="13" style="color:var(--red);padding:8px">${e.message}</td></tr>`;
+  }
+}
+
+function updateMatchTabCounts() {
+  const counts = { review:0, auto:0, human:0, amended:0, rejected:0 };
+  reviewAllRows.forEach(r => {
+    if      (r.match_status === 'rejected')                              counts.rejected++;
+    else if (r.match_status === 'amended')                               counts.amended++;
+    else if (r.match_status === 'matched' && r.human_reviewed === true)  counts.human++;
+    else if (r.match_status === 'matched' && r.human_reviewed === false) counts.auto++;
+    else if (r.match_status === 'review'  && r.human_reviewed === false) counts.review++;
+  });
+  Object.entries(counts).forEach(([k,v]) => {
+    const el = $('mtab-n-'+k); if (el) el.textContent = v.toLocaleString();
+  });
+  const nb = $('nav-review-badge');
+  if (nb) { nb.textContent = counts.review; nb.style.display = counts.review > 0 ? '' : 'none'; }
+}
+
 function filterReview() {
-  const q    = ($('review-search')?.value || '').toLowerCase().trim();
+  const q    = ($('review-search')?.value||'').toLowerCase().trim();
   const comp = $('review-comp-filter')?.value || '';
 
-  let rows = reviewAllRows;
-  if (q) {
-    rows = rows.filter(r =>
-      r.sku_id?.toLowerCase().includes(q) ||
-      (r.skus?.short_title||'').toLowerCase().includes(q) ||
-      (r.competitors?.name||'').toLowerCase().includes(q) ||
-      (r.competitor_title||'').toLowerCase().includes(q)
-    );
-  }
-  if (comp) rows = rows.filter(r => String(r.competitor_id) === String(comp));
-
-  /* FIX 3b — sort before rendering */
-  rows = [...rows].sort((a, b) => {
-    let av, bv;
-    if (reviewSortCol === 'confidence') {
-      av = a.confidence ?? 0; bv = b.confidence ?? 0;
-    } else if (reviewSortCol === 'competitor') {
-      av = a.competitors?.name || ''; bv = b.competitors?.name || '';
-    } else if (reviewSortCol === 'sku_id') {
-      av = a.sku_id || ''; bv = b.sku_id || '';
-    } else {
-      av = a[reviewSortCol] ?? ''; bv = b[reviewSortCol] ?? '';
-    }
-    if (av < bv) return -1 * reviewSortDir;
-    if (av > bv) return  1 * reviewSortDir;
-    return 0;
+  let rows = reviewAllRows.filter(r => {
+    if (matchTab === 'rejected') return r.match_status === 'rejected';
+    if (matchTab === 'human')    return r.match_status === 'matched' && r.human_reviewed === true;
+    if (matchTab === 'auto')     return r.match_status === 'matched' && r.human_reviewed === false;
+    if (matchTab === 'amended')  return r.match_status === 'amended';
+    return r.match_status === 'review' && r.human_reviewed === false;
   });
 
-  const total   = reviewAllRows.length;
+  if (q) rows = rows.filter(r =>
+    r.sku_id?.toLowerCase().includes(q) ||
+    (r.skus?.short_title||'').toLowerCase().includes(q) ||
+    (r.competitors?.name||'').toLowerCase().includes(q) ||
+    (r.competitor_title||'').toLowerCase().includes(q)
+  );
+  if (comp) rows = rows.filter(r => r.competitors?.name === comp);
+
   const showing = rows.length;
-  $('review-sub').textContent = (q || comp)
-    ? `${showing} of ${total} matches (filtered)`
-    : `${total} matches awaiting confirmation`;
+  const tabLabel = {review:'needs review',auto:'AI matched',human:'confirmed',amended:'needs rescrape',rejected:'rejected'}[matchTab];
+  $('review-sub').textContent = (q||comp) ? `${showing} matches (filtered)` : `${showing} ${tabLabel}`;
 
   if (!rows.length) {
-    $('review-list').innerHTML = '<div style="text-align:center;color:var(--t2);padding:40px;font-size:12px">'
-      + (q || comp
-          ? '<i class="ti ti-search" style="font-size:24px;display:block;margin-bottom:8px;opacity:.3"></i>No matches for that filter'
-          : '<i class="ti ti-circle-check" style="font-size:24px;display:block;margin-bottom:8px;color:var(--grn)"></i>Queue is empty')
-      + '</div>';
+    const msgs = {
+      review:   ['ti-circle-check','var(--grn)','All caught up — no matches need review'],
+      auto:     ['ti-robot','var(--blu)','No AI-matched pairs yet'],
+      human:    ['ti-user-check','var(--grn)','No confirmed matches yet'],
+      amended:  ['ti-clock','var(--amb)','No amended URLs awaiting rescrape'],
+      rejected: ['ti-x','var(--t3)','No rejected matches'],
+    };
+    const [icon, color, text] = msgs[matchTab] || ['ti-circle-check','var(--t2)','Nothing here'];
+    $('review-tbody').innerHTML = `<tr><td colspan="13"><div style="text-align:center;color:var(--t2);padding:40px">
+      <i class="ti ${icon}" style="font-size:28px;display:block;margin-bottom:8px;color:${color}"></i>
+      ${q||comp ? 'No matches for that filter' : text}
+    </div></td></tr>`;
     $('review-pagination').innerHTML = '';
     return;
   }
 
-  const lim   = reviewLimit === 999999 ? rows.length : reviewLimit;
-  const start = (reviewPage - 1) * lim;
-  const page  = rows.slice(start, start + lim);
-  const from  = start + 1;
-  const to    = start + page.length;
+  reviewData = rows;
+  renderReviewPage();
+}
 
-  $('review-list').innerHTML = page.map(r => {
-    const sku      = r.skus || {};
-    const comp     = r.competitors || {};
-    const snap     = r._snap || {};
-    const ourUrl   = sku.product_url || (sku.slug ? `https://www.ukpos.com/${sku.slug}?vat=0` : '#');
-    const ourImg   = sku.image_url || '';
-    const compImg  = r.competitor_image_url
-      ? r.competitor_image_url
-      : `https://www.google.com/s2/favicons?domain=${comp.domain||''}&sz=64`;
-    const ourPrice = sku.price_ex_vat ? parseFloat(sku.price_ex_vat) : null;
-    const theirRaw = snap.competitor_price ? parseFloat(snap.competitor_price) : null;
-    const theirEx  = theirRaw ? normalisePrice(theirRaw, snap.competitor_vat || comp.vat_status || 'unknown') : null;
-    const compVat  = snap.competitor_vat || comp.vat_status || 'unknown';
+function renderReviewPage() {
+  const lim   = reviewLimit === 999999 ? reviewData.length : reviewLimit;
+  const start = (reviewPage-1) * lim;
+  const page  = reviewData.slice(start, start+lim);
+  const from  = start+1, to = start+page.length;
 
-    return `<div class="rev-card" id="rev-${r.id}">
-
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:6px">
-        <div style="display:flex;align-items:center;gap:8px">
-          ${confWidget(r.confidence)}
-          ${r.notes ? `<span style="font-size:10px;color:var(--t2);background:var(--bb);padding:2px 7px;border-radius:10px"><i class="ti ti-info-circle" style="font-size:10px"></i> ${r.notes}</span>` : ''}
-        </div>
-        <div style="font-size:10px;color:var(--t3)">${r.match_method||''}</div>
-      </div>
-
-      <div class="rev-pair">
-        <div class="rev-side">
-          <div class="rs-label" style="color:var(--blu)">UKPOS</div>
-          <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px">
-            <div style="width:56px;height:56px;border:1px solid var(--border);border-radius:6px;overflow:hidden;flex-shrink:0;background:var(--bb);display:flex;align-items:center;justify-content:center">
-              ${ourImg
-                ? `<img src="${ourImg}" style="width:100%;height:100%;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
-                : ''}<i class="ti ti-photo" style="font-size:20px;color:var(--t3);${ourImg?'display:none':''}"></i>
-            </div>
-            <div style="flex:1;min-width:0">
-              <a href="#sku/${r.sku_id}" onclick="event.preventDefault();go('sku-detail',{skuId:'${r.sku_id}',fromPanel:'review'})" style="font-family:'SF Mono',monospace;font-size:11px;color:var(--blu);text-decoration:none">${r.sku_id}</a>
-              <div class="rs-name" style="margin-top:2px">${sku.short_title||r.sku_id}</div>
-            </div>
-          </div>
-          <a class="rs-url" href="${ourUrl}" target="_blank" rel="noopener" title="${ourUrl}">
-            <i class="ti ti-external-link" style="font-size:10px"></i> ${ourUrl.replace('https://','').slice(0,55)}
-          </a>
-          <div class="rs-price" style="margin-top:6px">
-            ${ourPrice ? `<strong>${fmtPrice(ourPrice)}</strong> <span class="vat vex">ex-VAT</span>` : '<span style="color:var(--t3)">No price</span>'}
-          </div>
-        </div>
-
-        <div style="display:flex;align-items:center;justify-content:center;padding:0 8px;color:var(--t3);font-size:18px">⇄</div>
-
-        <div class="rev-side">
-          <div class="rs-label" style="color:var(--amb)">${comp.name||'Competitor'}</div>
-          <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px">
-            <div style="width:56px;height:56px;border:1px solid var(--border);border-radius:6px;overflow:hidden;flex-shrink:0;background:var(--bb);display:flex;align-items:center;justify-content:center">
-              ${r.competitor_image_url
-                ? `<img src="${r.competitor_image_url}" style="width:100%;height:100%;object-fit:contain" onerror="this.src='https://www.google.com/s2/favicons?domain=${comp.domain||''}&sz=64';this.style.width='32px';this.style.height='32px'">`
-                : `<img src="${compImg}" style="width:32px;height:32px;object-fit:contain" onerror="this.style.display='none'">`}
-            </div>
-            <div style="flex:1;min-width:0">
-              <div style="font-size:11px;color:var(--t2)">${comp.domain||''}</div>
-              <div class="rs-name" style="margin-top:2px">${r.competitor_title||'—'}</div>
-            </div>
-          </div>
-          <a class="rs-url" href="${r.competitor_url||'#'}" target="_blank" rel="noopener" title="${r.competitor_url||''}">
-            <i class="ti ti-external-link" style="font-size:10px"></i> ${(r.competitor_url||'No URL set').replace('https://','').slice(0,55)}
-          </a>
-          <div class="rs-price" style="margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-            ${theirEx
-              ? `<strong>${fmtPrice(theirEx)}</strong> ${vatPill(compVat)}`
-              : `<span style="color:var(--t3)">Not yet scraped</span> ${vatPill(compVat)}`}
-            ${snap.availability && snap.availability !== 'in_stock' ? stockBadge(snap.availability) : ''}
-          </div>
-        </div>
-      </div>
-
-      <div id="rev-actions-${r.id}" style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
-        <button class="btn sm prim" onclick="reviewDecision(${r.id},'approve',this)"><i class="ti ti-check"></i> Confirm match</button>
-        <button class="btn sm danger" onclick="showCorrectUrl(${r.id})"><i class="ti ti-x"></i> Reject</button>
-        <button class="btn sm ghost" onclick="skipReview(${r.id})"><i class="ti ti-skip-forward"></i> Skip</button>
-      </div>
-      <div id="rev-url-wrap-${r.id}" style="display:none;margin-top:8px">
-        <div style="font-size:11px;color:var(--t2);margin-bottom:6px">Paste the correct URL for this product (optional — leave blank to reject without one):</div>
-        <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
-          <input id="rev-url-${r.id}" type="url" name="rev-url-${r.id}" placeholder="https://competitor.com/correct-product-page"
-            autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-1p-ignore data-lpignore="true" data-form-type="other"
-            style="flex:1;min-width:200px;padding:6px 10px;font-size:11px;border:1px solid var(--bm);border-radius:var(--r);font-family:inherit;outline:none">
-          <button class="btn sm prim" onclick="saveCorrectUrl(${r.id},this)"><i class="ti ti-device-floppy"></i> Save URL &amp; reject</button>
-          <button class="btn sm danger" onclick="reviewDecision(${r.id},'reject',this)">Reject without URL</button>
-          <button class="btn sm ghost" onclick="cancelReject(${r.id})">Cancel</button>
-        </div>
-      </div>
-    </div>`;
-  }).join('');
+  renderReviewRows(page);
 
   $('review-pagination').innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <span>${from}–${to} of ${showing}${q||comp?' (filtered)':''}</span>
-      <select onchange="reviewLimit=+this.value===0?999999:+this.value;reviewPage=1;filterReview()" style="padding:3px 6px;border-radius:5px;border:1px solid var(--bm);background:var(--surface);font-size:11px">
+      <span>${from}–${to} of ${reviewData.length}</span>
+      <select onchange="reviewLimit=+this.value===0?999999:+this.value;reviewPage=1;renderReviewPage()"
+        style="padding:3px 6px;border-radius:5px;border:1px solid var(--bm);background:var(--surface);font-size:11px">
         <option value="50">50/page</option><option value="100">100/page</option><option value="250">250/page</option>
       </select>
     </div>
     <div style="display:flex;gap:6px">
-      ${reviewPage>1?`<button class="btn sm" onclick="reviewPage--;filterReview()">← Prev</button>`:''}
-      ${to<showing?`<button class="btn sm" onclick="reviewPage++;filterReview()">Next →</button>`:''}
+      ${reviewPage>1 ? `<button class="btn sm" onclick="reviewPage--;renderReviewPage()">← Prev</button>` : ''}
+      ${to<reviewData.length ? `<button class="btn sm" onclick="reviewPage++;renderReviewPage()">Next →</button>` : ''}
     </div>`;
+}
+
+function renderReviewRows(rows) {
+  $('review-tbody').innerHTML = rows.map(r => {
+    const sku   = r.skus        || {};
+    const comp  = r.competitors || {};
+    const snap  = r._snap || {};
+
+    const ourPriceEx = sku.price_ex_vat ? parseFloat(sku.price_ex_vat) : null;
+    const unitQty    = sku.unit_qty && sku.unit_qty > 1 ? sku.unit_qty : null;
+    const ourPerUnit = (unitQty && ourPriceEx) ? ourPriceEx / unitQty : null;
+    const ourUrl     = sku.product_url || (sku.slug ? `https://www.ukpos.com/${sku.slug}?vat=0` : '#');
+    const ourThumb   = thumbUrl(sku.image_url||'', 50, 50);
+
+    const theirRaw  = snap.competitor_price ? parseFloat(snap.competitor_price) : null;
+    const theirVat  = snap.competitor_vat || snap.competitor_vat_default || comp.vat_status || 'unknown';
+    const theirEx   = theirRaw ? normalisePrice(theirRaw, theirVat) : null;
+    const theirPerU = (unitQty && theirEx) ? theirEx / unitQty : null;
+
+    const diff = snap.diff_pct_normalised ?? snap.diff_pct;
+
+    const statusPill = {
+      review:   `<span style="background:var(--ab);color:var(--amb);border-radius:4px;padding:2px 7px;font-size:11px;font-weight:500">Needs review</span>`,
+      matched:  r.human_reviewed
+                ? `<span style="background:var(--gb);color:var(--grn);border-radius:4px;padding:2px 7px;font-size:11px;font-weight:500">✓ Confirmed</span>`
+                : `<span style="background:var(--bb);color:var(--blu);border-radius:4px;padding:2px 7px;font-size:11px;font-weight:500">🤖 AI matched</span>`,
+      rejected: `<span style="background:var(--bg);color:var(--t3);border-radius:4px;padding:2px 7px;font-size:11px;border:1px solid var(--border)">Rejected</span>`,
+      amended:  `<span style="background:var(--ab);color:var(--amb);border-radius:4px;padding:2px 7px;font-size:11px;font-weight:500"><i class="ti ti-clock" style="font-size:11px"></i> Needs rescrape</span>`,
+    }[r.match_status] || '—';
+
+    /* ── Action cell ── */
+    const actions = matchTab === 'amended' ? `
+      <div style="font-size:11px;color:var(--amb);padding:4px 0;display:flex;align-items:center;gap:6px">
+        <i class="ti ti-clock" style="font-size:13px"></i>
+        Queued for rescrape
+        ${r.previous_url ? `<span style="font-size:10px;color:var(--t3);margin-left:4px" title="Previous URL: ${r.previous_url}">↩ URL updated</span>` : ''}
+      </div>` : matchTab === 'review' ? `
+      <div style="display:flex;gap:4px;flex-wrap:wrap">
+        <button class="btn sm prim"   style="font-size:11px;padding:3px 7px" onclick="event.stopPropagation();quickApprove(${r.id},this)"><i class="ti ti-check"></i> Confirm</button>
+        <button class="btn sm"        style="font-size:11px;padding:3px 7px" onclick="event.stopPropagation();showUpdateUrl(${r.id})"><i class="ti ti-link"></i> Update URL</button>
+        <button class="btn sm danger" style="font-size:11px;padding:3px 7px" onclick="event.stopPropagation();quickRejectNoProduct(${r.id},this)" title="Competitor doesn't sell this product"><i class="ti ti-x"></i> Reject</button>
+      </div>
+      <div id="rrow-update-${r.id}" style="display:none;margin-top:6px">
+        <div style="font-size:11px;color:var(--t2);margin-bottom:4px">Paste the correct competitor product URL:</div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap">
+          <input id="rrow-url-${r.id}" type="text" value="${(r.competitor_url||'').replace(/"/g,'&quot;')}" placeholder="https://competitor.com/product"
+            autocomplete="new-password" spellcheck="false"
+            style="flex:1;min-width:200px;padding:5px 8px;font-size:11px;border:1px solid var(--bm);border-radius:var(--r);font-family:inherit;outline:none">
+          <button class="btn sm prim"  style="font-size:11px" onclick="event.stopPropagation();quickReject(${r.id},this,true)"><i class="ti ti-device-floppy"></i> Save</button>
+          <button class="btn sm ghost" style="font-size:11px" onclick="event.stopPropagation();hideUpdateUrl(${r.id})">Cancel</button>
+        </div>
+      </div>` : matchTab !== 'rejected' ? `
+      <button class="btn sm ghost" style="font-size:11px" onclick="event.stopPropagation();revertToReview(${r.id},this)">
+        <i class="ti ti-rotate-clockwise"></i> Re-review
+      </button>` : '';
+
+    return `<tr class="${rowClass(diff)} tr-link" id="rrow-${r.id}" onclick="go('sku-detail',{skuId:'${r.sku_id}',fromPanel:'review'})">
+      <td style="padding:4px 8px;width:58px">
+        <div style="width:50px;height:50px;border:1px solid var(--border);border-radius:5px;overflow:hidden;background:var(--bb);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          ${ourThumb ? `<img src="${ourThumb}" style="width:100%;height:100%;object-fit:contain" onerror="this.style.display='none'">` : `<i class="ti ti-photo" style="font-size:16px;color:var(--t3)"></i>`}
+        </div>
+      </td>
+      <td style="min-width:140px">
+        <a href="${ourUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()"
+          style="display:inline-flex;align-items:center;gap:4px;font-family:'SF Mono',monospace;font-size:12px;color:var(--blu);text-decoration:none;font-weight:600">
+          ${r.sku_id}<i class="ti ti-arrow-up-right" style="font-size:13px"></i>
+        </a>
+        <a href="${ourUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()"
+          style="font-size:12px;color:var(--t2);display:block;line-height:1.3;text-decoration:none;margin-top:2px">
+          ${sku.short_title||''}
+        </a>
+      </td>
+      <td style="white-space:nowrap;font-weight:500">
+        ${ourPriceEx ? fmtPrice(ourPriceEx) : '—'} <span class="vat vex" style="font-size:10px">ex</span>
+        ${ourPerUnit ? `<div style="font-size:11px;font-weight:600;background:#fef08a;color:#854d0e;border-radius:3px;padding:1px 5px;display:inline-block;margin-top:2px">${fmtPrice(ourPerUnit)}/unit</div>` : ''}
+      </td>
+      <td style="min-width:140px;padding:0">
+        ${r.competitor_url
+          ? `<a href="${r.competitor_url}" target="_blank" rel="noopener" onclick="event.stopPropagation()"
+              style="display:block;padding:8px 10px;text-decoration:none;height:100%">
+              <div style="font-weight:600;color:var(--blu);display:flex;align-items:center;gap:4px">
+                ${comp.name||'—'}<i class="ti ti-arrow-up-right" style="font-size:13px;flex-shrink:0"></i>
+              </div>
+              <div style="font-size:11px;color:var(--t3);margin-top:2px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                ${r.competitor_url.replace('https://','').replace('http://','').slice(0,50)}
+              </div>
+             </a>`
+          : `<div style="padding:8px 10px">
+              <div style="font-weight:500;color:var(--t2)">${comp.name||'—'}</div>
+              <div style="font-size:11px;color:var(--t3);margin-top:2px">No URL set</div>
+             </div>`}
+      </td>
+      <td style="white-space:nowrap;font-weight:500">
+        ${theirEx
+          ? `${fmtPrice(theirEx)} ${vatPill(theirVat)}
+             ${theirPerU ? `<div style="font-size:11px;font-weight:600;background:#fef08a;color:#854d0e;border-radius:3px;padding:1px 5px;display:inline-block;margin-top:2px">${fmtPrice(theirPerU)}/unit</div>` : ''}`
+          : `<span style="color:var(--t3);font-size:12px">Not yet scraped</span>`}
+      </td>
+      <td>${diff != null ? `<span class="${diffClass(diff)}">${diffLabel(diff)}</span>` : '—'}</td>
+      <td>${confWidget(r.confidence)}</td>
+      <td onclick="event.stopPropagation()" style="min-width:220px">${actions}</td>
+      <td style="white-space:nowrap">${statusPill}</td>
+      <td style="font-size:12px;color:var(--t3);white-space:nowrap">${ts(r.reviewed_at||r.updated_at)}</td>
+      <td>${stockBadge(snap.availability)}</td>
+      <td style="font-size:12px;color:var(--t3);white-space:nowrap">${ts(snap.scraped_at)}</td>
+      <td><button class="btn sm ghost" onclick="event.stopPropagation();openDrawer('${r.sku_id}','${(sku.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(ourPriceEx)}','review')"
+        style="font-size:11px;padding:4px 8px">Quick view</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function sortReviewTable(col) {
+  const dir = (sortState.review?.col === col && sortState.review?.dir === 1) ? -1 : 1;
+  sortState.review = { col, dir };
+  updateSortHeaders('review-table', 'review', col);
+  const getV = r => {
+    const sku  = r.skus || {};
+    const comp = r.competitors || {};
+    const snap = r._snap || {};
+    if (col === 'sku_id')          return r.sku_id||'';
+    if (col === 'short_title')     return (sku.short_title||'').toLowerCase();
+    if (col === 'competitor_name') return (comp.name||'').toLowerCase();
+    if (col === 'our_price')       return parseFloat(sku.price_ex_vat||0);
+    if (col === 'their_price')     { const raw = snap.competitor_price ? parseFloat(snap.competitor_price) : null; return raw ? normalisePrice(raw, snap.competitor_vat||'unknown') : 999999; }
+    if (col === 'diff')            return parseFloat(snap.diff_pct_normalised ?? snap.diff_pct ?? 0);
+    if (col === 'confidence')      return parseFloat(r.confidence||0);
+    if (col === 'match_source')    return r.match_source||'';
+    if (col === 'reviewed_at')     return r.reviewed_at ? new Date(r.reviewed_at).getTime() : 0;
+    if (col === 'availability')    return (snap.availability||'').toLowerCase();
+    if (col === 'scraped_at')      return snap.scraped_at ? new Date(snap.scraped_at).getTime() : 0;
+    return '';
+  };
+  reviewData.sort((a,b) => cmpVal(getV(a), getV(b), dir));
+  reviewPage = 1;
+  renderReviewPage();
+}
+
+function showUpdateUrl(id)  { $(`rrow-update-${id}`).style.display = ''; $(`rrow-url-${id}`)?.focus(); }
+function hideUpdateUrl(id)  { $(`rrow-update-${id}`).style.display = 'none'; }
+function showRejectOptions(id) { showUpdateUrl(id); }
+function hideRejectOptions(id) { hideUpdateUrl(id); }
+
+async function quickRejectNoProduct(matchId, btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i>';
+  try {
+    await authPost(`/review/${matchId}`, { decision: 'reject' });
+    await sb.from('competitor_matches').update({
+      match_source: 'human', human_reviewed: true,
+      reviewed_at:  new Date().toISOString(),
+      competitor_url: null,
+    }).eq('id', matchId);
+    const r = reviewAllRows.find(r => r.id === matchId);
+    if (r) { r.match_status='rejected'; r.human_reviewed=true; r.match_source='human'; r.reviewed_at=new Date().toISOString(); r.competitor_url=null; }
+    const row = $(`rrow-${matchId}`);
+    if (row) row.remove();
+    updateMatchTabCounts(); filterReview(); loadDashboard();
+  } catch(e) { btn.disabled=false; btn.innerHTML=orig; alert(e.message); }
+}
+
+async function quickApprove(matchId, btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i>';
+  try {
+    await authPost(`/review/${matchId}`, { decision: 'approve' });
+    await sb.from('competitor_matches').update({ match_source:'human', human_reviewed:true, reviewed_at:new Date().toISOString() }).eq('id', matchId);
+    const r = reviewAllRows.find(r => r.id === matchId);
+    if (r) { r.match_status='matched'; r.human_reviewed=true; r.match_source='human'; r.reviewed_at=new Date().toISOString(); }
+    const row = $(`rrow-${matchId}`);
+    if (row) row.remove();
+    updateMatchTabCounts(); filterReview(); loadDashboard();
+  } catch(e) { btn.disabled=false; btn.innerHTML=orig; alert(e.message); }
+}
+
+async function quickReject(matchId, btn, saveUrl) {
+  const orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i>';
+  try {
+    const urlInput = $(`rrow-url-${matchId}`);
+    const newUrl   = saveUrl && urlInput ? urlInput.value.trim() : null;
+
+    if (newUrl && newUrl.startsWith('http')) {
+      // URL provided — route through /correct: status becomes 'amended', not 'rejected'
+      const json = await authPost(`/review/${matchId}/correct`, { url: newUrl });
+      if (!json.ok) throw new Error(json.error || 'Save failed');
+      const r = reviewAllRows.find(r => r.id === matchId);
+      if (r) { r.match_status='amended'; r.human_reviewed=true; r.competitor_url=newUrl; }
+    } else {
+      // No URL — straight reject
+      await authPost(`/review/${matchId}`, { decision: 'reject' });
+      await sb.from('competitor_matches').update({
+        match_source:'human', human_reviewed:true, reviewed_at:new Date().toISOString()
+      }).eq('id', matchId);
+      const r = reviewAllRows.find(r => r.id === matchId);
+      if (r) { r.match_status='rejected'; r.human_reviewed=true; r.match_source='human'; r.reviewed_at=new Date().toISOString(); }
+    }
+
+    const row = $(`rrow-${matchId}`);
+    if (row) row.remove();
+    updateMatchTabCounts(); filterReview(); loadDashboard();
+  } catch(e) { btn.disabled=false; btn.innerHTML=orig; alert(e.message); }
+}
+
+async function revertToReview(matchId, btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i>';
+  try {
+    await sb.from('competitor_matches').update({ match_status:'review', match_source:'scraper_search', human_reviewed:false, reviewed_at:null }).eq('id', matchId);
+    const r = reviewAllRows.find(r => r.id === matchId);
+    if (r) { r.match_status='review'; r.human_reviewed=false; r.match_source='scraper_search'; r.reviewed_at=null; }
+    updateMatchTabCounts(); filterReview();
+  } catch(e) { btn.disabled=false; btn.innerHTML=orig; alert(e.message); }
 }
 
 async function reviewDecision(matchId, decision, btn) {
   btn.disabled = true;
   try {
     await authPost(`/review/${matchId}`, { decision });
+    await sb.from('competitor_matches').update({
+      match_source:   'human',
+      human_reviewed: true,
+      reviewed_at:    new Date().toISOString(),
+    }).eq('id', matchId);
     const row = $(`rev-${matchId}`);
     if (row) { row.style.opacity = '.4'; row.style.pointerEvents = 'none'; btn.textContent = decision === 'approve' ? '✓ Confirmed' : 'Rejected'; }
+    reviewAllRows = reviewAllRows.filter(r => r.id !== matchId);
     loadDashboard();
   } catch (e) { btn.disabled = false; alert(e.message); }
 }
@@ -918,8 +1140,6 @@ function cancelReject(matchId) {
   $(`rev-url-wrap-${matchId}`).style.display = 'none';
 }
 
-/* FIX 2 — use authPost to the edge function instead of direct sb.from() write,
-   which is blocked by RLS for non-service-role keys */
 async function saveCorrectUrl(matchId, btn) {
   const input  = $(`rev-url-${matchId}`);
   const newUrl = (input?.value || '').trim();
@@ -932,15 +1152,18 @@ async function saveCorrectUrl(matchId, btn) {
   btn.disabled = true;
   btn.innerHTML = '<i class="ti ti-loader"></i> Saving…';
   try {
-    await authPost(`/review/${matchId}/correct`, { url: newUrl });
+    // POST to edge function — sets status='amended', saves previous_url,
+    // sets awaiting_scrape=true. Row leaves review queue immediately.
+    const json = await authPost(`/review/${matchId}/correct`, { url: newUrl });
+    if (!json.ok) throw new Error(json.error || 'Save failed');
+    // Optimistic removal from review queue DOM
     const row = $(`rev-${matchId}`);
-    if (row) {
-      row.style.opacity = '.45';
-      row.style.pointerEvents = 'none';
-      $(`rev-url-wrap-${matchId}`).innerHTML =
-        `<div style="color:var(--grn);font-size:11px;padding:4px 0"><i class="ti ti-check"></i> URL saved — will be scraped on next run</div>`;
-    }
-    reviewAllRows = reviewAllRows.filter(r => r.id !== matchId);
+    if (row) row.remove();
+    // Update local cache so tab counts update correctly
+    const cached = reviewAllRows.find(r => r.id === matchId);
+    if (cached) { cached.match_status = 'amended'; cached.human_reviewed = true; cached.competitor_url = newUrl; }
+    updateMatchTabCounts();
+    filterReview();
     loadDashboard();
   } catch (e) {
     btn.disabled = false;
@@ -1132,64 +1355,6 @@ async function loadCompDetail(opts) {
 
   const defaultGrid = $('pref-default-grid')?.checked !== false;
   setCompView(defaultGrid ? 'grid' : 'list');
-  loadCompNotes();
-}
-
-let compNotesDirty = false;
-
-async function loadCompNotes() {
-  const ta = $('comp-notes-text');
-  const status = $('comp-notes-status');
-  if (!ta) return;
-  ta.value = '';
-  compNotesDirty = false;
-  $('comp-notes-dirty').style.display = 'none';
-  status.textContent = 'Loading…';
-  try {
-    const { data, error } = await sb.from('competitors').select('notes').eq('id', currentCompId).single();
-    if (error) throw new Error(error.message);
-    ta.value = data?.notes || '';
-    status.textContent = data?.notes ? 'Saved' : 'No notes yet';
-  } catch (e) {
-    status.textContent = 'Could not load notes';
-  }
-}
-
-function markCompNotesDirty() {
-  compNotesDirty = true;
-  $('comp-notes-dirty').style.display = '';
-  $('comp-notes-status').textContent = '';
-}
-
-async function saveCompNotes() {
-  const ta  = $('comp-notes-text');
-  const btn = $('comp-notes-save');
-  const status = $('comp-notes-status');
-  if (!ta || currentCompId == null) return;
-  const orig = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '<i class="ti ti-loader"></i> Saving…';
-  try {
-    await ensureFreshSession();
-    const { error } = await sb.from('competitors').update({ notes: ta.value }).eq('id', currentCompId);
-    if (error) throw new Error(error.message);
-    compNotesDirty = false;
-    $('comp-notes-dirty').style.display = 'none';
-    status.textContent = 'Saved';
-    btn.innerHTML = '<i class="ti ti-check"></i> Saved';
-    setTimeout(() => { btn.disabled = false; btn.innerHTML = orig; }, 1500);
-  } catch (e) {
-    btn.disabled = false;
-    btn.innerHTML = orig;
-    status.textContent = 'Save failed: ' + e.message;
-  }
-}
-
-function scrollToCompNotes() {
-  const footer = $('comp-notes-footer');
-  const ta = $('comp-notes-text');
-  if (footer) footer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  if (ta) setTimeout(() => ta.focus(), 300);
 }
 
 function renderCompDetail() {
@@ -1292,7 +1457,9 @@ async function loadSkuDetail(opts) {
     $('sku-site-link').href = siteUrl;
 
     $('sku-hero-content').innerHTML = `
-      <div class="sku-img"><i class="ti ti-photo" style="font-size:24px"></i></div>
+      <div class="sku-img">${sku.image_url
+        ? `<img src="${thumbUrl(sku.image_url,144,144)}" style="width:100%;height:100%;object-fit:contain;border-radius:var(--r)" onerror="this.style.display='none'">`
+        : `<i class="ti ti-photo" style="font-size:24px"></i>`}</div>
       <div style="flex:1">
         <div class="sku-id-badge">${sku.sku_id}</div>
         <div class="sku-name">${sku.short_title||sku.sku_id}</div>
@@ -1419,63 +1586,106 @@ function closeDrawer() {
    SCHEDULE + RUN HISTORY
 ════════════════════════════════════════ */
 async function loadRuns() {
-  $('run-history').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
   try {
-    const d = await authFetch('/runs');
-    const runs = d.data || [];
+    const [{ data: rows }, { data: progress }] = await Promise.all([
+      sb.from('sync_runs').select('*').order('started_at', {ascending: false}).limit(20),
+      sb.from('scrape_progress').select('batch_id,sku_id').order('attempted_at', {ascending: false}).limit(5000),
+    ]);
 
-    let progressHtml = '';
-    try {
-      const { data: prog } = await sb.from('scrape_progress').select('*').order('updated_at',{ascending:false}).limit(1);
-      const p = prog?.[0];
-      if (p) {
-        const totalSkus = 2634;
-        const done = p.last_offset || 0;
-        const pct  = Math.min(100, Math.round(done / totalSkus * 100));
-        const daysLeft = Math.max(0, Math.ceil((totalSkus - done) / 570));
-        progressHtml = `
-          <div style="grid-column:1/-1;background:var(--bb);border:1px solid var(--bbd);border-radius:var(--rl);padding:12px 14px">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-              <div style="font-weight:500;font-size:13px;color:#042c53">Batch search progress — full SKU pass</div>
-              <div style="font-size:12px;color:var(--blu)">${done.toLocaleString()} / ${totalSkus.toLocaleString()} SKUs · ~${daysLeft} weekday${daysLeft===1?'':'s'} left</div>
-            </div>
-            <div style="height:8px;border-radius:4px;background:rgba(24,95,165,.15);overflow:hidden">
-              <div style="height:100%;width:${pct}%;background:var(--blu);border-radius:4px;transition:width .3s"></div>
-            </div>
-            <div style="font-size:11px;color:var(--blu);margin-top:4px">${pct}% · cycles back to start when complete · 570 SKUs/day Mon–Fri</div>
-          </div>`;
-      }
-    } catch(e) { /* scrape_progress table optional */ }
-
-    const last = runs[0];
-    if (last) {
-      $('run-summary-cards').innerHTML = progressHtml + `
-        <div class="metric m-gray"><span class="ml">Last run</span><span class="mv" style="font-size:18px">${ts(last.completed_at||last.started_at)}</span><span class="ms">${last.run_type||'matched'}</span></div>
-        <div class="metric m-g"><span class="ml">Succeeded</span><span class="mv">${last.skus_succeeded||0}</span><span class="ms">prices captured</span></div>
-        <div class="metric m-a"><span class="ml">Failed</span><span class="mv">${last.skus_failed||0}</span><span class="ms">retried next run</span></div>
-        <div class="metric m-gray"><span class="ml">Duration</span><span class="mv" style="font-size:18px">${last.duration_sec?Math.round(last.duration_sec/60)+'m':'—'}</span><span class="ms">${last.status||''}</span></div>`;
-    } else {
-      $('run-summary-cards').innerHTML = progressHtml || '<div style="color:var(--t2);font-size:12px;padding:8px">No runs recorded yet</div>';
+    const totalSkus = 2634;
+    if (progress?.length) {
+      const batches = {};
+      progress.forEach(p => { batches[p.batch_id] = (batches[p.batch_id]||0) + 1; });
+      const batchLines = Object.entries(batches).map(([id, done]) => {
+        const pct  = Math.round(done / totalSkus * 100);
+        const remaining = totalSkus - done;
+        const estDate   = new Date(Date.now() + (remaining/570)*24*60*60*1000);
+        const estStr    = estDate.toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+        return `<div style="margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <span style="font-weight:500">Batch: ${id}</span>
+            <span style="color:var(--t2)">${done.toLocaleString()} / ${totalSkus.toLocaleString()} SKUs · ${pct}% · est. complete ${estStr}</span>
+          </div>
+          <div style="height:8px;background:var(--bb);border-radius:4px;overflow:hidden">
+            <div style="height:100%;width:${pct}%;background:var(--blu);border-radius:4px;transition:width .3s"></div>
+          </div>
+        </div>`;
+      }).join('');
+      $('run-summary-cards').insertAdjacentHTML('beforebegin', `
+        <div class="card" style="margin-bottom:14px;padding:14px 16px">
+          <div class="card-hd" style="padding:0 0 10px"><div class="card-title">Full crawl progress</div></div>
+          ${batchLines}
+        </div>`);
     }
 
-    if (!runs.length) {
-      $('run-history').innerHTML = '<div style="color:var(--t2);font-size:12px;padding:8px">No run history</div>';
+    if (!rows?.length) {
+      $('run-history').innerHTML = '<div style="color:var(--t2);padding:8px">No runs yet.</div>';
       return;
     }
-    $('run-history-sub').textContent = `last ${runs.length} runs`;
-    $('run-history').innerHTML = `<table class="run-table"><thead><tr>
-      <th>Started</th><th>Type</th><th>Status</th><th>OK</th><th>Fail</th><th>Duration</th>
-    </tr></thead><tbody>${runs.map(r => {
-      const statusColor = r.status==='completed'?'var(--grn)':r.status==='running'?'var(--blu)':r.status==='failed'?'var(--red)':'var(--t2)';
-      return `<tr>
-        <td>${ts(r.started_at)}</td>
-        <td>${r.run_type||'—'}</td>
-        <td><span style="color:${statusColor};font-weight:500">${r.status||'—'}</span></td>
-        <td style="color:var(--grn)">${r.skus_succeeded||0}</td>
-        <td style="color:${r.skus_failed?'var(--red)':'var(--t3)'}">${r.skus_failed||0}</td>
-        <td>${r.duration_sec?Math.round(r.duration_sec/60)+'m':'—'}</td>
-      </tr>`;
-    }).join('')}</tbody></table>`;
+
+    const last = rows.find(r => r.status === 'complete') || rows[0];
+    const dur  = last.completed_at
+      ? Math.round((new Date(last.completed_at) - new Date(last.started_at)) / 60000)
+      : null;
+
+    const cards = [
+      { label: 'Pairs attempted',   val: (last.pairs_attempted||last.skus_attempted||0).toLocaleString(), icon: 'ti-refresh',      color: 'var(--blu)' },
+      { label: 'Prices found',      val: (last.prices_found||0).toLocaleString(),                         icon: 'ti-currency-pound',color: 'var(--grn)' },
+      { label: 'Confirmed matches', val: (last.matches_confirmed||0).toLocaleString(),                    icon: 'ti-circle-check', color: 'var(--grn)' },
+      { label: 'In review queue',   val: (last.matches_review||last.review_queue||0).toLocaleString(),    icon: 'ti-eye-check',    color: 'var(--amb)' },
+      { label: 'Failed',            val: (last.skus_failed||0).toLocaleString(),                          icon: 'ti-alert-circle', color: 'var(--red)' },
+      { label: 'OOS flagged',       val: (last.oos_flagged||0).toLocaleString(),                          icon: 'ti-package-off',  color: 'var(--t2)'  },
+      { label: 'Duration',          val: dur != null ? dur+'m' : '—',                                     icon: 'ti-clock',        color: 'var(--t2)'  },
+      { label: 'Mode',              val: last.scrape_mode || last.trigger || '—',                         icon: 'ti-settings',     color: 'var(--t2)'  },
+    ];
+    $('run-summary-cards').innerHTML = cards.map(c => `
+      <div class="card" style="padding:12px 14px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+          <i class="ti ${c.icon}" style="font-size:14px;color:${c.color}"></i>
+          <span style="font-size:12px;color:var(--t2)">${c.label}</span>
+        </div>
+        <div style="font-size:22px;font-weight:600;color:${c.color}">${c.val}</div>
+        <div style="font-size:11px;color:var(--t3);margin-top:2px">last run · ${ts(last.started_at)}</div>
+      </div>`).join('');
+
+    $('run-history-sub').textContent = `${rows.length} most recent runs`;
+    $('run-history').innerHTML = `
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>
+          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--t2)">Started</th>
+          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--t2)">Mode</th>
+          <th style="text-align:right;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--t2)">Pairs</th>
+          <th style="text-align:right;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--t2)">Prices found</th>
+          <th style="text-align:right;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--t2)">Confirmed</th>
+          <th style="text-align:right;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--t2)">Review</th>
+          <th style="text-align:right;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--t2)">Failed</th>
+          <th style="text-align:right;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--t2)">OOS</th>
+          <th style="text-align:right;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--t2)">Duration</th>
+          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--t2)">Status</th>
+        </tr></thead><tbody>
+        ${rows.map(r => {
+          const d    = r.completed_at ? Math.round((new Date(r.completed_at)-new Date(r.started_at))/60000)+'m' : '…';
+          const bc   = r.status==='complete'?'b-g':r.status==='running'?'b-blu':'b-a';
+          const pairs = r.pairs_attempted || r.skus_attempted || 0;
+          const pricePct = pairs > 0 ? Math.round((r.prices_found||0)/pairs*100) : null;
+          return `<tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:7px 10px">${ts(r.started_at)}</td>
+            <td style="padding:7px 10px;color:var(--t2)">${r.scrape_mode||r.trigger||'—'}</td>
+            <td style="padding:7px 10px;text-align:right">${pairs.toLocaleString()}</td>
+            <td style="padding:7px 10px;text-align:right">
+              ${(r.prices_found||0).toLocaleString()}
+              ${pricePct!=null ? `<span style="font-size:11px;color:var(--t3);margin-left:4px">${pricePct}%</span>` : ''}
+            </td>
+            <td style="padding:7px 10px;text-align:right;color:var(--grn);font-weight:500">${(r.matches_confirmed||0).toLocaleString()}</td>
+            <td style="padding:7px 10px;text-align:right;color:var(--amb)">${(r.matches_review||r.review_queue||0).toLocaleString()}</td>
+            <td style="padding:7px 10px;text-align:right;color:${r.skus_failed>0?'var(--red)':'var(--t3)'}">${(r.skus_failed||0).toLocaleString()}</td>
+            <td style="padding:7px 10px;text-align:right;color:var(--t2)">${(r.oos_flagged||0).toLocaleString()}</td>
+            <td style="padding:7px 10px;text-align:right;color:var(--t2)">${d}</td>
+            <td style="padding:7px 10px"><span class="badge ${bc}">${r.status||'—'}</span></td>
+          </tr>`;
+        }).join('')}
+        </tbody></table>
+      </div>`;
   } catch (e) {
     $('run-history').innerHTML = `<div style="color:var(--red);padding:8px">${e.message}</div>`;
   }
@@ -1487,379 +1697,438 @@ async function loadRuns() {
 async function loadCompetitorSettings() {
   try {
     const { data: comps } = await sb.from('competitors').select('*').order('name');
-    if (!comps?.length) { $('comp-sett-tbody').innerHTML = '<tr><td colspan="5" style="padding:16px;text-align:center;color:var(--t2)">No competitors</td></tr>'; return; }
-
-    const unknownCount = comps.filter(c => !c.vat_status || c.vat_status === 'unknown').length;
-    if (unknownCount > 0) {
+    if (!comps?.length) return;
+    const unknown = comps.filter(c=>c.vat_status==='unknown').length;
+    $('comp-sett-sub').textContent = `${comps.filter(c=>c.active).length} active · ${unknown} unknown VAT`;
+    if (unknown > 0) {
+      $('comp-vat-note-text').textContent = `${unknown} competitor${unknown>1?'s':''} have unknown VAT status — set these before trusting differentials.`;
       $('comp-vat-note').style.display = '';
-      $('comp-vat-note-text').textContent = `${unknownCount} competitor${unknownCount===1?'':'s'} ${unknownCount===1?'has':'have'} unknown VAT status — set these before trusting differentials.`;
     }
-    $('comp-sett-sub').textContent = `${comps.length} competitors · ${comps.filter(c=>c.active).length} active`;
-
-    $('comp-sett-tbody').innerHTML = comps.map(c => `
-      <tr>
+    $('comp-sett-tbody').innerHTML = comps.map(c => {
+      const exCls  = c.vat_status==='ex'  ? 's-ex'  : '';
+      const incCls = c.vat_status==='inc' ? 's-inc' : '';
+      const unkCls = c.vat_status==='unknown' ? 's-unk' : '';
+      const rowBg  = c.vat_status==='unknown' ? 'background:rgba(133,79,11,.03)' : '';
+      return `<tr style="${rowBg}${!c.active?';opacity:.5':''}">
         <td style="font-weight:500">${c.name}</td>
-        <td style="color:var(--t2)">${c.domain||'—'}</td>
+        <td style="font-size:11px;color:var(--t2)">${c.domain}</td>
         <td>
-          <div class="vat-toggle">
-            <button class="vt-opt ${c.vat_status==='ex'?'s-ex':''}"   onclick="setVatStatus(${c.id},'ex',this)">Ex</button>
-            <button class="vt-opt ${c.vat_status==='inc'?'s-inc':''}" onclick="setVatStatus(${c.id},'inc',this)">Inc</button>
-            <button class="vt-opt ${(!c.vat_status||c.vat_status==='unknown')?'s-unk':''}" onclick="setVatStatus(${c.id},'unknown',this)">?</button>
+          <div class="vat-toggle" id="vtog-${c.id}">
+            <button class="vt-opt ${exCls}"  onclick="setVatStatus(${c.id},'ex')">ex</button>
+            <button class="vt-opt ${incCls}" onclick="setVatStatus(${c.id},'inc')">inc</button>
+            <button class="vt-opt ${unkCls}" onclick="setVatStatus(${c.id},'unknown')">?</button>
           </div>
         </td>
-        <td style="color:var(--t2);font-size:11px">${c.scrape_method||'auto'}</td>
-        <td><label style="cursor:pointer"><input type="checkbox" ${c.active?'checked':''} onchange="setCompActive(${c.id},this.checked)" style="accent-color:var(--orange)"></label></td>
-      </tr>`).join('');
-  } catch (e) {
-    $('comp-sett-tbody').innerHTML = `<tr><td colspan="5" style="color:var(--red);padding:8px">${e.message}</td></tr>`;
-  }
+        <td><span class="badge ${c.feed_url?'b-g':'b-gray'}" style="font-size:9px">${c.feed_url?'Feed':'Scrape'}</span></td>
+        <td><input type="checkbox" ${c.active?'checked':''} style="accent-color:var(--orange)" onchange="setCompActive(${c.id},this.checked)"></td>
+      </tr>`;
+    }).join('');
+  } catch (e) { $('comp-sett-tbody').innerHTML = `<tr><td colspan="5" style="color:var(--red);padding:8px">${e.message}</td></tr>`; }
 }
 
-async function setVatStatus(compId, status, btn) {
-  const wrap = btn.parentElement;
-  wrap.querySelectorAll('.vt-opt').forEach(b => b.className = 'vt-opt');
-  btn.className = 'vt-opt ' + (status==='ex'?'s-ex':status==='inc'?'s-inc':'s-unk');
+async function setVatStatus(compId, val) {
   try {
-    const { error } = await sb.from('competitors').update({ vat_status: status }).eq('id', compId);
+    const { error } = await sb.from('competitors').update({ vat_status: val }).eq('id', compId);
     if (error) throw new Error(error.message);
-  } catch (e) { alert('Update failed: ' + e.message); }
+    const tog = $('vtog-'+compId);
+    if (tog) {
+      tog.querySelectorAll('.vt-opt').forEach(b => {
+        b.className = 'vt-opt';
+        if (b.textContent.trim()==='ex'  && val==='ex')      b.className='vt-opt s-ex';
+        if (b.textContent.trim()==='inc' && val==='inc')     b.className='vt-opt s-inc';
+        if (b.textContent.trim()==='?'   && val==='unknown') b.className='vt-opt s-unk';
+      });
+    }
+  } catch (e) { alert('VAT update failed: '+e.message); }
 }
 
 async function setCompActive(compId, active) {
   try {
     const { error } = await sb.from('competitors').update({ active }).eq('id', compId);
     if (error) throw new Error(error.message);
-  } catch (e) { alert('Update failed: ' + e.message); }
+  } catch (e) { alert('Update failed: '+e.message); }
 }
 
 /* ════════════════════════════════════════
-   SETTINGS — USERS (super_admin only)
+   SETTINGS — USERS
 ════════════════════════════════════════ */
 async function loadUsers() {
   if (currentProfile?.role !== 'super_admin') {
-    $('users-list').innerHTML = '<div style="padding:12px;color:var(--t2);font-size:12px">Only administrators can manage users.</div>';
+    $('users-list').innerHTML = '<div style="color:var(--t2);font-size:12px;padding:12px">Admin access required to manage users.</div>';
     $('pending-list').innerHTML = '';
     return;
   }
   try {
-    const [{ data: profiles }, { data: requests }] = await Promise.all([
-      sb.from('profiles').select('*').order('created_at', { ascending: false }),
-      sb.from('access_requests').select('*').order('requested_at', { ascending: false }),
-    ]);
+    const { data: profiles } = await sb.from('profiles').select('*').eq('status','approved').order('requested_at');
+    const { data: requests } = await sb.from('access_requests').select('*').order('requested_at');
+    $('users-sub').textContent = `${(profiles||[]).length} active users`;
 
-    const active  = (profiles||[]).filter(p => p.status === 'approved');
-    const pending = (profiles||[]).filter(p => p.status === 'pending');
-
-    $('users-sub').textContent = `${active.length} active user${active.length===1?'':'s'}`;
-
-    $('users-list').innerHTML = active.length ? active.map(u => {
-      const initials = (u.full_name||u.email||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-      return `<div class="user-row">
-        <div class="avatar">${initials}</div>
+    $('users-list').innerHTML = (profiles||[]).map(p => {
+      const initials = (p.full_name||p.email||'?').split(/[\s@]/)[0].slice(0,2).toUpperCase();
+      const isMe = p.id === currentProfile.id;
+      return `<div class="user-row" style="padding:10px 14px">
+        <div class="avatar" style="${p.role==='super_admin'?'background:var(--os);color:var(--orange)':''}">${initials}</div>
         <div style="flex:1">
-          <div style="font-weight:500">${u.full_name||u.email}</div>
-          <div style="font-size:11px;color:var(--t2)">${u.email} · ${u.role||'viewer'}</div>
+          <div style="font-weight:500;font-size:12px">${p.email}</div>
+          <div style="font-size:11px;color:var(--t2)">${p.full_name||'—'} · ${p.role==='super_admin'?'Admin':'User'}</div>
         </div>
-        ${u.id !== currentProfile.id && u.role !== 'super_admin'
-          ? `<button class="btn sm danger" onclick="revokeUser('${u.id}',this)">Revoke</button>`
-          : `<span class="badge b-blu">${u.role==='super_admin'?'Admin':'You'}</span>`}
+        <span class="badge ${p.role==='super_admin'?'':'b-g'}" style="${p.role==='super_admin'?'background:var(--os);color:var(--orange)':''}">${p.role==='super_admin'?'Admin':'Active'}</span>
+        ${!isMe ? `<button class="btn sm ghost danger" onclick="revokeUser('${p.id}',this)"><i class="ti ti-user-off"></i></button>` : ''}
       </div>`;
-    }).join('') : '<div style="padding:12px;color:var(--t2);font-size:12px">No active users</div>';
+    }).join('') || '<div style="color:var(--t2);font-size:12px;padding:12px">No approved users.</div>';
 
-    const pendingHtml = [
-      ...(requests||[]).map(r => `
-        <div class="user-row">
-          <div class="avatar" style="background:var(--ab);color:var(--amb)"><i class="ti ti-clock" style="font-size:14px"></i></div>
-          <div style="flex:1">
-            <div style="font-weight:500">${r.full_name||r.email}</div>
-            <div style="font-size:11px;color:var(--t2)">${r.email} · requested ${new Date(r.requested_at).toLocaleDateString('en-GB')}</div>
-          </div>
-          <button class="btn sm prim" onclick="approveRequest('${r.email}','${(r.full_name||'').replace(/'/g,"\\'")}',this)">Approve</button>
-          <button class="btn sm danger" onclick="rejectRequest('${r.email}',this)">Reject</button>
-        </div>`),
-      ...pending.map(u => `
-        <div class="user-row">
-          <div class="avatar" style="background:var(--ab);color:var(--amb)"><i class="ti ti-clock" style="font-size:14px"></i></div>
-          <div style="flex:1">
-            <div style="font-weight:500">${u.full_name||u.email}</div>
-            <div style="font-size:11px;color:var(--t2)">${u.email}</div>
-          </div>
-          <button class="btn sm prim" onclick="approveUser('${u.id}','${u.email}',this)">Approve</button>
-          <button class="btn sm danger" onclick="rejectUser('${u.id}',this)">Reject</button>
-        </div>`),
-    ].join('');
-
-    $('pending-list').innerHTML = pendingHtml || '<div style="padding:12px;color:var(--t2);font-size:12px">No pending requests</div>';
-
+    $('pending-list').innerHTML = (requests||[]).length ? (requests||[]).map(r => `
+      <div class="user-row" style="padding:10px 14px">
+        <div class="avatar" style="background:var(--ab);color:var(--amb)">${(r.email||'?').slice(0,2).toUpperCase()}</div>
+        <div style="flex:1">
+          <div style="font-weight:500;font-size:12px">${r.email}</div>
+          <div style="font-size:11px;color:var(--t2)">${r.full_name||'—'} · Requested ${ts(r.requested_at)}</div>
+        </div>
+        <button class="btn sm prim" onclick="approveUser('${r.email}',this)"><i class="ti ti-check"></i> Approve</button>
+        <button class="btn sm danger" onclick="rejectUser('${r.email}',this)"><i class="ti ti-x"></i> Reject</button>
+      </div>`).join('') :
+      '<div style="text-align:center;padding:24px;color:var(--t3);font-size:12px"><i class="ti ti-circle-check" style="font-size:22px;display:block;margin-bottom:6px;color:var(--grn)"></i>No pending requests</div>';
   } catch (e) {
-    $('users-list').innerHTML = `<div style="color:var(--red);padding:8px">${e.message}</div>`;
+    $('users-list').innerHTML = `<div style="color:var(--red);font-size:12px;padding:12px">${e.message}</div>`;
   }
 }
 
-async function approveRequest(email, fullName, btn) {
-  btn.disabled = true; btn.textContent = 'Approving…';
+async function approveUser(email, btn) {
+  btn.disabled = true;
   try {
     const { data: { session } } = await sb.auth.getSession();
-    const res = await fetch('https://uaqakssusydpjzrcznhb.supabase.co/functions/v1/approve-user', {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/approve-user`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + session.access_token },
       body: JSON.stringify({ email }),
     });
-    if (!res.ok) { const e = await res.json().catch(()=>{}); throw new Error(e?.error||'Failed'); }
-    loadUsers();
-  } catch (e) { btn.disabled = false; btn.textContent = 'Approve'; alert('Approve failed: ' + e.message); }
+    if (!res.ok) { const err = await res.json().catch(()=>{}); throw new Error(err?.error || 'Approve failed'); }
+    await loadUsers();
+  } catch (e) { alert('Approve failed: '+e.message); btn.disabled = false; }
 }
 
-async function rejectRequest(email, btn) {
-  if (!confirm(`Reject request from ${email}?`)) return;
+async function rejectUser(email, btn) {
+  if (!confirm(`Reject access request from ${email}?`)) return;
   btn.disabled = true;
   try {
-    const { error } = await sb.from('access_requests').delete().eq('email', email);
-    if (error) throw new Error(error.message);
-    loadUsers();
-  } catch (e) { btn.disabled = false; alert(e.message); }
+    await sb.from('access_requests').delete().eq('email', email);
+    await loadUsers();
+  } catch (e) { alert('Reject failed: '+e.message); btn.disabled = false; }
+}
+
+async function revokeUser(id, btn) {
+  if (!confirm('Revoke access for this user?')) return;
+  btn.disabled = true;
+  try {
+    await sb.from('profiles').update({ status: 'rejected', rejected_at: new Date().toISOString() }).eq('id', id);
+    await loadUsers();
+  } catch (e) { alert('Revoke failed: '+e.message); btn.disabled = false; }
 }
 
 /* ════════════════════════════════════════
-   THRESHOLDS
+   THRESHOLDS (configurables)
 ════════════════════════════════════════ */
 function updateThreshPreview() {
-  const red = +$('t-red').value || 10;
-  const amb = +$('t-amb').value || 5;
-  const par = +$('t-par').value || 2;
-  $('t-grn-derived').textContent = par;
-  $('prev-r').textContent = `−${(red+2.4).toFixed(1)}%`;
-  $('prev-a').textContent = `−${((red+amb)/2).toFixed(1)}%`;
-  $('prev-p').textContent = `±${(par*0.65).toFixed(1)}%`;
-  $('prev-g').textContent = `+${(par+3.8).toFixed(1)}%`;
-  $('thresh-live').innerHTML = `
-    <span style="font-weight:500">Live preview:</span>
-    <span class="tc-swatch" style="background:var(--rb);color:var(--red)">Critical ≤ −${red}%</span>
-    <span class="tc-swatch" style="background:var(--ab);color:var(--amb)">Warning −${amb}% to −${red}%</span>
-    <span class="tc-swatch" style="background:var(--bg);color:var(--t2);border:1px solid var(--border)">Parity ±${par}%</span>
-    <span class="tc-swatch" style="background:var(--gb);color:var(--grn)">Cheaper ≥ +${par}%</span>`;
+  const r = parseInt($('t-red').value) || 10;
+  const a = parseInt($('t-amb').value) || 5;
+  const p = parseInt($('t-par').value) || 2;
+  $('t-grn-derived').textContent = p;
+  $('prev-r').textContent = `-${(r+2.4).toFixed(1)}%`;
+  $('prev-a').textContent = `-${((r+a)/2).toFixed(1)}%`;
+  $('prev-p').textContent = `±${(p*0.6).toFixed(1)}%`;
+
+  const live = $('thresh-live');
+  if (!live) return;
+  const testDiff = -8;
+  let label, fg, bg;
+  if (testDiff <= -r)      { label='Critical'; fg='var(--red)'; bg='var(--rb)'; }
+  else if (testDiff <= -a) { label='Warning';  fg='var(--amb)'; bg='var(--ab)'; }
+  else if (Math.abs(testDiff) <= p) { label='Parity'; fg='var(--t2)'; bg='var(--bg)'; }
+  else                     { label='We\'re cheaper'; fg='var(--grn)'; bg='var(--gb)'; }
+  live.innerHTML = `<span style="color:var(--t2)">A <strong>−8%</strong> differential would be classified as:</span> <span style="padding:3px 10px;border-radius:5px;font-weight:600;background:${bg};color:${fg}">${label}</span>`;
 }
 
 function saveThresholds() {
-  T.red = +$('t-red').value || 10;
-  T.amb = +$('t-amb').value || 5;
-  T.par = +$('t-par').value || 2;
+  T.red = parseInt($('t-red').value) || 10;
+  T.amb = parseInt($('t-amb').value) || 5;
+  T.par = parseInt($('t-par').value) || 2;
   try { localStorage.setItem('pw_thresholds', JSON.stringify(T)); } catch(e) {}
   applyThresholdCSS();
-  if ($('p-alerts').classList.contains('active')) loadDashboard();
-  if ($('p-bycomp').classList.contains('active')) loadByCompetitor();
-  const btn = event?.target?.closest('button');
-  if (btn) { const o = btn.innerHTML; btn.innerHTML = '<i class="ti ti-check"></i> Saved'; setTimeout(()=>btn.innerHTML=o, 1500); }
+  buildLegend('comp-detail-legend');
+  buildLegend('sku-detail-legend');
+  if (compSkusAll.length) renderCompDetail();
+  if (distChart) buildDistChart({
+    cheapest:$('m-cheap').textContent||0,
+    parity:0,
+    warning:$('m-warn').textContent||0,
+    critical:$('m-crit').textContent||0,
+    oos:$('m-oos').textContent||0
+  });
+  const btn = event.target;
+  const orig = btn.innerHTML;
+  btn.innerHTML = '<i class="ti ti-check"></i> Saved';
+  setTimeout(() => btn.innerHTML = orig, 1500);
 }
 
 function resetThresholds() {
-  $('t-red').value = 10; $('t-amb').value = 5; $('t-par').value = 2;
+  $('t-red').value = 10;
+  $('t-amb').value = 5;
+  $('t-par').value = 2;
   updateThreshPreview();
-  saveThresholds();
 }
 
 /* ════════════════════════════════════════
    MANUAL LOOKUP / REFRESH
 ════════════════════════════════════════ */
 async function lookupSKU(skuId, btn) {
-  const orig = btn ? btn.innerHTML : '';
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> Scraping…'; }
+  const orig = btn.innerHTML;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Scraping…';
+  btn.disabled = true;
   try {
-    await authPost('/lookup', { sku_id: skuId });
-    if (btn) { btn.innerHTML = '<i class="ti ti-check"></i> Queued'; setTimeout(()=>{ btn.disabled=false; btn.innerHTML=orig; }, 2000); }
-    if (drawerSkuId === skuId) setTimeout(() => openDrawer(skuId, $('dr-name').textContent, $('dr-price').textContent, drawerFromPanel), 800);
-  } catch (e) {
-    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
-    alert('Lookup failed: ' + e.message);
-  }
+    await authFetch('/lookup', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({sku_id: skuId}) });
+    setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 5000);
+  } catch { btn.innerHTML = orig; btn.disabled = false; }
 }
 
-async function scrapeRow(skuId, compId, btn) {
+async function scrapeRow(skuId, competitorId, btn) {
   const orig = btn.innerHTML;
-  btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i>';
+  btn.innerHTML = '<i class="ti ti-loader" style="font-size:13px"></i>';
+  btn.disabled = true;
   try {
-    await authPost('/lookup', { sku_id: skuId, competitor_id: compId });
-    btn.innerHTML = '<i class="ti ti-check" style="font-size:13px;color:var(--grn)"></i>';
-    setTimeout(() => { btn.disabled = false; btn.innerHTML = orig; }, 2000);
+    await authFetch('/lookup', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({sku_id: skuId, competitor_id: competitorId}) });
+    setTimeout(async () => {
+      btn.innerHTML = '<i class="ti ti-check" style="font-size:13px;color:var(--grn)"></i>';
+      await loadSkuDetail({ skuId, fromPanel: drawerFromPanel });
+    }, 4000);
   } catch (e) {
-    btn.disabled = false; btn.innerHTML = orig;
+    btn.innerHTML = orig;
+    btn.disabled = false;
     alert('Scrape failed: ' + e.message);
   }
 }
 
 async function manualRefresh() {
-  const btn = event?.target?.closest('button');
-  const orig = btn ? btn.innerHTML : '';
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> Refreshing…'; }
-  try {
-    loadDashboard();
-    if ($('p-skus').classList.contains('active'))  loadSKUs();
-    if ($('p-review').classList.contains('active')) loadReview();
-    if (btn) { setTimeout(()=>{ btn.disabled=false; btn.innerHTML=orig; }, 1200); }
-  } catch (e) {
-    if (btn) { btn.disabled=false; btn.innerHTML=orig; }
-  }
+  const btn = event.target.closest('button');
+  const orig = btn.innerHTML;
+  btn.innerHTML = '<i class="ti ti-loader" style="font-size:12px"></i> Refreshing…';
+  btn.disabled = true;
+  await loadDashboard();
+  btn.innerHTML = orig;
+  btn.disabled = false;
 }
 
 /* ════════════════════════════════════════
    SORTING ENGINE
 ════════════════════════════════════════ */
 const sortState = {
-  bycomp:  { col: null, dir: 1 },
-  skus:    { col: null, dir: 1 },
-  compSku: { col: null, dir: 1 },
-  skuComp: { col: null, dir: 1 },
+  bycomp:   { col: null, dir: 1 },
+  skus:     { col: null, dir: 1 },
+  compSku:  { col: null, dir: 1 },
+  skuComp:  { col: null, dir: 1 },
 };
-let bycompData = [], skusData = [], compSkuData = [], skuCompData = [];
 
-function cmpVal(v) {
-  if (v === null || v === undefined) return -Infinity;
-  if (typeof v === 'number') return v;
-  if (typeof v === 'string') {
-    const n = parseFloat(v.replace(/[£,%]/g,''));
-    if (!isNaN(n) && /[\d.]/.test(v)) return n;
-    return v.toLowerCase();
-  }
-  return v;
-}
+let bycompData   = [];
+let skusData     = [];
+let skuCompData  = [];
 
 function updateSortHeaders(tableId, stateKey, col) {
-  const table = $(tableId);
-  if (!table) return;
-  table.querySelectorAll('th.sortable').forEach(th => th.classList.remove('sort-asc','sort-desc'));
-  if (!col) return;
-  const dir = sortState[stateKey].dir;
-  table.querySelectorAll('th.sortable').forEach(th => {
-    const oc = th.getAttribute('onclick') || '';
-    if (oc.includes(`'${col}'`)) th.classList.add(dir === 1 ? 'sort-asc' : 'sort-desc');
+  const tbl = document.getElementById(tableId);
+  if (!tbl) return;
+  tbl.querySelectorAll('th.sortable').forEach(th => {
+    th.classList.remove('sort-asc','sort-desc');
+    const fn = th.getAttribute('onclick') || '';
+    const m  = fn.match(/'([^']+)'/);
+    if (m && m[1] === col) {
+      th.classList.add(sortState[stateKey].dir === 1 ? 'sort-asc' : 'sort-desc');
+    }
   });
 }
 
 function toggleSort(stateKey, col) {
-  const st = sortState[stateKey];
-  if (st.col === col) st.dir *= -1;
-  else { st.col = col; st.dir = 1; }
-  return st;
+  const s = sortState[stateKey];
+  if (s.col === col) s.dir = s.dir === 1 ? -1 : 1;
+  else { s.col = col; s.dir = 1; }
+}
+
+function cmpVal(a, b, dir) {
+  if (a === null || a === undefined) return 1;
+  if (b === null || b === undefined) return -1;
+  if (typeof a === 'string' && typeof b === 'string') return a.localeCompare(b) * dir;
+  return (a - b) * dir;
 }
 
 function sortByCompTable(col) {
-  const st = toggleSort('bycomp', col);
-  const keyMap = {
-    name:'name', domain:'domain', vat_status:'vat_status',
-    matched:'_matched', critical:'_critical', warning:'_warning', cheaper:'_cheaper', parity:'_parity'
-  };
-  const k = keyMap[col] || col;
-  bycompData.sort((a,b) => {
-    const av = cmpVal(a[k]), bv = cmpVal(b[k]);
-    if (av < bv) return -1*st.dir;
-    if (av > bv) return  1*st.dir;
-    return 0;
-  });
-  renderByCompRows(bycompData);
+  toggleSort('bycomp', col);
   updateSortHeaders('bycomp-table', 'bycomp', col);
+  const { dir } = sortState.bycomp;
+  const sorted = [...bycompData].sort((a, b) => {
+    const getV = r => {
+      if (col === 'name')     return (r.name||'').toLowerCase();
+      if (col === 'domain')   return (r.domain||'').toLowerCase();
+      if (col === 'vat_status') return (r.vat_status||'').toLowerCase();
+      if (col === 'matched')  return r._matched  ?? 0;
+      if (col === 'critical') return r._critical ?? 0;
+      if (col === 'warning')  return r._warning  ?? 0;
+      if (col === 'cheaper')  return r._cheaper  ?? 0;
+      if (col === 'parity')   return r._parity   ?? 0;
+      return '';
+    };
+    return cmpVal(getV(a), getV(b), dir);
+  });
+  renderByCompRows(sorted);
 }
 
-function renderByCompRows(rows) {
-  $('bycomp-tbody').innerHTML = rows.map(c => {
+function renderByCompRows(comps) {
+  $('bycomp-tbody').innerHTML = comps.map(c => {
     const slug = slugify(c.name);
-    return `<tr class="tr-link" onclick="go('comp-detail',{compId:${c.id},compName:'${(c.name||'').replace(/'/g,"\\'")}',compSlug:'${slug}',compDomain:'${c.domain||''}',compVat:'${c.vat_status||'unknown'}'})">
+    const noData = c._matched === 0;
+    return `<tr class="tr-link" onclick="go('comp-detail',{compId:${c.id},compName:'${c.name.replace(/'/g,"\\'")}',compSlug:'${slug}',compDomain:'${c.domain}',compVat:'${c.vat_status}'})">
       <td style="font-weight:500">${c.name}</td>
-      <td style="color:var(--t2)">${c.domain||'—'}</td>
-      <td>${vatPill(c.vat_status||'unknown')}</td>
-      <td style="font-weight:500">${c._matched}</td>
-      <td>${c._critical?`<span class="d-r">${c._critical}</span>`:'<span style="color:var(--t3)">0</span>'}</td>
-      <td>${c._warning?`<span class="d-a">${c._warning}</span>`:'<span style="color:var(--t3)">0</span>'}</td>
-      <td>${c._cheaper?`<span class="d-g">${c._cheaper}</span>`:'<span style="color:var(--t3)">0</span>'}</td>
-      <td style="color:var(--t2)">${c._parity}</td>
+      <td style="font-size:11px;color:var(--t2)">${c.domain}</td>
+      <td>${vatPill(c.vat_status)}</td>
+      <td style="color:var(--t2)">${noData ? '<span style="color:var(--t3)">—</span>' : c._matched}</td>
+      <td style="font-weight:600">${noData ? '<span style="color:var(--t3)">—</span>' : (c._critical > 0 ? `<span style="color:var(--red)">${c._critical}</span>` : '<span style="color:var(--t3)">0</span>')}</td>
+      <td>${noData ? '<span style="color:var(--t3)">—</span>' : (c._warning > 0 ? `<span style="color:var(--amb);font-weight:500">${c._warning}</span>` : '<span style="color:var(--t3)">0</span>')}</td>
+      <td>${noData ? '<span style="color:var(--t3)">—</span>' : (c._cheaper > 0 ? `<span style="color:var(--grn)">${c._cheaper}</span>` : '<span style="color:var(--t3)">0</span>')}</td>
+      <td style="color:var(--t2)">${noData ? '<span style="color:var(--t3)">—</span>' : c._parity}</td>
     </tr>`;
   }).join('');
 }
 
 function sortSkusTable(col) {
-  const st = toggleSort('skus', col);
-  const keyMap = {
-    sku_id:'sku_id', short_title:'short_title', our_price:'our_price',
-    competitor_name:'competitor_name', their_price:'competitor_price',
-    diff:'diff_pct_normalised', availability:'availability', scraped_at:'scraped_at'
-  };
-  const k = keyMap[col] || col;
-  skusData.sort((a,b) => {
-    let av, bv;
-    if (col === 'diff') { av = cmpVal(a.diff_pct_normalised??a.diff_pct); bv = cmpVal(b.diff_pct_normalised??b.diff_pct); }
-    else { av = cmpVal(a[k]); bv = cmpVal(b[k]); }
-    if (av < bv) return -1*st.dir;
-    if (av > bv) return  1*st.dir;
-    return 0;
-  });
-  renderSkusRows(skusData);
+  toggleSort('skus', col);
   updateSortHeaders('skus-table', 'skus', col);
+  const { dir } = sortState.skus;
+  const sorted = [...skusData].sort((a, b) => {
+    const getV = r => {
+      if (col === 'sku_id')        return (r.sku_id||'').toLowerCase();
+      if (col === 'short_title')   return (r.short_title||'').toLowerCase();
+      if (col === 'our_price')     return parseFloat(r.our_price||0);
+      if (col === 'competitor_name') return (r.competitor_name||'').toLowerCase();
+      if (col === 'their_price')   { const raw = r.competitor_price ? parseFloat(r.competitor_price) : null; const vat = r.competitor_vat || r.competitor_vat_default || 'unknown'; return raw ? normalisePrice(raw, vat) : 999999; }
+      if (col === 'diff')          return parseFloat(r.diff_pct_normalised??r.diff_pct??0);
+      if (col === 'confidence')   return parseFloat(r.confidence??0);
+      if (col === 'match_status') { const ms = r._ms; if (!ms) return 0; return (ms.human*3) + (ms.auto*2) + (ms.review); }
+      if (col === 'reviewed_at')  { return r._ms?.last_reviewed ? new Date(r._ms.last_reviewed).getTime() : 0; }
+      if (col === 'availability')  return (r.availability||'').toLowerCase();
+      if (col === 'scraped_at')    return r.scraped_at ? new Date(r.scraped_at).getTime() : 0;
+      return '';
+    };
+    return cmpVal(getV(a), getV(b), dir);
+  });
+  renderSkusRows(sorted);
 }
 
 function renderSkusRows(rows) {
   $('sku-tbody').innerHTML = rows.map(r => {
-    const diff = r.diff_pct_normalised ?? r.diff_pct;
-    const raw  = r.competitor_price ? parseFloat(r.competitor_price) : null;
-    const vat  = r.competitor_vat || r.competitor_vat_default || 'unknown';
-    const ex   = raw ? normalisePrice(raw, vat) : null;
-    const compQty = r.competitor_unit_qty || 1;
-    const perU = (compQty > 1 && ex) ? ` ${perUnitLabel(ex, compQty)}` : '';
-    return `<tr class="${rowClass(diff)} tr-link" onclick="openDrawer('${r.sku_id}','${(r.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(r.our_price)}','skus')">
+    const diff     = r.diff_pct_normalised ?? r.diff_pct;
+    const raw      = r.competitor_price ? parseFloat(r.competitor_price) : null;
+    const vat      = r.competitor_vat || r.competitor_vat_default || 'unknown';
+    const ex       = raw ? normalisePrice(raw, vat) : null;
+    const thumb    = thumbUrl(r.image_url || '', 50, 50);
+    const unitQty  = r.unit_qty && r.unit_qty > 1 ? r.unit_qty : null;
+
+    const normDiff   = r.diff_pct_normalised;
+    const packDiff   = r.diff_pct;
+    const showPerUnit = unitQty && normDiff != null && packDiff != null
+                        && Math.abs(normDiff - packDiff) > 0.5;
+
+    const ourPrice  = r.our_price ? parseFloat(r.our_price) : null;
+    const ourPerUnit = (showPerUnit && ourPrice) ? ourPrice / unitQty : null;
+
+    return `<tr class="${rowClass(diff)} tr-link" onclick="go('sku-detail',{skuId:'${r.sku_id}',fromPanel:'skus'})">
+      <td style="padding:4px 8px;width:58px">
+        <div style="width:50px;height:50px;border:1px solid var(--border);border-radius:5px;overflow:hidden;background:var(--bb);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          ${thumb
+            ? `<img src="${thumb}" style="width:100%;height:100%;object-fit:contain" onerror="this.style.display='none'">`
+            : `<i class="ti ti-photo" style="font-size:16px;color:var(--t3)"></i>`}
+        </div>
+      </td>
       <td>${skuLink(r)}</td>
-      <td style="font-size:11px;color:var(--t2);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.short_title||''}</td>
-      <td style="font-weight:500">${fmtPrice(r.our_price)}</td>
-      <td style="font-size:11px;color:var(--t2)">${r.competitor_name||'—'}</td>
-      <td style="font-weight:500">${ex ? fmtPrice(ex) : '—'}${ex ? ` <span style="font-size:9px;color:var(--t3)">${vatPill(vat)}</span>` : ''}${perU}</td>
-      <td><span class="${diffClass(diff)}">${diffLabel(diff)}</span></td>
-      <td style="color:var(--t2);font-size:11px">${r.comp_count > 0 ? r.comp_count : '—'}</td>
+      <td style="color:var(--t2);max-width:160px;white-space:normal;line-height:1.3">${r.short_title||''}</td>
+      <td style="font-weight:500">
+        ${fmtPrice(r.our_price)}
+        ${ourPerUnit ? `<div style="font-size:12px;color:var(--t2)">${fmtPrice(ourPerUnit)}/unit</div>` : ''}
+      </td>
+      <td style="color:var(--t2)">${r.competitor_name||'—'}</td>
+      <td style="font-weight:500">${ex ? fmtPrice(ex) : '—'}${ex ? ` <span style="font-size:9px;color:var(--t3)">${vatPill(vat)}</span>` : ''}</td>
+      <td>
+        <span class="${diffClass(diff)}">${diffLabel(diff)}</span>
+        ${showPerUnit ? `<div style="font-size:12px;color:var(--t2)" title="Pack of ${unitQty} vs per-unit comparison">per unit · pack: <span class="${diffClass(packDiff)}">${diffLabel(packDiff)}</span></div>` : ''}
+      </td>
+      <td>${confWidget(r.confidence)}</td>
+      <td style="white-space:nowrap">
+        ${r._ms ? matchStatusMini(r._ms) : '<span style="color:var(--t3);font-size:12px">—</span>'}
+      </td>
+      <td style="font-size:12px;color:var(--t3)">${r._ms?.last_reviewed ? ts(r._ms.last_reviewed) : '—'}</td>
       <td>${stockBadge(r.availability)}</td>
-      <td style="font-size:10px;color:var(--t3)">${ts(r.scraped_at)}</td>
-      <td><button class="btn sm ghost" onclick="event.stopPropagation();openDrawer('${r.sku_id}','${(r.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(r.our_price)}','skus')">→</button></td>
+      <td style="color:var(--t3)">${ts(r.scraped_at)}</td>
+      <td style="white-space:nowrap"><button class="btn sm ghost" onclick="event.stopPropagation();openDrawer('${r.sku_id}','${(r.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(r.our_price)}','skus')" style="font-size:11px;padding:4px 8px">Quick view</button></td>
     </tr>`;
   }).join('');
 }
 
 function sortCompSkuTable(col) {
-  const st = toggleSort('compSku', col);
-  const keyMap = {
-    sku_id:'sku_id', short_title:'short_title', our_price:'our_price',
-    their_price:'competitor_price', diff:'diff_pct_normalised',
-    availability:'availability', scraped_at:'scraped_at'
-  };
-  const k = keyMap[col] || col;
-  compSkusFiltered.sort((a,b) => {
-    let av, bv;
-    if (col === 'diff') { av = cmpVal(a.diff_pct_normalised??a.diff_pct); bv = cmpVal(b.diff_pct_normalised??b.diff_pct); }
-    else if (col === 'their_price') {
-      av = a.competitor_price ? normalisePrice(parseFloat(a.competitor_price), a.competitor_vat||a.competitor_vat_default||'unknown') : -Infinity;
-      bv = b.competitor_price ? normalisePrice(parseFloat(b.competitor_price), b.competitor_vat||b.competitor_vat_default||'unknown') : -Infinity;
-    }
-    else { av = cmpVal(a[k]); bv = cmpVal(b[k]); }
-    if (av < bv) return -1*st.dir;
-    if (av > bv) return  1*st.dir;
-    return 0;
-  });
-  renderCompDetail();
+  toggleSort('compSku', col);
   updateSortHeaders('comp-sku-table', 'compSku', col);
+  const { dir } = sortState.compSku;
+  const sorted = [...compSkusFiltered].sort((a, b) => {
+    const getV = r => {
+      const diff = r.diff_pct_normalised ?? r.diff_pct;
+      const raw  = r.competitor_price ? parseFloat(r.competitor_price) : null;
+      const vat  = r.competitor_vat || r.competitor_vat_default || 'unknown';
+      const ex   = raw ? normalisePrice(raw, vat) : null;
+      if (col === 'sku_id')      return (r.sku_id||'').toLowerCase();
+      if (col === 'short_title') return (r.short_title||'').toLowerCase();
+      if (col === 'our_price')   return parseFloat(r.our_price||0);
+      if (col === 'their_price') return ex ?? 999999;
+      if (col === 'diff')        return parseFloat(diff??0);
+      if (col === 'availability')return (r.availability||'').toLowerCase();
+      if (col === 'scraped_at')  return r.scraped_at ? new Date(r.scraped_at).getTime() : 0;
+      return '';
+    };
+    return cmpVal(getV(a), getV(b), dir);
+  });
+  $('comp-sku-tbody').innerHTML = sorted.map(s => {
+    const diff = s.diff_pct_normalised ?? s.diff_pct;
+    const raw  = s.competitor_price ? parseFloat(s.competitor_price) : null;
+    const vat  = s.competitor_vat || s.competitor_vat_default || 'unknown';
+    const ex   = raw ? normalisePrice(raw, vat) : null;
+    return `<tr class="${rowClass(diff)} tr-link" onclick="openDrawer('${s.sku_id}','${(s.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(s.our_price)}','comp-detail')">
+      <td><span style="font-family:'SF Mono',monospace;font-size:11px;color:var(--blu)">${s.sku_id}</span></td>
+      <td style="font-size:11px;color:var(--t2);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.short_title||''}</td>
+      <td style="font-weight:500">${fmtPrice(s.our_price)}</td>
+      <td style="font-weight:500">${ex?fmtPrice(ex):'—'}</td>
+      <td><span class="${diffClass(diff)}">${diffLabel(diff)}</span></td>
+      <td>${stockBadge(s.availability)}</td>
+      <td style="font-size:10px;color:var(--t3)">${ts(s.scraped_at)}</td>
+      <td><button class="btn sm ghost" onclick="event.stopPropagation();openDrawer('${s.sku_id}','${(s.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(s.our_price)}','comp-detail')">→</button></td>
+    </tr>`;
+  }).join('');
 }
 
 function sortSkuCompTable(col) {
-  const st = toggleSort('skuComp', col);
-  skuCompData.sort((a,b) => {
-    let av, bv;
-    if (col === 'diff')   { av = cmpVal(a.diff_pct_normalised??a.diff_pct); bv = cmpVal(b.diff_pct_normalised??b.diff_pct); }
-    else if (col === 'price') {
-      av = a.competitor_price ? normalisePrice(parseFloat(a.competitor_price), a.competitor_vat||a.competitor_vat_default||'unknown') : -Infinity;
-      bv = b.competitor_price ? normalisePrice(parseFloat(b.competitor_price), b.competitor_vat||b.competitor_vat_default||'unknown') : -Infinity;
-    }
-    else if (col === 'name') { av = cmpVal(a.competitor_name); bv = cmpVal(b.competitor_name); }
-    else if (col === 'vat')  { av = cmpVal(a.competitor_vat||a.competitor_vat_default); bv = cmpVal(b.competitor_vat||b.competitor_vat_default); }
-    else { av = cmpVal(a[col]); bv = cmpVal(b[col]); }
-    if (av < bv) return -1*st.dir;
-    if (av > bv) return  1*st.dir;
-    return 0;
-  });
-  renderSkuCompRows(skuCompData);
+  toggleSort('skuComp', col);
   updateSortHeaders('sku-comp-table', 'skuComp', col);
+  const { dir } = sortState.skuComp;
+  const sorted = [...skuCompData].sort((a, b) => {
+    const getV = r => {
+      const diff = r.diff_pct_normalised ?? r.diff_pct;
+      const raw  = r.competitor_price ? parseFloat(r.competitor_price) : null;
+      const vat  = r.competitor_vat || r.competitor_vat_default || 'unknown';
+      const ex   = raw ? normalisePrice(raw, vat) : null;
+      if (col === 'name')        return (r.competitor_name||'').toLowerCase();
+      if (col === 'price')       return ex ?? 999999;
+      if (col === 'vat')         return (vat||'').toLowerCase();
+      if (col === 'diff')        return parseFloat(diff??0);
+      if (col === 'availability')return (r.availability||'').toLowerCase();
+      if (col === 'confidence')  return parseFloat(r.confidence||0);
+      if (col === 'scraped_at')  return r.scraped_at ? new Date(r.scraped_at).getTime() : 0;
+      return '';
+    };
+    return cmpVal(getV(a), getV(b), dir);
+  });
+  renderSkuCompRows(sorted);
 }
 
 function renderSkuCompRows(rows) {
@@ -1873,31 +2142,15 @@ function renderSkuCompRows(rows) {
     const barC  = {r:'var(--red)',a:'var(--amb)',g:'var(--grn)',p:'var(--t3)'}[tier];
     const rowId = `${r.sku_id}-${r.competitor_id}`;
     const hasUrl = !!r.competitor_url;
-
-    const ourQty  = (r.our_unit_qty ?? r.skus?.unit_qty) || 1;
-    const compQty = r.competitor_unit_qty || 1;
-    const perUnitDiffer = ourQty !== compQty && (ourQty > 1 || compQty > 1);
-
-    let theirPerUnit = '';
-    if (perUnitDiffer && ex) {
-      const per = ex / compQty;
-      const perTxt = per < 1 ? `£${per.toFixed(3)}` : `£${per.toFixed(2)}`;
-      theirPerUnit = `<div><span style="font-size:10px;color:var(--t3);white-space:nowrap">${perTxt}/unit ×${compQty}</span></div>`;
-    }
-
-    const basisTag = perUnitDiffer
-      ? `<div style="font-size:9px;color:var(--amb);background:var(--ab);border-radius:3px;padding:0 4px;display:inline-block;margin-top:2px">per-unit basis</div>`
-      : '';
-
     return `<tr class="${rowClass(diff)}" id="skurow-${rowId}">
       <td style="font-weight:500">${r.competitor_name||'—'}<div style="font-size:10px;color:var(--t2)">${r.competitor_domain||''}</div></td>
       <td style="font-weight:500">${ex
         ? (r.competitor_url
             ? `<a href="${r.competitor_url}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:underline;text-decoration-color:rgba(0,0,0,.2);text-underline-offset:2px" onclick="event.stopPropagation()">${fmtPrice(ex)} <i class="ti ti-external-link" style="font-size:10px;color:var(--t3)"></i></a>`
             : fmtPrice(ex))
-        : '—'}${theirPerUnit}</td>
+        : '—'}</td>
       <td>${vatPill(vat)}</td>
-      <td><span class="${diffClass(diff)}">${diffLabel(diff)}</span>${basisTag}</td>
+      <td><span class="${diffClass(diff)}">${diffLabel(diff)}</span></td>
       <td><div class="dbar-wrap"><div class="dbar-track"><div class="dbar-fill" style="width:${barW}%;background:${barC}"></div></div></div></td>
       <td>${stockBadge(r.availability)}</td>
       <td>${confWidget(r.confidence)}</td>
@@ -1918,8 +2171,8 @@ function renderSkuCompRows(rows) {
           Match URL for <strong>${r.competitor_name}</strong> — paste the exact product page URL
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <input id="match-url-${rowId}" type="url" name="match-url-${rowId}" value="${r.competitor_url||''}" placeholder="https://competitor.com/product-page"
-            autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-1p-ignore data-lpignore="true" data-form-type="other"
+          <input id="match-url-${rowId}" type="text" value="${r.competitor_url||''}" placeholder="https://competitor.com/product-page"
+            autocomplete="new-password" spellcheck="false"
             style="flex:1;min-width:260px;padding:6px 10px;font-size:12px;border:1px solid var(--bbd);border-radius:var(--r);font-family:inherit;outline:none;background:var(--surface)"
             onkeydown="if(event.key==='Enter')saveMatchUrl('${rowId}','${r.sku_id}',${r.competitor_id},this.closest('tr').previousElementSibling,event)">
           <button class="btn sm prim" onclick="saveMatchUrl('${rowId}','${r.sku_id}',${r.competitor_id},this)">
@@ -1933,13 +2186,13 @@ function renderSkuCompRows(rows) {
   }).join('');
 }
 
-function editMatchUrl(rowId, skuId, compId, currentUrl, btn) {
+function editMatchUrl(rowId, skuId, competitorId, currentUrl, btn) {
+  document.querySelectorAll('[id^="skurow-edit-"]').forEach(r => r.style.display = 'none');
   const editRow = $(`skurow-edit-${rowId}`);
   if (editRow) {
-    const showing = editRow.style.display !== 'none';
-    document.querySelectorAll('[id^="skurow-edit-"]').forEach(r => r.style.display = 'none');
-    editRow.style.display = showing ? 'none' : '';
-    if (!showing) { const inp = $(`match-url-${rowId}`); if (inp) inp.focus(); }
+    editRow.style.display = '';
+    const input = $(`match-url-${rowId}`);
+    if (input) { input.value = currentUrl; input.focus(); input.select(); }
   }
 }
 
@@ -1948,44 +2201,58 @@ function cancelEditUrl(rowId) {
   if (editRow) editRow.style.display = 'none';
 }
 
-async function saveMatchUrl(rowId, skuId, compId, btn) {
+async function saveMatchUrl(rowId, skuId, competitorId, btn) {
   const input = $(`match-url-${rowId}`);
-  const msg   = $(`match-url-msg-${rowId}`);
+  const msgEl = $(`match-url-msg-${rowId}`);
   const url   = (input?.value || '').trim();
-  if (url && !url.startsWith('http')) {
-    msg.style.display = 'block'; msg.style.color = 'var(--red)';
-    msg.textContent = 'URL must start with http(s)://';
+
+  if (!url || !url.startsWith('http')) {
+    input.style.borderColor = 'var(--red)';
+    if (msgEl) { msgEl.textContent = 'Must be a valid URL starting with https://'; msgEl.style.color = 'var(--red)'; msgEl.style.display = ''; }
     return;
   }
+
   const orig = btn.innerHTML;
-  btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> Saving…';
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Saving…';
+  if (msgEl) msgEl.style.display = 'none';
+
   try {
-    await ensureFreshSession();
-    const { error } = await sb.from('competitor_matches')
-      .update({ competitor_url: url || null, human_reviewed: true, reviewed_at: new Date().toISOString() })
-      .eq('sku_id', skuId).eq('competitor_id', compId);
+    const { error } = await sb.from('competitor_matches').upsert({
+      sku_id:          skuId,
+      competitor_id:   competitorId,
+      competitor_url:  url,
+      match_status:    'matched',
+      match_source:    'human',
+      human_reviewed:  true,
+      reviewed_at:     new Date().toISOString(),
+      updated_at:      new Date().toISOString(),
+    }, { onConflict: 'sku_id,competitor_id' });
+
     if (error) throw new Error(error.message);
-    msg.style.display = 'block'; msg.style.color = 'var(--grn)';
-    msg.innerHTML = '<i class="ti ti-check"></i> Saved — queuing scrape…';
-    await authPost('/lookup', { sku_id: skuId, competitor_id: compId }).catch(()=>{});
-    setTimeout(() => { cancelEditUrl(rowId); loadSkuDetail({ skuId }); }, 900);
+
+    if (msgEl) { msgEl.textContent = '✓ Saved — triggering scrape…'; msgEl.style.color = 'var(--grn)'; msgEl.style.display = ''; }
+
+    try {
+      await authFetch('/lookup', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ sku_id: skuId, competitor_id: competitorId }) });
+    } catch(e) { /* best-effort */ }
+
+    setTimeout(async () => {
+      cancelEditUrl(rowId);
+      await loadSkuDetail({ skuId, fromPanel: drawerFromPanel });
+    }, 3000);
+
   } catch (e) {
-    btn.disabled = false; btn.innerHTML = orig;
-    msg.style.display = 'block'; msg.style.color = 'var(--red)';
-    msg.textContent = 'Save failed: ' + e.message;
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    if (msgEl) { msgEl.textContent = 'Save failed: ' + e.message; msgEl.style.color = 'var(--red)'; msgEl.style.display = ''; }
   }
 }
 
-/* ════════════════════════════════════════
-   STATE FLAGS + INIT
-════════════════════════════════════════ */
 let skusLoaded = false;
 
-window.addEventListener('hashchange', () => {
-  if (currentProfile && currentProfile.status === 'active') restoreRoute();
-});
-
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
-
+/* ════════════════════════════════════════
+   INIT
+════════════════════════════════════════ */
 updateThreshPreview();
 bootstrap();
