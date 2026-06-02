@@ -1,0 +1,25 @@
+-- PriceWatch Pro — Migration 006
+-- Adds 'amended' to competitor_matches.match_status check constraint,
+-- plus previous_url (audit trail) and awaiting_scrape (scraper flag).
+-- Also adds index for the Needs Rescrape tab query.
+
+-- Extend the check constraint to allow 'amended'
+alter table competitor_matches
+  drop constraint if exists competitor_matches_match_status_check;
+
+alter table competitor_matches
+  add constraint competitor_matches_match_status_check
+  check (match_status in ('matched','review','rejected','unavailable','pending','amended'));
+
+-- Audit trail: what URL was replaced when a user submits a correction
+alter table competitor_matches
+  add column if not exists previous_url text;
+
+-- Scraper flag: set true when a URL is amended so the scraper can pick it up
+alter table competitor_matches
+  add column if not exists awaiting_scrape boolean default false;
+
+-- Index for the Needs Rescrape tab query
+create index if not exists idx_cm_amended
+  on competitor_matches(match_status, competitor_id)
+  where match_status = 'amended';
