@@ -105,12 +105,14 @@
           </div>
         </div>
         <div class="card-0p">
-              <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
-                <div><div class="card-title">Monitored competitors</div><div class="card-sub" id="comp-sett-sub">Loading…</div></div>
-              </div>
-  <table><thead><tr><th>ID</th><th>Competitor</th><th>Domain</th><th>VAT basis</th><th>Method</th><th>Active</th></tr></thead>
-  <tbody id="comp-sett-tbody"><tr><td colspan="6"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table>
-</div>
+          <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+            <div class="card-title">Biggest price gaps <span style="font-weight:400;font-size:11px;color:var(--t2)">— where we're most expensive</span></div>
+            <button class="btn sm ghost" onclick="go('skus')"><i class="ti ti-arrow-right"></i> All SKUs</button>
+          </div>
+          <div class="tw"><table><thead><tr>
+            <th style="border-left:3px solid transparent">SKU</th><th>Product</th><th>Our price</th><th>Competitor</th><th>Their price</th><th>VAT</th><th>Gap</th><th>Stock</th><th>Updated</th><th></th>
+          </tr></thead><tbody id="dash-tbody"><tr><td colspan="10"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table></div>
+        </div>
       </div>
     </div>
 
@@ -435,18 +437,23 @@
               <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
                 <div><div class="card-title">Monitored competitors</div><div class="card-sub" id="comp-sett-sub">Loading…</div></div>
               </div>
-              <table><thead><tr>
-                <th>ID</th>
-                <th>Competitor</th>
-                <th>Domain</th>
-                <th>VAT basis</th>
-                <th>Method</th>
-                <th>Active</th>
-              </tr></thead>
-              <tbody id="comp-sett-tbody">
-                <tr><td colspan="6"><div class="loading"><span class="spinner"></span></div></td></tr>
-              </tbody></table>
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Competitor</th>
+                    <th>Domain</th>
+                    <th>VAT basis</th>
+                    <th>Method</th>
+                    <th>Active</th>
+                  </tr>
+                </thead>
+                <tbody id="comp-sett-tbody">
+                  <tr><td colspan="6"><div class="loading"><span class="spinner"></span></div></td></tr>
+                </tbody>
+              </table>
             </div>
+          </div>
 
           <!-- USERS -->
           <div id="st-users" class="stab">
