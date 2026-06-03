@@ -23,6 +23,12 @@ Discount Displays special handling:
   - Persists the canonical variant URL (with super_attribute params) back to
     competitor_matches so future runs use the exact child page (Case A fast path)
 
+Alplas special handling:
+  - Parses the WooCommerce data-product_variations JSON blob directly from raw HTML
+  - Matches the correct variation using dimension/orientation tokens from UKPOS title
+  - Persists the canonical variation URL (with variation_id param) back to
+    competitor_matches so future runs use the exact variation page (Case A fast path)
+
 Environment variables:
     SUPABASE_URL
     SUPABASE_SERVICE_KEY
@@ -72,6 +78,10 @@ from discount_displays import (
     match_variant,
     variant_url,
     price_from_blob,
+)
+from alplas import (
+    scrape_alplas_page,
+    ALPLAS_DOMAIN,
 )
 
 # ── Config ─────────────────────────────────────────────────────────────────────
@@ -243,47 +253,6 @@ async def _extract_main_price(page: Page) -> Optional[float]:
         return None
 
 
-async def _extract_alplas_price(page: Page) -> Optional[float]:
-    try:
-        result = await page.evaluate(r"""
-            () => {
-                function parsePrice(raw) {
-                    const m = (raw || '').replace(/,/g,'').match(/[\d]+\.[\d]{2}/);
-                    if (!m) return null;
-                    const val = parseFloat(m[0]);
-                    return (val > 0.01 && val < 99999) ? val : null;
-                }
-                const container = document.querySelector('.price_inner_container .total_price_container');
-                if (container) {
-                    for (const priceDiv of container.querySelectorAll('.price')) {
-                        const vatSpan = priceDiv.querySelector('.vat_span');
-                        if (vatSpan && vatSpan.innerText.toLowerCase().includes('ex')) {
-                            const amount = priceDiv.querySelector('.amount bdi, .amount');
-                            if (amount) {
-                                const val = parsePrice(amount.innerText || amount.textContent);
-                                if (val) return val;
-                            }
-                        }
-                    }
-                    const first = container.querySelector('.price .amount bdi, .price .amount');
-                    if (first) {
-                        const val = parsePrice(first.innerText || first.textContent);
-                        if (val) return val;
-                    }
-                }
-                const unit = document.querySelector('.unit_container .price .amount');
-                if (unit) {
-                    const val = parsePrice(unit.innerText || unit.textContent);
-                    if (val) return val;
-                }
-                return null;
-            }
-        """)
-        return float(result) if result else None
-    except Exception:
-        return None
-
-
 async def _extract_pavement_signs_price(page: Page) -> Optional[float]:
     try:
         result = await page.evaluate(r"""
@@ -377,7 +346,8 @@ async def scrape_product_page(
         "url": url,
         "error": None,
         "og_image": None,
-        "_dd_variant_url": None,   # set when DD blob matching finds a specific child URL
+        "_dd_variant_url": None,
+        "_alplas_variation_url": None,
     }
 
     if is_category_url(url):
@@ -417,17 +387,10 @@ async def scrape_product_page(
         if not price: price = await _extract_meta_price(page)
 
         # ── Discount Displays: try JSON blob first ─────────────────────────────
-        # For configurable products the blob contains the exact ex-VAT price for
-        # each child variant — no Alpine.js rendering needed.  If the URL already
-        # has super_attribute params (Case A) we read the price directly.  If not
-        # (Case B) we match the best variant for this UKPOS SKU.
-        # For simple (non-configurable) DD pages the blob won't be present so we
-        # fall through to the legacy Alpine selector.
         if DISCOUNT_DISPLAYS_DOMAIN in competitor_domain:
             dd_result = await scrape_dd_page(page, sku=sku or {}, url=url)
             if dd_result.success and dd_result.price_ex_vat:
                 price = dd_result.price_ex_vat
-                # Blob always returns ex-VAT — override any detect_vat() guess
                 result["vat"] = "ex"
                 if not dd_result.in_stock:
                     result["availability"] = "out_of_stock"
@@ -438,12 +401,31 @@ async def scrape_product_page(
                     f"child={dd_result.matched_variant.child_id if dd_result.matched_variant else '?'}"
                 )
             else:
-                # Fallback: simple product or blob parse failed — use Alpine selector
                 log.debug(f"  DD blob unavailable ({dd_result.error}), trying Alpine fallback")
                 price = await _extract_discount_displays_price(page)
 
-        elif "alplas.com" in competitor_domain:
-            if not price: price = await _extract_alplas_price(page)
+        # ── Alplas: parse WooCommerce variation blob from raw HTML ─────────────
+        # Prices are entirely JS-rendered client-side — the blob in the raw HTML
+        # contains all variation IDs and ex-VAT prices. No page interaction needed.
+        # Case A: URL has ?variation_id=... → direct price read from blob.
+        # Case B: URL has ?attribute_dimension=... → label lookup in blob.
+        # Case C: neither → match by SKU title scoring.
+        elif ALPLAS_DOMAIN in competitor_domain:
+            html = await page.content()
+            alplas_result = scrape_alplas_page(html, url=url, sku=sku or {})
+            if alplas_result.success and alplas_result.price_ex_vat:
+                price = alplas_result.price_ex_vat
+                result["vat"] = "ex"
+                if not alplas_result.in_stock:
+                    result["availability"] = "out_of_stock"
+                if alplas_result.matched_variation:
+                    result["_alplas_variation_url"] = alplas_result.matched_variation.url
+                log.debug(
+                    f"  Alplas blob price: £{price} ex VAT "
+                    f"variation={alplas_result.matched_variation.variation_id if alplas_result.matched_variation else '?'}"
+                )
+            else:
+                log.debug(f"  Alplas blob unavailable ({alplas_result.error}) — no price")
 
         elif "pavementsigns.com" in competitor_domain:
             if not price: price = await _extract_pavement_signs_price(page)
@@ -533,6 +515,7 @@ async def scrape_match(
         "_comp_title":         match.get("competitor_title"),
         "_was_amended":        was_amended,
         "_dd_variant_url":     None,
+        "_alplas_variation_url": None,
     }
 
     ctx = await new_stealth_context(browser)
@@ -546,11 +529,12 @@ async def scrape_match(
         comp_title = result["title"] or match.get("competitor_title", "")
         vat_hint   = result["vat"]
 
-        snapshot["availability"]   = result["availability"]
-        snapshot["error_message"]  = result["error"]
-        snapshot["_comp_title"]    = comp_title
-        snapshot["_og_image"]      = result.get("og_image")
-        snapshot["_dd_variant_url"] = result.get("_dd_variant_url")
+        snapshot["availability"]          = result["availability"]
+        snapshot["error_message"]         = result["error"]
+        snapshot["_comp_title"]           = comp_title
+        snapshot["_og_image"]             = result.get("og_image")
+        snapshot["_dd_variant_url"]       = result.get("_dd_variant_url")
+        snapshot["_alplas_variation_url"] = result.get("_alplas_variation_url")
 
         if vat_hint != "unknown":
             snapshot["competitor_vat"] = vat_hint
@@ -691,7 +675,6 @@ async def run_scraper(trigger: str = "scheduled"):
                     if snap["availability"] == "out_of_stock":
                         stats["oos"] += 1
 
-                # ── Build competitor_matches update payload ─────────────────────
                 url = match["competitor_url"]
                 match_updates = {"updated_at": datetime.now(timezone.utc).isoformat()}
 
@@ -701,16 +684,24 @@ async def run_scraper(trigger: str = "scheduled"):
                     match_updates["competitor_image_url"] = snap["_og_image"]
 
                 # ── Persist canonical DD variant URL ───────────────────────────
-                # When the blob matcher resolves a specific child variant, store
-                # its canonical URL (with super_attribute params) so future runs
-                # take the Case A fast path and read price directly from the blob
-                # without needing to match again.
                 dd_vurl = snap.get("_dd_variant_url")
                 if dd_vurl and dd_vurl != url:
                     match_updates["competitor_url"] = dd_vurl
                     log.info(
                         f"  DD: persisting variant URL for {sku['sku_id']} "
                         f"→ {dd_vurl}"
+                    )
+
+                # ── Persist canonical Alplas variation URL ─────────────────────
+                # When blob matching resolves a specific variation, store its
+                # canonical URL (with variation_id param) so future runs take
+                # the Case A fast path and read price directly from the blob.
+                alplas_vurl = snap.get("_alplas_variation_url")
+                if alplas_vurl and alplas_vurl != url and not dd_vurl:
+                    match_updates["competitor_url"] = alplas_vurl
+                    log.info(
+                        f"  Alplas: persisting variation URL for {sku['sku_id']} "
+                        f"→ {alplas_vurl}"
                     )
 
                 # ── Promote 'amended' → 'matched' once we get any usable result ──
