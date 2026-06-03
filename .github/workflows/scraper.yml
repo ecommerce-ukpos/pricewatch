@@ -1,11 +1,9 @@
 name: Price Scraper
-
 on:
   schedule:
     # Price scrape — every 3 days (Mon/Thu/Sun at 1am)
     # Only visits confirmed competitor URLs — fast and reliable
     - cron: '0 1 * * 0,1,4'
-
   workflow_dispatch:
     inputs:
       job:
@@ -36,7 +34,11 @@ on:
         description: 'Max SKUs per discovery run (default 250)'
         required: false
         default: '250'
-
+      competitor_ids:
+        description: 'Comma-separated competitor IDs to run (optional — runs all if blank)'
+        required: false
+        default: ''
+        type: string
 jobs:
   run:
     runs-on: ubuntu-22.04
@@ -44,18 +46,14 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install dependencies
         run: pip install supabase playwright httpx
-
       - name: Install Playwright browsers
         run: python -m playwright install --with-deps chromium
-
       - name: Determine job for scheduled runs
         id: job
         run: |
@@ -64,7 +62,6 @@ jobs:
           else
             echo "job=${{ github.event.inputs.job || 'scrape' }}" >> $GITHUB_OUTPUT
           fi
-
       - name: Run price scrape
         if: steps.job.outputs.job == 'scrape'
         env:
@@ -74,8 +71,8 @@ jobs:
           SCRAPER_WORKERS:      ${{ github.event.inputs.scraper_workers || '5' }}
           SCRAPER_DELAY_MIN:    '3'
           SCRAPER_DELAY_MAX:    '7'
+          COMPETITOR_IDS:       ${{ github.event.inputs.competitor_ids || '' }}
         run: python scraper/scrape.py scheduled
-
       - name: Run URL discovery
         if: steps.job.outputs.job == 'discover'
         env:
@@ -87,4 +84,5 @@ jobs:
           DISCOVER_SKU_LIMIT:    ${{ github.event.inputs.discover_sku_limit || '250' }}
           DISCOVER_DELAY_MIN:    '8'
           DISCOVER_DELAY_MAX:    '15'
+          COMPETITOR_IDS:        ${{ github.event.inputs.competitor_ids || '' }}
         run: python scraper/discover.py
