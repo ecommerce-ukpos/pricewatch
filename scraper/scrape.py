@@ -17,6 +17,12 @@ Per confirmed URL:
   - Raises alerts if diff > threshold
   - Refreshes competitor product image quarterly
 
+Discount Displays special handling:
+  - Parses the initConfigurableOptions JSON blob directly from raw HTML
+  - Matches the correct child variant using size/colour tokens from UKPOS title
+  - Persists the canonical variant URL (with super_attribute params) back to
+    competitor_matches so future runs use the exact child page (Case A fast path)
+
 Environment variables:
     SUPABASE_URL
     SUPABASE_SERVICE_KEY
@@ -59,6 +65,13 @@ from common import (
     per_unit_price,
     BIGCOMMERCE_DOMAINS,
     DISCOUNT_DISPLAYS_DOMAIN,
+)
+from discount_displays import (
+    scrape_dd_page,
+    parse_configurable_blob,
+    match_variant,
+    variant_url,
+    price_from_blob,
 )
 
 # ── Config ─────────────────────────────────────────────────────────────────────
@@ -290,6 +303,12 @@ async def _extract_pavement_signs_price(page: Page) -> Optional[float]:
 
 
 async def _extract_discount_displays_price(page: Page) -> Optional[float]:
+    """
+    Fallback for simple (non-configurable) Discount Displays pages.
+    The primary path for configurable products is scrape_dd_page() which
+    reads price directly from the JSON blob without waiting for Alpine.js.
+    This fallback is kept for simple products that have no blob.
+    """
     try:
         try:
             await page.wait_for_function(
@@ -348,10 +367,17 @@ async def scrape_product_page(
     url: str,
     competitor_domain: str = "",
     fetch_image: bool = False,
+    sku: Optional[dict] = None,
 ) -> dict:
     result = {
-        "price": None, "vat": "unknown", "availability": "in_stock",
-        "title": "", "url": url, "error": None, "og_image": None,
+        "price": None,
+        "vat": "unknown",
+        "availability": "in_stock",
+        "title": "",
+        "url": url,
+        "error": None,
+        "og_image": None,
+        "_dd_variant_url": None,   # set when DD blob matching finds a specific child URL
     }
 
     if is_category_url(url):
@@ -389,12 +415,39 @@ async def scrape_product_page(
         price = shopify_price
         if not price: price = await _extract_jsonld_price(page)
         if not price: price = await _extract_meta_price(page)
-        if not price and DISCOUNT_DISPLAYS_DOMAIN in competitor_domain:
-            price = await _extract_discount_displays_price(page)
-        if not price and "alplas.com" in competitor_domain:
-            price = await _extract_alplas_price(page)
-        if not price and "pavementsigns.com" in competitor_domain:
-            price = await _extract_pavement_signs_price(page)
+
+        # ── Discount Displays: try JSON blob first ─────────────────────────────
+        # For configurable products the blob contains the exact ex-VAT price for
+        # each child variant — no Alpine.js rendering needed.  If the URL already
+        # has super_attribute params (Case A) we read the price directly.  If not
+        # (Case B) we match the best variant for this UKPOS SKU.
+        # For simple (non-configurable) DD pages the blob won't be present so we
+        # fall through to the legacy Alpine selector.
+        if DISCOUNT_DISPLAYS_DOMAIN in competitor_domain:
+            dd_result = await scrape_dd_page(page, sku=sku or {}, url=url)
+            if dd_result.success and dd_result.price_ex_vat:
+                price = dd_result.price_ex_vat
+                # Blob always returns ex-VAT — override any detect_vat() guess
+                result["vat"] = "ex"
+                if not dd_result.in_stock:
+                    result["availability"] = "out_of_stock"
+                if dd_result.matched_variant:
+                    result["_dd_variant_url"] = dd_result.matched_variant.url
+                log.debug(
+                    f"  DD blob price: £{price} "
+                    f"child={dd_result.matched_variant.child_id if dd_result.matched_variant else '?'}"
+                )
+            else:
+                # Fallback: simple product or blob parse failed — use Alpine selector
+                log.debug(f"  DD blob unavailable ({dd_result.error}), trying Alpine fallback")
+                price = await _extract_discount_displays_price(page)
+
+        elif "alplas.com" in competitor_domain:
+            if not price: price = await _extract_alplas_price(page)
+
+        elif "pavementsigns.com" in competitor_domain:
+            if not price: price = await _extract_pavement_signs_price(page)
+
         if not price:
             price = await _extract_main_price(page)
 
@@ -458,9 +511,9 @@ async def scrape_match(
     match: dict,
     run_id: str,
 ) -> dict:
-    domain         = competitor["domain"].lstrip("www.")
-    url            = match["competitor_url"]
-    was_amended    = match.get("match_status") == "amended"
+    domain      = competitor["domain"].lstrip("www.")
+    url         = match["competitor_url"]
+    was_amended = match.get("match_status") == "amended"
 
     snapshot = {
         "sku_id":              sku["sku_id"],
@@ -479,6 +532,7 @@ async def scrape_match(
         "error_message":       None,
         "_comp_title":         match.get("competitor_title"),
         "_was_amended":        was_amended,
+        "_dd_variant_url":     None,
     }
 
     ctx = await new_stealth_context(browser)
@@ -486,15 +540,17 @@ async def scrape_match(
         result = await scrape_product_page(
             ctx, url, domain,
             fetch_image=image_needs_refresh(match),
+            sku=sku,
         )
         price      = result["price"]
         comp_title = result["title"] or match.get("competitor_title", "")
         vat_hint   = result["vat"]
 
-        snapshot["availability"]  = result["availability"]
-        snapshot["error_message"] = result["error"]
-        snapshot["_comp_title"]   = comp_title
-        snapshot["_og_image"]     = result.get("og_image")
+        snapshot["availability"]   = result["availability"]
+        snapshot["error_message"]  = result["error"]
+        snapshot["_comp_title"]    = comp_title
+        snapshot["_og_image"]      = result.get("og_image")
+        snapshot["_dd_variant_url"] = result.get("_dd_variant_url")
 
         if vat_hint != "unknown":
             snapshot["competitor_vat"] = vat_hint
@@ -569,10 +625,6 @@ async def run_scraper(trigger: str = "scheduled"):
 
     specific_skus = [s.strip() for s in os.getenv("SCRAPER_SKUS", "").split(",") if s.strip()]
 
-    # ── Load confirmed matches AND amended matches ──────────────────────────────
-    # 'amended' rows are URLs manually corrected by a reviewer awaiting first scrape.
-    # They are scraped here exactly like 'matched' rows; on success they transition
-    # to 'matched' and awaiting_scrape is cleared.
     query = (
         sb.table("competitor_matches")
         .select(
@@ -639,7 +691,8 @@ async def run_scraper(trigger: str = "scheduled"):
                     if snap["availability"] == "out_of_stock":
                         stats["oos"] += 1
 
-                # Build the competitor_matches update payload
+                # ── Build competitor_matches update payload ─────────────────────
+                url = match["competitor_url"]
                 match_updates = {"updated_at": datetime.now(timezone.utc).isoformat()}
 
                 if snap.get("_comp_title"):
@@ -647,10 +700,20 @@ async def run_scraper(trigger: str = "scheduled"):
                 if snap.get("_og_image"):
                     match_updates["competitor_image_url"] = snap["_og_image"]
 
+                # ── Persist canonical DD variant URL ───────────────────────────
+                # When the blob matcher resolves a specific child variant, store
+                # its canonical URL (with super_attribute params) so future runs
+                # take the Case A fast path and read price directly from the blob
+                # without needing to match again.
+                dd_vurl = snap.get("_dd_variant_url")
+                if dd_vurl and dd_vurl != url:
+                    match_updates["competitor_url"] = dd_vurl
+                    log.info(
+                        f"  DD: persisting variant URL for {sku['sku_id']} "
+                        f"→ {dd_vurl}"
+                    )
+
                 # ── Promote 'amended' → 'matched' once we get any usable result ──
-                # We promote even on OOS — the URL is valid, price data exists.
-                # We only leave it as 'amended' if the page errored or was unavailable
-                # (suggesting the URL might still be wrong).
                 if was_amended:
                     if snap["availability"] not in ("error", "unavailable"):
                         match_updates["match_status"]    = "matched"
@@ -661,7 +724,6 @@ async def run_scraper(trigger: str = "scheduled"):
                             f"amended→matched (availability={snap['availability']})"
                         )
                     else:
-                        # URL still looks bad — keep as amended so reviewer can see it
                         log.warning(
                             f"  ⚠ {sku['sku_id']} × {comp['domain']} "
                             f"amended but page error/unavailable — keeping as amended"
