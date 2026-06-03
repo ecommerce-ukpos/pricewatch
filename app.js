@@ -1710,6 +1710,7 @@ async function loadCompetitorSettings() {
       const unkCls = c.vat_status==='unknown' ? 's-unk' : '';
       const rowBg  = c.vat_status==='unknown' ? 'background:rgba(133,79,11,.03)' : '';
       return `<tr style="${rowBg}${!c.active?';opacity:.5':''}">
+        <td style="font-family:'SF Mono',monospace;font-size:11px;color:var(--t3)">${c.id}</td>
         <td style="font-weight:500">${c.name}</td>
         <td style="font-size:11px;color:var(--t2)">${c.domain}</td>
         <td>
@@ -1723,7 +1724,7 @@ async function loadCompetitorSettings() {
         <td><input type="checkbox" ${c.active?'checked':''} style="accent-color:var(--orange)" onchange="setCompActive(${c.id},this.checked)"></td>
       </tr>`;
     }).join('');
-  } catch (e) { $('comp-sett-tbody').innerHTML = `<tr><td colspan="5" style="color:var(--red);padding:8px">${e.message}</td></tr>`; }
+  } catch (e) { $('comp-sett-tbody').innerHTML = `<tr><td colspan="6" style="color:var(--red);padding:8px">${e.message}</td></tr>`; }
 }
 
 async function setVatStatus(compId, val) {
