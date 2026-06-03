@@ -1,5 +1,4 @@
 name: Image Scraper
-
 on:
   schedule:
     # 2am on the 1st of January, April, July, October — quarterly
@@ -18,24 +17,24 @@ on:
         description: 'Max SKUs to process (0 = all, default 5000)'
         required: false
         default: '5000'
-
+      competitor_ids:
+        description: 'Comma-separated competitor IDs to run (optional — runs all if blank)'
+        required: false
+        default: ''
+        type: string
 jobs:
   scrape-images:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
       - name: Install dependencies
         run: pip install supabase httpx
-
       - name: Run image scraper
         env:
           SUPABASE_URL:        ${{ secrets.SUPABASE_URL }}
@@ -43,6 +42,7 @@ jobs:
           IMAGE_WORKERS:       '10'
           IMAGE_REFRESH_DAYS:  '90'
           IMAGE_SKU_LIMIT:     ${{ github.event.inputs.sku_limit || '5000' }}
+          COMPETITOR_IDS:      ${{ github.event.inputs.competitor_ids || '' }}
         run: |
           ARGS=""
           if [ "${{ github.event.inputs.force }}" = "true" ]; then
