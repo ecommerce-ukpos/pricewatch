@@ -527,7 +527,6 @@ async def scrape_match(
         )
         price      = result["price"]
         comp_title = result["title"] or match.get("competitor_title", "")
-        vat_hint   = result["vat"]
 
         snapshot["availability"]          = result["availability"]
         snapshot["error_message"]         = result["error"]
@@ -536,10 +535,10 @@ async def scrape_match(
         snapshot["_dd_variant_url"]       = result.get("_dd_variant_url")
         snapshot["_alplas_variation_url"] = result.get("_alplas_variation_url")
 
-        # Only apply page VAT detection if the competitor has no configured vat_status.
-        # Page detection can misfire on header toggles (e.g. "INC VAT / EX VAT" switcher).
-        if vat_hint != "unknown" and competitor.get("vat_status", "unknown") == "unknown":
-            snapshot["competitor_vat"] = vat_hint
+        # competitor_vat is set from the competitors table at snapshot initialisation.
+        # Page VAT detection (vat_hint) is intentionally ignored — it misfires on
+        # header toggles and other non-price text. VAT basis is a competitor-level
+        # setting, not a per-page one.
 
         if price:
             our_price  = float(sku["price_ex_vat"])
