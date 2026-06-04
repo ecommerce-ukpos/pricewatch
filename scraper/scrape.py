@@ -536,7 +536,9 @@ async def scrape_match(
         snapshot["_dd_variant_url"]       = result.get("_dd_variant_url")
         snapshot["_alplas_variation_url"] = result.get("_alplas_variation_url")
 
-        if vat_hint != "unknown":
+        # Only apply page VAT detection if the competitor has no configured vat_status.
+        # Page detection can misfire on header toggles (e.g. "INC VAT / EX VAT" switcher).
+        if vat_hint != "unknown" and competitor.get("vat_status", "unknown") == "unknown":
             snapshot["competitor_vat"] = vat_hint
 
         if price:
