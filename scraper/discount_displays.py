@@ -12,7 +12,7 @@ Discount Displays–specific logic for:
 
   2. Matching a UKPOS SKU to the best-fit child variant on a Discount Displays
      page, using dimension tokens and colour/finish keywords extracted from the
-     UKPOS short_title.
+     UKPOS short_title and SKU ID.
 
   3. Building a canonical variant URL that encodes the selected
      super_attribute params — this URL is what gets stored in
@@ -281,9 +281,9 @@ def _colour_hints(text: str) -> set[str]:
     return found
 
 
-def _score_child(child_id: str, cp: ConfigurableProduct, sku_title: str) -> tuple[int, str]:
+def _score_child(child_id: str, cp: ConfigurableProduct, sku_title: str, sku_id: str = "") -> tuple[int, str]:
     """
-    Score a child variant against a UKPOS SKU title.
+    Score a child variant against a UKPOS SKU title and SKU ID.
     Returns (score 0-100, reasoning string).
     """
     labels = cp.child_labels(child_id)
@@ -293,23 +293,30 @@ def _score_child(child_id: str, cp: ConfigurableProduct, sku_title: str) -> tupl
     sku_sizes   = _size_tokens(sku_title)
     sku_colours = _colour_hints(sku_title)
 
+    # Extract A-size directly from SKU ID (e.g. "A2" from "HLEDA2")
+    a_size_in_sku_id = re.search(r'A[0-7]', sku_id, re.IGNORECASE)
+    sku_id_sizes = {a_size_in_sku_id.group(0).lower()} if a_size_in_sku_id else set()
+
+    # Combined size signal from title + SKU ID
+    all_sku_sizes = sku_sizes | sku_id_sizes
+
     for attr_label, option_label in labels.items():
         opt_lower = option_label.lower()
 
         # ── Size matching ──────────────────────────────────────────────────
         if any(k in attr_label.lower() for k in ("size", "dimension", "format", "graphic", "width", "height", "length", "depth", "notice_board")):
             opt_sizes = _size_tokens(option_label)
-            if sku_sizes and opt_sizes:
-                if sku_sizes & opt_sizes:
+            if all_sku_sizes and opt_sizes:
+                if all_sku_sizes & opt_sizes:
                     score += 50
                     reasons.append(f"size match: {option_label}")
                 else:
                     score -= 20
-                    reasons.append(f"size MISMATCH: sku={sku_sizes} opt={opt_sizes}")
-            elif not sku_sizes:
-                # No size in UKPOS title — treat as neutral (not a penalty)
+                    reasons.append(f"size MISMATCH: sku={all_sku_sizes} opt={opt_sizes}")
+            elif not all_sku_sizes:
+                # No size in UKPOS title or SKU ID — treat as neutral (not a penalty)
                 score += 5
-                reasons.append("size: no token in sku title")
+                reasons.append("size: no token in sku title or id")
             else:
                 score -= 5
 
@@ -350,21 +357,22 @@ def match_variant(
     Find the best-matching child variant for a UKPOS SKU.
 
     Strategy:
-      1. Score every child against the UKPOS short_title.
+      1. Score every child against the UKPOS short_title and sku_id.
       2. Break ties by preferring in-stock children.
       3. Return None only if the product has no children at all.
 
     The score intentionally doesn't require a perfect match — on single-axis
     products (size only, no colour) every child gets a meaningful score.
     """
-    title = sku.get("short_title", "")
+    title  = sku.get("short_title", "")
+    sku_id = sku.get("sku_id", "")
     children = cp.all_children()
     if not children:
         return None
 
     scored = []
     for child_id in children:
-        score, reasoning = _score_child(child_id, cp, title)
+        score, reasoning = _score_child(child_id, cp, title, sku_id)
         in_stock = cp.is_saleable.get(child_id, True)
         scored.append((score, in_stock, child_id, reasoning))
 
