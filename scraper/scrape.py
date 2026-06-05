@@ -29,6 +29,14 @@ Alplas special handling:
   - Persists the canonical variation URL (with variation_id param) back to
     competitor_matches so future runs use the exact variation page (Case A fast path)
 
+DisplayWizard special handling:
+  - Shopify headless storefront (Gatsby SSG frontend)
+  - Parses variant data from embedded Shopify JSON in the Gatsby page HTML
+  - Falls back to /products/<handle>.json Shopify endpoint
+  - Variant URLs use ?variant=ID format
+  - Prices are inc-VAT (competitor vat_status='inc' handles normalisation)
+  - Persists the canonical variant URL back to competitor_matches (Case A fast path)
+
 Environment variables:
     SUPABASE_URL
     SUPABASE_SERVICE_KEY
@@ -82,6 +90,10 @@ from discount_displays import (
 from alplas import (
     scrape_alplas_page,
     ALPLAS_DOMAIN,
+)
+from display_wizard import (
+    scrape_dw_page,
+    DISPLAY_WIZARD_DOMAIN,
 )
 
 # ── Config ─────────────────────────────────────────────────────────────────────
@@ -348,6 +360,7 @@ async def scrape_product_page(
         "og_image": None,
         "_dd_variant_url": None,
         "_alplas_variation_url": None,
+        "_dw_variant_url": None,
     }
 
     if is_category_url(url):
@@ -405,11 +418,6 @@ async def scrape_product_page(
                 price = await _extract_discount_displays_price(page)
 
         # ── Alplas: parse WooCommerce variation blob from raw HTML ─────────────
-        # Prices are entirely JS-rendered client-side — the blob in the raw HTML
-        # contains all variation IDs and ex-VAT prices. No page interaction needed.
-        # Case A: URL has ?variation_id=... → direct price read from blob.
-        # Case B: URL has ?attribute_dimension=... → label lookup in blob.
-        # Case C: neither → match by SKU title scoring.
         elif ALPLAS_DOMAIN in competitor_domain:
             html = await page.content()
             alplas_result = scrape_alplas_page(html, url=url, sku=sku or {})
@@ -426,6 +434,31 @@ async def scrape_product_page(
                 )
             else:
                 log.debug(f"  Alplas blob unavailable ({alplas_result.error}) — no price")
+
+        # ── DisplayWizard: parse Shopify variant data from Gatsby page HTML ────
+        # Prices are inc-VAT. Variant URLs use ?variant=ID format.
+        # Case A: URL already has ?variant=ID → direct price read.
+        # Case B: no variant param → match by SKU suffix / title scoring.
+        elif DISPLAY_WIZARD_DOMAIN in competitor_domain:
+            html = await page.content()
+            dw_result = scrape_dw_page(html, url=url, sku=sku or {})
+            if dw_result.success and dw_result.price:
+                price = dw_result.price
+                result["vat"] = "inc"   # DW shows inc-VAT prices
+                if not dw_result.available:
+                    result["availability"] = "out_of_stock"
+                if dw_result.matched_variant:
+                    result["_dw_variant_url"] = dw_result.matched_variant.url
+                log.debug(
+                    f"  DW variant price: £{price} inc VAT "
+                    f"variant={dw_result.matched_variant.variant_id if dw_result.matched_variant else '?'}"
+                )
+            else:
+                log.debug(f"  DW variant data unavailable ({dw_result.error}) — falling through to generic extraction")
+                # Generic extraction will pick up the displayed price (also inc-VAT)
+                # vat detection from page text should catch "inc VAT" on DW pages
+                if not price:
+                    price = await _extract_main_price(page)
 
         elif "pavementsigns.com" in competitor_domain:
             if not price: price = await _extract_pavement_signs_price(page)
@@ -516,6 +549,7 @@ async def scrape_match(
         "_was_amended":        was_amended,
         "_dd_variant_url":     None,
         "_alplas_variation_url": None,
+        "_dw_variant_url":     None,
     }
 
     ctx = await new_stealth_context(browser)
@@ -534,11 +568,7 @@ async def scrape_match(
         snapshot["_og_image"]             = result.get("og_image")
         snapshot["_dd_variant_url"]       = result.get("_dd_variant_url")
         snapshot["_alplas_variation_url"] = result.get("_alplas_variation_url")
-
-        # competitor_vat is set from the competitors table at snapshot initialisation.
-        # Page VAT detection (vat_hint) is intentionally ignored — it misfires on
-        # header toggles and other non-price text. VAT basis is a competitor-level
-        # setting, not a per-page one.
+        snapshot["_dw_variant_url"]       = result.get("_dw_variant_url")
 
         if price:
             our_price  = float(sku["price_ex_vat"])
@@ -694,15 +724,23 @@ async def run_scraper(trigger: str = "scheduled"):
                     )
 
                 # ── Persist canonical Alplas variation URL ─────────────────────
-                # When blob matching resolves a specific variation, store its
-                # canonical URL (with variation_id param) so future runs take
-                # the Case A fast path and read price directly from the blob.
                 alplas_vurl = snap.get("_alplas_variation_url")
                 if alplas_vurl and alplas_vurl != url and not dd_vurl:
                     match_updates["competitor_url"] = alplas_vurl
                     log.info(
                         f"  Alplas: persisting variation URL for {sku['sku_id']} "
                         f"→ {alplas_vurl}"
+                    )
+
+                # ── Persist canonical DisplayWizard variant URL ────────────────
+                # When blob matching resolves a specific ?variant=ID, store its
+                # canonical URL so future runs take the Case A fast path.
+                dw_vurl = snap.get("_dw_variant_url")
+                if dw_vurl and dw_vurl != url and not dd_vurl and not alplas_vurl:
+                    match_updates["competitor_url"] = dw_vurl
+                    log.info(
+                        f"  DW: persisting variant URL for {sku['sku_id']} "
+                        f"→ {dw_vurl}"
                     )
 
                 # ── Promote 'amended' → 'matched' once we get any usable result ──
