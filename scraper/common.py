@@ -71,7 +71,7 @@ STOP_WORDS = {
 
 # ── Pack qty patterns ──────────────────────────────────────────────────────────
 PACK_QTY_PATTERNS = [
-    r"\bx\s*(\d+)\b",
+    r"(?<!\d\s)(?<!\d)\bx\s*(\d+)\b",
     r"\bpack\s+of\s+(\d+)\b",
     r"\b(\d+)\s*pack\b",
     r"\bset\s+of\s+(\d+)\b",
@@ -79,7 +79,7 @@ PACK_QTY_PATTERNS = [
     r"\bbag\s+of\s+(\d+)\b",
     r"\bper\s+(\d+)\b",
     r"\bqty\s*[:\-]?\s*(\d+)\b",
-    r"\b(\d+)\s*x\b",
+    r"\b(\d+)\s*x\b(?!\s*\d)",
 ]
 
 # ── Category URL signals (used by scrape.py to skip listing pages) ─────────────
