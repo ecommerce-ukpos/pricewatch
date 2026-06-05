@@ -219,7 +219,7 @@ def extract_pack_qty(title: str) -> Optional[int]:
         m = re.search(pattern, t, re.I)
         if m:
             qty = int(m.group(1))
-            if 2 <= qty <= 10000:  # sanity bounds
+            if 2 <= qty <= 500:  # was 10000 — anything larger is almost certainly a dimension
                 return qty
     return None
 
