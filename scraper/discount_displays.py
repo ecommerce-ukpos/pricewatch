@@ -297,7 +297,7 @@ def _score_child(child_id: str, cp: ConfigurableProduct, sku_title: str) -> tupl
         opt_lower = option_label.lower()
 
         # ── Size matching ──────────────────────────────────────────────────
-        if any(k in attr_label.lower() for k in ("size", "dimension", "format")):
+        if any(k in attr_label.lower() for k in ("size", "dimension", "format", "graphic", "width", "height", "length", "depth", "notice_board")):
             opt_sizes = _size_tokens(option_label)
             if sku_sizes and opt_sizes:
                 if sku_sizes & opt_sizes:
