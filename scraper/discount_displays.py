@@ -124,7 +124,7 @@ class VariantMatch:
 # ── JSON blob extraction ───────────────────────────────────────────────────────
 
 _BLOB_PATTERN = re.compile(
-    r"initConfigurableOptions\(\s*'(\d+)'\s*,\s*(\{.*?\})\s*\)\s*;",
+    r"initConfigurableOptions\(\s*'(\d+)'\s*,\s*(\{.*?\})\s*\)",
     re.DOTALL,
 )
 
