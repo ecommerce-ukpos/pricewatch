@@ -37,6 +37,12 @@ DisplayWizard special handling:
   - Prices are inc-VAT (competitor vat_status='inc' handles normalisation)
   - Persists the canonical variant URL back to competitor_matches (Case A fast path)
 
+Snap Frames Warehouse special handling:
+  - Custom OpenCart theme with no standard price class
+  - Prices are in <h2> elements inside .list-unstyled, before #product
+  - First <h2> is the single-unit price; subsequent ones are tier prices
+  - Scoped extraction avoids related-product prices elsewhere on the page
+
 Environment variables:
     SUPABASE_URL
     SUPABASE_SERVICE_KEY
@@ -111,6 +117,8 @@ DELAY_MIN         = float(os.getenv("SCRAPER_DELAY_MIN", "3"))
 DELAY_MAX         = float(os.getenv("SCRAPER_DELAY_MAX", "7"))
 COMPETITOR_LIMIT  = int(os.getenv("SCRAPER_COMPETITOR_LIMIT", "23"))
 IMAGE_REFRESH_DAYS = int(os.getenv("IMAGE_REFRESH_DAYS", "90"))
+
+SNAP_FRAMES_WAREHOUSE_DOMAIN = "snapframeswarehouse.co.uk"
 
 
 # ── Image refresh helper ───────────────────────────────────────────────────────
@@ -341,6 +349,38 @@ async def _extract_discount_displays_price(page: Page) -> Optional[float]:
         return None
 
 
+async def _extract_snap_frames_warehouse_price(page: Page) -> Optional[float]:
+    """
+    snapframeswarehouse.co.uk — custom OpenCart theme with no standard price class.
+    Prices sit in <h2> elements inside ul.list-unstyled, before the #product div.
+    The first <h2> is the single-unit price; subsequent <h2>s are tier prices.
+    Iterates all .list-unstyled lists and returns the price from the first <h2>
+    found, which is always the single-unit price on this site's layout.
+    """
+    try:
+        result = await page.evaluate(r"""
+            () => {
+                const lists = document.querySelectorAll('ul.list-unstyled');
+                for (const ul of lists) {
+                    const h2 = ul.querySelector('h2');
+                    if (h2) {
+                        const txt = h2.innerText || h2.textContent || '';
+                        const m = txt.replace(/,/g, '').match(/[\d]+\.?\d*/);
+                        if (m) {
+                            const val = parseFloat(m[0]);
+                            if (val > 0.01 && val < 99999) return val;
+                        }
+                    }
+                }
+                return null;
+            }
+        """)
+        return float(result) if result else None
+    except Exception as e:
+        log.debug(f"  SFW price extraction failed: {e}")
+        return None
+
+
 # ── Page scraper ───────────────────────────────────────────────────────────────
 
 async def scrape_product_page(
@@ -459,6 +499,13 @@ async def scrape_product_page(
                 # vat detection from page text should catch "inc VAT" on DW pages
                 if not price:
                     price = await _extract_main_price(page)
+
+        # ── Snap Frames Warehouse: custom OpenCart theme ───────────────────────
+        # No standard price class — prices in <h2> inside ul.list-unstyled.
+        # First <h2> is single-unit price; subsequent ones are tier prices.
+        elif SNAP_FRAMES_WAREHOUSE_DOMAIN in competitor_domain:
+            if not price:
+                price = await _extract_snap_frames_warehouse_price(page)
 
         elif "pavementsigns.com" in competitor_domain:
             if not price: price = await _extract_pavement_signs_price(page)
