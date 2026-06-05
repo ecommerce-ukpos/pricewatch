@@ -199,7 +199,7 @@ def normalise_price(price: float, vat: str) -> float:
 
 # Pack quantity patterns — matches "x 100", "x100", "pack of 50", "50 pack", "pack of 1" etc.
 PACK_QTY_PATTERNS = [
-    r"\bx\s*(\d+)\b",
+    r"(?<!\d\s)(?<!\d)\bx\s*(\d+)\b",
     r"\bpack\s+of\s+(\d+)\b",
     r"\b(\d+)\s*pack\b",
     r"\bset\s+of\s+(\d+)\b",
@@ -207,7 +207,7 @@ PACK_QTY_PATTERNS = [
     r"\bbag\s+of\s+(\d+)\b",
     r"\bper\s+(\d+)\b",
     r"\bqty\s*[:\-]?\s*(\d+)\b",
-    r"\b(\d+)\s*x\b",
+    r"\b(\d+)\s*x\b(?!\s*\d)",
 ]
 
 def extract_pack_qty(title: str) -> Optional[int]:
