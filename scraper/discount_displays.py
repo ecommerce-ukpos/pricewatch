@@ -281,7 +281,7 @@ def _colour_hints(text: str) -> set[str]:
     return found
 
 
-def _score_child(child_id: str, cp: ConfigurableProduct, sku_title: str) -> tuple[int, str]:
+def _score_child(child_id: str, cp: ConfigurableProduct, sku_title: str, sku_id: str = "") -> tuple[int, str]:
     """
     Score a child variant against a UKPOS SKU title.
     Returns (score 0-100, reasoning string).
@@ -312,6 +312,17 @@ def _score_child(child_id: str, cp: ConfigurableProduct, sku_title: str) -> tupl
                 reasons.append("size: no token in sku title")
             else:
                 score -= 5
+
+            # ── SKU ID size token matching ─────────────────────────────────
+            if not (sku_sizes & opt_sizes) and sku_id:
+                a_size_in_sku_id = re.search(r"A[0-7]", sku_id, re.IGNORECASE)
+                sku_id_sizes = {a_size_in_sku_id.group(0).lower()} if a_size_in_sku_id else _size_tokens(sku_id)
+                if sku_id_sizes & opt_sizes:
+                    score += 50
+                    reasons.append(f"size match via SKU ID: {sku_id_sizes & opt_sizes}")
+                elif sku_id_sizes and opt_sizes:
+                    score -= 20
+                    reasons.append(f"size mismatch via SKU ID")
 
         # ── Colour / finish matching ───────────────────────────────────────
         elif any(k in attr_label.lower() for k in ("colour", "color", "finish", "stain", "material")):
@@ -364,7 +375,7 @@ def match_variant(
 
     scored = []
     for child_id in children:
-        score, reasoning = _score_child(child_id, cp, title)
+        score, reasoning = _score_child(child_id, cp, title, sku.get("sku_id", ""))
         in_stock = cp.is_saleable.get(child_id, True)
         scored.append((score, in_stock, child_id, reasoning))
 
