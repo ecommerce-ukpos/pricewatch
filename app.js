@@ -439,7 +439,7 @@ async function loadDashboard() {
       $('nav-alerts-badge').style.display = '';
     }
 
-    $('sidebar-foot').innerHTML = `<strong>${(d.sku_count||0).toLocaleString()}</strong> SKUs · <strong>${d.competitor_count||23}</strong> competitors<br><strong>${(d.snapshot_count||0).toLocaleString()}</strong> snapshots`;
+    $('sidebar-foot').innerHTML = `<strong>${(d.sku_count||0).toLocaleString()}</strong> SKUs · <strong>${d.competitor_count||0}</strong> competitors<br><strong>${(d.match_count||0).toLocaleString()}</strong> matched pairs`;
 
     if (d.last_run) {
       const r = d.last_run;
