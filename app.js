@@ -707,7 +707,7 @@ function applySkuCompetitorFilter() {
 
   $('skus-sub').textContent = comp
     ? `${rows.length.toLocaleString()} of ${skusAllData.length.toLocaleString()} SKUs matched by ${comp}`
-    : `${skuTotal.toLocaleString()} SKUs`;
+    : `${rows.length < skuLimit ? ((skuPage-1)*skuLimit + rows.length).toLocaleString() : skuPage > 1 ? 'Page ' + skuPage : rows.length.toLocaleString() + '+ SKUs'}`;
 
   if (!rows.length) {
     $('sku-tbody').innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--t2);padding:20px">No SKUs matched by this competitor</td></tr>';
@@ -726,7 +726,7 @@ function applySkuCompetitorFilter() {
     const from = (skuPage-1)*skuLimit+1, to = (skuPage-1)*skuLimit+rows.length;
     $('sku-pagination').innerHTML = `
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <span>${from.toLocaleString()}–${to.toLocaleString()} of ${skuTotal.toLocaleString()}</span>
+        <span>${from.toLocaleString()}–${to.toLocaleString()}${rows.length === skuLimit ? '+' : ''}</span>
         <select onchange="skuLimit=+this.value===0?999999:+this.value;skuPage=1;loadSKUs()" style="padding:3px 6px;border-radius:5px;border:1px solid var(--bm);background:var(--surface);font-size:11px">
           <option value="50" ${skuLimit===50?'selected':''}>50 / page</option>
           <option value="100" ${skuLimit===100?'selected':''}>100 / page</option>
