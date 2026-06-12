@@ -2083,16 +2083,7 @@ function renderSkusRows(rows) {
       <td style="color:var(--t3)">${ts(r.scraped_at)}</td>
       <td style="white-space:nowrap"><button class="btn sm ghost" onclick="event.stopPropagation();openDrawer('${r.sku_id}','${(r.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(r.our_price)}','skus')" style="font-size:11px;padding:4px 8px">Quick view</button></td>
     </tr>`;
-  }).join('') + `<tr style="border-top:2px solid var(--border);font-weight:600;background:var(--bg)">
-  <td style="color:var(--t2);font-size:11px">Total</td>
-  <td></td>
-  <td></td>
-  <td>${totals.matched}</td>
-  <td style="color:var(--red)">${totals.critical}</td>
-  <td style="color:var(--amb)">${totals.warning}</td>
-  <td style="color:var(--grn)">${totals.cheaper}</td>
-  <td style="color:var(--t2)">${totals.parity}</td>
-</tr>`;
+  }).join('');
 }
 
 function sortCompSkuTable(col) {
