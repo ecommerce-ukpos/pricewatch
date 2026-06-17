@@ -207,7 +207,20 @@ async def discover_url(
                     await page.close()
                     continue
 
+                # ── DEBUG: dump all links containing any part of the domain ──
+                raw_links = await page.evaluate(f"""
+                    () => Array.from(document.querySelectorAll('a[href]'))
+                               .map(a => a.href)
+                               .filter(h => h.includes('{clean_dom.split(".")[0]}'))
+                               .slice(0, 15)
+                """)
+                log.info(f"  {engine['name']} raw links for '{clean_dom}': {raw_links}")
+
                 results = await _extract_shopping_results(page, clean_dom)
+
+                # ── DEBUG: dump extracted results before confidence filter ────
+                log.info(f"  {engine['name']} extracted results: {results}")
+
                 await page.close()
 
                 for r in results:
@@ -216,7 +229,8 @@ async def discover_url(
                     if not url or not title:
                         continue
                     conf = fuzzy_confidence(sku, title, url)
-                    if conf >= 30:   # low bar — human reviews everything anyway
+                    log.info(f"  candidate: '{title[:60]}' conf={conf}% url={url[:70]}")
+                    if conf >= 30:
                         log.info(f"  ✓ {engine['name']}: '{title[:60]}' conf={conf}%")
                         return {"url": url, "title": title, "confidence": conf, "method": engine["name"].lower().replace(" ", "_")}
 
@@ -246,12 +260,16 @@ async def discover_url(
                     continue
 
                 candidates = await _extract_web_search_urls(page, clean_dom)
+
+                # ── DEBUG: dump site: search candidates ───────────────────────
+                log.info(f"  {engine_name} candidates: {candidates[:10]}")
+
                 await page.close()
 
                 if candidates:
                     url  = candidates[0]
-                    # No title from web search — use query as a placeholder; scrape.py gets the real title
-                    conf = fuzzy_confidence(sku, "", url)
+                    slug = url.rstrip("/").split("/")[-1].replace("-", " ")
+                    conf = fuzzy_confidence(sku, slug, url)
                     log.info(f"  ✓ {engine_name} site-search: {url[:70]} conf={conf}%")
                     return {"url": url, "title": "", "confidence": conf, "method": "site_search"}
 
