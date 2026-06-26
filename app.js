@@ -287,10 +287,17 @@ function go(name, opts = {}) {
   }[name];
   if (navKey && $('nav-' + navKey)) $('nav-' + navKey).classList.add('active');
 
-  if (name === 'skus') {
+if (name === 'skus') {
     const q = $('skuQ');
     if (q) q.value = '';
+    if (opts.filter !== undefined) {
+      const fd = $('fDiff');
+      if (fd) fd.value = opts.filter;
+      const hashFilter = opts.filter ? '?filter=' + opts.filter : '';
+      history.replaceState(null, '', '#skus' + hashFilter);
+    }
     if (!skusLoaded) { skusLoaded = true; loadSKUs(); }
+    else loadSKUs();
   }
   if (name === 'review')      loadReview();
   if (name === 'bycat')       loadByCategory();
@@ -315,6 +322,9 @@ function restoreRoute() {
         else go('bycomp');
       });
     }
+} else if (hash.startsWith('skus')) {
+    const m = hash.match(/\?filter=([^&]+)/);
+    go('skus', m ? { filter: m[1] } : {});
   } else if (PANEL_MAP[hash]) {
     go(hash);
   } else {
@@ -423,10 +433,24 @@ async function loadDashboard() {
     const d = await authFetch('/dashboard');
     const m = d.metrics || {};
 
-    $('m-crit').textContent  = m.critical  ?? '—';
+$('m-crit').textContent  = m.critical  ?? '—';
     $('m-warn').textContent  = m.warning   ?? '—';
     $('m-cheap').textContent = m.cheapest  ?? '—';
     $('m-oos').textContent   = m.oos       ?? '—';
+
+    [
+      ['m-crit',  'crit'],
+      ['m-warn',  'warn'],
+      ['m-cheap', 'cheap'],
+      ['m-oos',   'oos'],
+    ].forEach(([mvId, filter]) => {
+      const card = $(mvId)?.closest('.metric');
+      if (card) {
+        card.style.cursor = 'pointer';
+        card.title = 'View filtered SKUs';
+        card.onclick = () => { skusLoaded = false; go('skus', { filter }); };
+      }
+    });
 
     const reviewCount = m.review || 0;
     if (reviewCount > 0) {
@@ -741,6 +765,8 @@ function applySkuCompetitorFilter() {
 
 function filterSKUs() {
   const comp = $('fComp')?.value || '';
+  const diff = $('fDiff')?.value || '';
+  history.replaceState(null, '', diff ? '#skus?filter=' + diff : '#skus');
   if (comp && skusAllData.length) { applySkuCompetitorFilter(); return; }
   skuPage = 1;
   loadSKUs();
