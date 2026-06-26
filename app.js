@@ -876,7 +876,20 @@ function filterReview() {
   const showing = rows.length;
   const tabLabel = {review:'needs review',auto:'AI matched',human:'confirmed',amended:'needs rescrape',rejected:'rejected'}[matchTab];
   $('review-sub').textContent = (q||comp) ? `${showing} matches (filtered)` : `${showing} ${tabLabel}`;
-
+const sendAllBtn = $('send-all-rescrape');
+  if (matchTab === 'amended') {
+    if (!sendAllBtn) {
+      const btn = document.createElement('button');
+      btn.className = 'btn sm prim';
+      btn.id = 'send-all-rescrape';
+      btn.innerHTML = '<i class="ti ti-player-play"></i> Send all for rescrape';
+      btn.onclick = sendAllForRescrape;
+      document.querySelector('#p-review .cmd-actions').appendChild(btn);
+    }
+  } else {
+    if (sendAllBtn) sendAllBtn.remove();
+  }
+   
   if (!rows.length) {
     const msgs = {
       review:   ['ti-circle-check','var(--grn)','All caught up — no matches need review'],
@@ -1932,7 +1945,44 @@ async function scrapeRow(skuId, competitorId, btn) {
     alert('Scrape failed: ' + e.message);
   }
 }
-
+async function queueRescrape(skuId, competitorId, btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader" style="font-size:13px"></i>';
+  try {
+    const { error } = await sb.from('competitor_matches')
+      .update({ match_status: 'amended', updated_at: new Date().toISOString() })
+      .eq('sku_id', skuId)
+      .eq('competitor_id', competitorId);
+    if (error) throw new Error(error.message);
+    btn.innerHTML = '<i class="ti ti-check" style="font-size:13px;color:var(--grn)"></i> Queued';
+  } catch(e) {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    alert('Failed to queue: ' + e.message);
+  }
+}
+async function sendAllForRescrape() {
+  const btn = $('send-all-rescrape');
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Dispatching…';
+  try {
+    const token = await getToken();
+    const res = await fetch('https://uaqakssusydpjzrcznhb.supabase.co/functions/v1/trigger-scrape', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Dispatch failed');
+    btn.innerHTML = '<i class="ti ti-check"></i> Queued — runs in ~2 min';
+    setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 10000);
+  } catch(e) {
+    btn.innerHTML = orig;
+    btn.disabled = false;
+    alert('Failed to dispatch: ' + e.message);
+  }
+}
 async function manualRefresh() {
   const btn = event.target.closest('button');
   const orig = btn.innerHTML;
@@ -2206,8 +2256,8 @@ function renderSkuCompRows(rows) {
           ${hasUrl?'Edit URL':'Add URL'}
         </button>
       </td>
-      <td><button class="btn sm ghost" id="scrape-${rowId}" onclick="scrapeRow('${r.sku_id}',${r.competitor_id},this)" title="Re-scrape this competitor now"><i class="ti ti-refresh" style="font-size:13px"></i></button></td>
-    </tr>
+      <td><button class="btn sm ghost" id="scrape-${rowId}" onclick="queueRescrape('${r.sku_id}',${r.competitor_id},this)" title="Rescrape"><i class="ti ti-refresh" style="font-size:13px"></i> Rescrape</button></td>
+      </tr>
     <tr id="skurow-edit-${rowId}" style="display:none;background:var(--bb)">
       <td colspan="10" style="padding:10px 12px">
         <div style="font-size:11px;font-weight:500;margin-bottom:6px;color:var(--blu)">
