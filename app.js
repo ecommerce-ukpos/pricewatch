@@ -1996,7 +1996,7 @@ async function sendAllForRescrape() {
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || 'Dispatch failed');
-    btn.innerHTML = '<i class="ti ti-check"></i> Queued — runs in ~2 min';
+    btn.innerHTML = '<i class="ti ti-check"></i> Queued for rescrape';
     setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 10000);
   } catch(e) {
     btn.innerHTML = orig;
