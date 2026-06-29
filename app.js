@@ -1516,13 +1516,34 @@ async function loadSkuDetail(opts) {
         </div>
       </div>`;
 
-    const { data: snaps } = await sb.from('latest_snapshots').select('*,skus(unit_qty)').eq('sku_id', currentSkuId).order('diff_pct_normalised', {ascending:true, nullsFirst:false});
-    const rows = snaps || [];
+const [{ data: snaps }, { data: allComps }] = await Promise.all([
+      sb.from('latest_snapshots').select('*,skus(unit_qty)').eq('sku_id', currentSkuId).order('diff_pct_normalised', {ascending:true, nullsFirst:false}),
+      sb.from('competitors').select('id,name,domain,vat_status').eq('active', true).order('name'),
+    ]);
 
-    if (!rows.length) {
-      $('sku-comp-tbody').innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--t2);padding:20px">No competitor data yet</td></tr>';
-      return;
-    }
+    const snapMap = {};
+    (snaps || []).forEach(s => { snapMap[s.competitor_id] = s; });
+
+    const rows = (allComps || []).map(c => {
+      const snap = snapMap[c.id];
+      return snap
+        ? { ...snap, _hasMatch: true }
+        : {
+            sku_id: currentSkuId,
+            competitor_id: c.id,
+            competitor_name: c.name,
+            competitor_domain: c.domain,
+            competitor_vat: c.vat_status,
+            competitor_price: null,
+            competitor_url: null,
+            diff_pct: null,
+            diff_pct_normalised: null,
+            availability: null,
+            scraped_at: null,
+            confidence: null,
+            _hasMatch: false,
+          };
+    });
 
     skuCompData = rows;
     sortState.skuComp = { col: null, dir: 1 };
