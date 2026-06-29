@@ -1969,7 +1969,7 @@ async function sendAllForRescrape() {
   btn.innerHTML = '<i class="ti ti-loader"></i> Dispatching…';
   try {
     const token = await getToken();
-    const res = await fetch('https://uaqakssusydpjzrcznhb.supabase.co/functions/v1/trigger-scrape', {
+    const res = await fetch('https://uaqakssusydpjzrcznhb.supabase.co/functions/v1/smart-function', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
     });
