@@ -453,10 +453,6 @@ $('m-crit').textContent  = m.critical  ?? '—';
     });
 
     const reviewCount = m.review || 0;
-    if (reviewCount > 0) {
-      $('nav-review-badge').textContent = reviewCount.toLocaleString();
-      $('nav-review-badge').style.display = '';
-    }
     const critCount = m.critical || 0;
     if (critCount > 0) {
       $('nav-alerts-badge').textContent = critCount;
