@@ -393,6 +393,8 @@ def run_discovery():
     log.info(f"Competitors with sitemap config: {len(comps)} / {len(all_comps)}")
 
     # ── Load SKUs ──────────────────────────────────────────────────────────────
+    SKU_OFFSET = int(os.getenv("DISCOVER_SKU_OFFSET", "0"))
+
     if _specific_skus:
         skus = sb.table("skus").select("*").in_("sku_id", _specific_skus).execute().data
     else:
@@ -400,7 +402,8 @@ def run_discovery():
             sb.table("skus")
             .select("*")
             .eq("active", True)
-            .limit(SKU_LIMIT)
+            .order("sku_id")
+            .range(SKU_OFFSET, SKU_OFFSET + SKU_LIMIT - 1)
             .execute()
             .data
         )
