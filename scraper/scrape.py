@@ -67,6 +67,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 from urllib.parse import quote_plus
 
+import httpx
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 from supabase import create_client, Client
 
@@ -111,6 +112,7 @@ log = logging.getLogger("pricewatch.scrape")
 
 SUPABASE_URL      = os.environ["SUPABASE_URL"]
 SUPABASE_KEY      = os.environ["SUPABASE_SERVICE_KEY"]
+CF_PROXY_URL      = os.getenv("CF_PROXY_URL", "")  # Cloudflare Worker proxy URL
 WORKERS           = int(os.getenv("SCRAPER_WORKERS", "5"))
 TIMEOUT_MS        = int(os.getenv("SCRAPER_PAGE_TIMEOUT_MS", "30000"))
 DELAY_MIN         = float(os.getenv("SCRAPER_DELAY_MIN", "3"))
@@ -119,6 +121,52 @@ COMPETITOR_LIMIT  = int(os.getenv("SCRAPER_COMPETITOR_LIMIT", "23"))
 IMAGE_REFRESH_DAYS = int(os.getenv("IMAGE_REFRESH_DAYS", "90"))
 
 SNAP_FRAMES_WAREHOUSE_DOMAIN = "snapframeswarehouse.co.uk"
+
+# Domains blocked from GitHub Actions / Codespaces IPs — routed via CF Worker
+CF_PROXY_DOMAINS = {
+    "vkf-renzel.co.uk",
+    "displaypro.co.uk",
+    "shopfittingwarehouse.co.uk",
+    "signwaves.co.uk",
+    "sign-holders.co.uk",
+    "signholdersdirect.co.uk",
+}
+
+
+# ── Cloudflare Worker proxy ───────────────────────────────────────────────────
+# Used for domains that block GitHub Actions / Codespaces IPs.
+# The Worker fetches the page from Cloudflare edge and returns raw HTML.
+
+def _domain_needs_proxy(domain: str) -> bool:
+    clean = domain.lstrip("www.")
+    return any(clean == d or clean.endswith("." + d) for d in CF_PROXY_DOMAINS)
+
+
+def _fetch_via_worker(url: str) -> dict:
+    """
+    Fetch a product page via the Cloudflare Worker proxy.
+    Returns dict with keys: html, status, url, error.
+    """
+    if not CF_PROXY_URL:
+        return {"html": None, "status": None, "url": url, "error": "CF_PROXY_URL not set"}
+    try:
+        r = httpx.post(
+            CF_PROXY_URL,
+            json={"url": url},
+            timeout=30,
+            headers={"Content-Type": "application/json"},
+        )
+        data = r.json()
+        if "error" in data:
+            return {"html": None, "status": None, "url": url, "error": data["error"]}
+        return {
+            "html":   data.get("html", ""),
+            "status": data.get("status"),
+            "url":    data.get("url", url),
+            "error":  None,
+        }
+    except Exception as e:
+        return {"html": None, "status": None, "url": url, "error": str(e)[:200]}
 
 
 # ── Image refresh helper ───────────────────────────────────────────────────────
@@ -407,6 +455,85 @@ async def scrape_product_page(
         result["error"]        = "Category page — no single product price"
         result["availability"] = "unavailable"
         log.debug(f"  Skipping category page: {url}")
+        return result
+
+    # ── Cloudflare Worker proxy path ───────────────────────────────────────────
+    # Domains blocked from GitHub Actions / Codespaces are fetched via the CF
+    # Worker instead of Playwright. We get raw HTML back, parse it with regex
+    # equivalents of the standard extractors (no page object available), then
+    # return early — Playwright is never launched for these domains.
+    if _domain_needs_proxy(competitor_domain):
+        log.debug(f"  Routing via CF Worker: {url}")
+        proxy = _fetch_via_worker(url)
+        if proxy["error"]:
+            result["error"]        = f"CF proxy error: {proxy['error']}"
+            result["availability"] = "error"
+            log.info(f"  ✗ CF proxy failed for {url}: {proxy['error']}")
+            return result
+
+        html = proxy["html"] or ""
+        # Title
+        title_m = re.search(r"<title[^>]*>(.*?)</title>", html, re.I | re.S)
+        result["title"] = re.sub(r"<[^>]+>", "", title_m.group(1)).strip() if title_m else ""
+        # VAT + OOS from body text
+        body_text = re.sub(r"<[^>]+>", " ", html)
+        result["vat"]          = detect_vat(body_text)
+        result["availability"] = "out_of_stock" if detect_oos(body_text) else "in_stock"
+
+        # 1. JSON-LD price
+        price = None
+        jld_pat = re.compile(r'<script[^>]*application/ld.json[^>]*>(.*?)</script>', re.I | re.S)
+        for jld in jld_pat.findall(html):
+            try:
+                data  = json.loads(jld)
+                items = data if isinstance(data, list) else [data]
+                flat  = []
+                for item in items:
+                    flat.extend(item.get("@graph", [item]))
+                for item in flat:
+                    if item.get("@type") == "Product":
+                        offers = item.get("offers", {})
+                        if isinstance(offers, list): offers = offers[0]
+                        p = offers.get("price") or offers.get("lowPrice")
+                        if p: price = float(str(p).replace(",", "")); break
+                    if item.get("@type") == "Offer":
+                        p = item.get("price")
+                        if p: price = float(str(p).replace(",", "")); break
+                if price: break
+            except Exception:
+                pass
+
+        # 2. Meta price tag
+        if not price:
+            for attr in ["product:price:amount", "og:price:amount"]:
+                m = re.search(rf'property="{attr}"[^>]*content="([^"]+)"', html, re.I)
+                if not m:
+                    m = re.search(rf'content="([^"]+)"[^>]*property="{attr}"', html, re.I)
+                if m:
+                    price = parse_price(m.group(1))
+                    if price: break
+
+        # 3. Generic price pattern — find £N.NN or itemprop="price" content
+        if not price:
+            # itemprop price
+            m = re.search(r'itemprop=[^>]*price[^>]*content="([^"]+)"', html, re.I)
+            if not m:
+                m = re.search(r'content="([^"]+)"[^>]*itemprop=[^>]*price', html, re.I)
+            if m:
+                price = parse_price(m.group(1))
+        if not price:
+            # Prominent £ price — find all, take median to avoid nav/footer noise
+            prices = [float(p) for p in re.findall(r"£\s*([\d,]+\.[\d]{2})", html)
+                      if 0.01 < float(p.replace(",", "")) < 99999]
+            if prices:
+                prices.sort()
+                price = prices[len(prices) // 2]  # median
+
+        result["price"] = price
+        if price:
+            log.debug(f"  CF proxy price: £{price} for {url}")
+        else:
+            log.info(f"  ✗ CF proxy — no price found for {url}")
         return result
 
     shopify_price = await _extract_shopify_json_price(url, context)
