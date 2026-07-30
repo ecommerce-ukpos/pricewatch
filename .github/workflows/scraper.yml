@@ -31,9 +31,17 @@ on:
           - 'false'
           - 'true'
       discover_sku_limit:
-        description: 'Max SKUs per discovery run (default 250)'
+        description: 'Max SKUs per discovery run (default 700)'
         required: false
-        default: '250'
+        default: '700'
+      discover_sku_offset:
+        description: 'SKU offset — start from this position in the catalogue (default 0)'
+        required: false
+        default: '0'
+      min_confidence:
+        description: 'Minimum confidence score to write a match, 0-100 (default 0 = write all)'
+        required: false
+        default: '0'
       competitor_ids:
         description: 'Comma-separated competitor IDs to run (optional — runs all if blank)'
         required: false
@@ -67,6 +75,7 @@ jobs:
         env:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          CF_PROXY_URL:         ${{ secrets.CF_PROXY_URL }}
           SCRAPER_SKUS:         ${{ github.event.inputs.scraper_skus || '' }}
           SCRAPER_WORKERS:      ${{ github.event.inputs.scraper_workers || '5' }}
           SCRAPER_DELAY_MIN:    '3'
@@ -79,10 +88,9 @@ jobs:
           SUPABASE_URL:          ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY:  ${{ secrets.SUPABASE_SERVICE_KEY }}
           DISCOVER_SKUS:         ${{ github.event.inputs.scraper_skus || '' }}
-          DISCOVER_WORKERS:      ${{ github.event.inputs.scraper_workers || '2' }}
           DISCOVER_FORCE:        ${{ github.event.inputs.discover_force || 'false' }}
-          DISCOVER_SKU_LIMIT:    ${{ github.event.inputs.discover_sku_limit || '250' }}
-          DISCOVER_DELAY_MIN:    '8'
-          DISCOVER_DELAY_MAX:    '15'
+          DISCOVER_SKU_LIMIT:    ${{ github.event.inputs.discover_sku_limit || '700' }}
+          DISCOVER_SKU_OFFSET:   ${{ github.event.inputs.discover_sku_offset || '0' }}
+          MIN_CONFIDENCE:        ${{ github.event.inputs.min_confidence || '0' }}
           COMPETITOR_IDS:        ${{ github.event.inputs.competitor_ids || '' }}
-        run: python scraper/discover.py
+        run: python scraper/discover_sitemap.py
