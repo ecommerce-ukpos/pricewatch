@@ -59,7 +59,10 @@ from xml.etree import ElementTree as ET
 import httpx
 from supabase import create_client
 
-from common import is_category_url, USER_AGENTS
+from common import (
+    is_category_url, USER_AGENTS,
+    detect_vat, detect_oos, diff_pct, normalise_price, extract_pack_qty,
+)
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -652,6 +655,64 @@ def upsert_match(sb, sku_id: str, competitor_id: int, url: str, title: str,
     ).execute()
 
 
+# ── Snapshot writer ───────────────────────────────────────────────────────────
+
+def write_snapshot(sb, sku: dict, competitor_id: int, url: str,
+                   raw_price: Optional[float], vat_status: str,
+                   html: str, confidence: int, run_id: str):
+    """
+    Write a provisional price snapshot at discovery time.
+    Uses the price already extracted from the page so we don't fetch it again.
+    VAT is normalised to ex-VAT using detect_vat() result.
+    The scrape run will overwrite this with a properly extracted price on its
+    next cycle — this just means the dashboard shows a price immediately
+    rather than waiting days for the next scheduled scrape.
+    """
+    if not raw_price:
+        return
+
+    our_price  = float(sku["_price"])
+    unit_qty   = sku.get("unit_qty") or 1
+    body_text  = re.sub(r"<[^>]+>", " ", html)
+
+    # Normalise to ex-VAT
+    vat    = vat_status or detect_vat(body_text)
+    ex_vat = normalise_price(raw_price, vat)
+
+    # Per-unit normalisation — if competitor sells different pack size
+    comp_qty = extract_pack_qty(body_text) or 1
+    our_qty  = unit_qty or 1
+
+    # Normalised diff (per-unit comparison)
+    our_per_unit  = our_price / our_qty  if our_qty  > 1 else our_price
+    comp_per_unit = ex_vat    / comp_qty if comp_qty > 1 else ex_vat
+
+    dp            = diff_pct(our_per_unit, comp_per_unit) if our_per_unit else 0
+    dp_normalised = dp  # discovery snapshots don't have separate normalised diff
+
+    availability = "out_of_stock" if detect_oos(body_text) else "in_stock"
+
+    try:
+        sb.table("price_snapshots").insert({
+            "sku_id":               sku["sku_id"],
+            "competitor_id":        competitor_id,
+            "scraped_at":           datetime.now(timezone.utc).isoformat(),
+            "run_id":               run_id,
+            "competitor_price":     ex_vat,
+            "competitor_vat":       vat,
+            "competitor_url":       url,
+            "availability":         availability,
+            "diff_pct":             dp,
+            "diff_pct_normalised":  dp_normalised,
+            "confidence":           confidence,
+            "competitor_unit_qty":  comp_qty if comp_qty > 1 else None,
+            "pack_qty_flag":        "discovery_provisional",
+        }).execute()
+        log.debug(f"    Snapshot written: £{ex_vat:.2f} {vat} diff={dp:+.1f}%")
+    except Exception as e:
+        log.warning(f"    Snapshot write failed for {sku['sku_id']} × {competitor_id}: {e}")
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def run_discovery():
@@ -687,6 +748,11 @@ def run_discovery():
         if m["match_status"] == "matched" and not FORCE
     }
     log.info(f"Confirmed pairs to protect: {len(confirmed_pairs)}")
+
+    # Create a discovery run_id so snapshots are grouped in sync_runs-adjacent queries
+    import uuid as _uuid
+    discovery_run_id = str(_uuid.uuid4())
+    log.info(f"Discovery run ID: {discovery_run_id}")
 
     # ── Process each competitor ───────────────────────────────────────────────
     comps = sb.table("competitors").select("*").eq("active", True)\
@@ -817,6 +883,14 @@ def run_discovery():
 
                     upsert_match(sb, sku_id, cid, url, comp_title,
                                  confidence, "claude_sitemap", reasoning)
+
+                    # Write provisional price snapshot using the price already on hand
+                    sku_obj = next((s for s in all_skus if s["sku_id"] == sku_id), None)
+                    if sku_obj and comp_price:
+                        write_snapshot(sb, sku_obj, cid, url,
+                                      comp_price, "", html,
+                                      confidence, discovery_run_id)
+
                     confirmed_pairs.add((sku_id, cid))  # prevent duplicate writes
                     stats["matches_written"] += 1
                     written += 1
