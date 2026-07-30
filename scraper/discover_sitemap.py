@@ -835,7 +835,7 @@ def run_discovery():
                         # Add price proximity bonus
                         kw_score += price_score(comp_price, sku["_price"], sku.get("unit_qty"))
 
-                    if kw_score > 0:
+                    if kw_score => 25:
                         candidates.append({**sku, "keyword_score": kw_score})
 
                 if not candidates:
