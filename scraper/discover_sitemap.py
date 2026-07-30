@@ -1,5 +1,5 @@
 """
-scraper/discover_sitemap.py  —  Option C: keyword pre-filter + Claude API matching
+scraper/discover_sitemap.py  —-  Option C: keyword pre-filter + Claude API matching
 ═══════════════════════════════════════════════════════════════════════════════════
 
 ARCHITECTURE
