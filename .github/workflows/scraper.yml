@@ -85,6 +85,7 @@ jobs:
       - name: Run URL discovery
         if: steps.job.outputs.job == 'discover'
         env:
+          ANTHROPIC_API_KEY:     ${{ secrets.ANTHROPIC_API_KEY }}
           SUPABASE_URL:          ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY:  ${{ secrets.SUPABASE_SERVICE_KEY }}
           DISCOVER_SKUS:         ${{ github.event.inputs.scraper_skus || '' }}
