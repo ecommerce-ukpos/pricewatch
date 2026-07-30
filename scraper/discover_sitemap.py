@@ -395,6 +395,8 @@ def run_discovery():
     # ── Load SKUs ──────────────────────────────────────────────────────────────
     SKU_OFFSET = int(os.getenv("DISCOVER_SKU_OFFSET", "0"))
 
+    SKU_OFFSET = int(os.getenv("DISCOVER_SKU_OFFSET", "0"))
+
     if _specific_skus:
         skus = sb.table("skus").select("*").in_("sku_id", _specific_skus).execute().data
     else:
