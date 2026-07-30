@@ -812,7 +812,8 @@ async def run_scraper(trigger: str = "scheduled"):
         "status": "running", "started_at": datetime.now(timezone.utc).isoformat(),
     }).execute()
 
-    specific_skus = [s.strip() for s in os.getenv("SCRAPER_SKUS", "").split(",") if s.strip()]
+    specific_skus    = [s.strip() for s in os.getenv("SCRAPER_SKUS", "").split(",")    if s.strip()]
+    specific_comp_ids = [int(i.strip()) for i in os.getenv("COMPETITOR_IDS", "").split(",") if i.strip()]
 
     query = (
         sb.table("competitor_matches")
@@ -826,6 +827,8 @@ async def run_scraper(trigger: str = "scheduled"):
     )
     if specific_skus:
         query = query.in_("sku_id", specific_skus)
+    if specific_comp_ids:
+        query = query.in_("competitor_id", specific_comp_ids)
     matched_rows = query.execute().data
 
     if not matched_rows:
