@@ -234,15 +234,16 @@
       <div class="content">
         <div class="tw">
           <table id="bycomp-table"><thead><tr>
-            <th class="sortable" style="border-left:3px solid transparent" onclick="sortByCompTable('name')">Competitor</th>
+            <th class="sortable" onclick="sortByCompTable('name')">Competitor</th>
             <th class="sortable" onclick="sortByCompTable('domain')">Domain</th>
             <th class="sortable" onclick="sortByCompTable('vat_status')">VAT</th>
-            <th class="sortable" onclick="sortByCompTable('matched')">Matched SKUs</th>
+            <th class="sortable" onclick="sortByCompTable('discovered')">Discovered</th>
+            <th class="sortable" onclick="sortByCompTable('matched')">Matched</th>
             <th class="sortable" onclick="sortByCompTable('critical')">Critical</th>
             <th class="sortable" onclick="sortByCompTable('warning')">Warning</th>
             <th class="sortable" onclick="sortByCompTable('cheaper')">We're cheaper</th>
             <th class="sortable" onclick="sortByCompTable('parity')">Parity</th>
-          </tr></thead><tbody id="bycomp-tbody"><tr><td colspan="8"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table>
+          </tr></thead><tbody id="bycomp-tbody"><tr><td colspan="9"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table>
         </div>
       </div>
     </div>
