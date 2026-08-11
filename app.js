@@ -1316,15 +1316,21 @@ function selectCat5(name) { catL5 = name; catPage = 1; renderCategoryLevel(); }
 ════════════════════════════════════════ */
 async function loadByCompetitor() {
   try {
-    const [{ data: comps }, { data: snaps }] = await Promise.all([
+    const [{ data: comps }, { data: snaps }, { data: discovered }] = await Promise.all([
       sb.from('competitors').select('id,name,domain,vat_status,active').eq('active',true).order('name'),
-      sb.from('latest_snapshots').select('competitor_id,diff_pct_normalised,diff_pct,competitor_price').not('competitor_price','is',null)
+      sb.from('latest_snapshots').select('competitor_id,diff_pct_normalised,diff_pct,competitor_price').not('competitor_price','is',null),
+      sb.from('competitor_matches').select('competitor_id'),
     ]);
 
     if (!comps?.length) {
-      $('bycomp-tbody').innerHTML = '<tr><td colspan="8" style="padding:20px;text-align:center;color:var(--t2)">No competitors found</td></tr>';
+      $('bycomp-tbody').innerHTML = '<tr><td colspan="9" style="padding:20px;text-align:center;color:var(--t2)">No competitors found</td></tr>';
       return;
     }
+
+    const discoveredCount = {};
+    (discovered || []).forEach(r => {
+      discoveredCount[r.competitor_id] = (discoveredCount[r.competitor_id] || 0) + 1;
+    });
 
     const stats = {};
     (snaps || []).forEach(s => {
@@ -1340,18 +1346,19 @@ async function loadByCompetitor() {
 
     bycompData = comps.map(c => ({
       ...c,
-      _matched:  stats[c.id]?.matched  ?? 0,
-      _critical: stats[c.id]?.critical ?? 0,
-      _warning:  stats[c.id]?.warning  ?? 0,
-      _cheaper:  stats[c.id]?.cheaper  ?? 0,
-      _parity:   stats[c.id]?.parity   ?? 0,
+      _discovered: discoveredCount[c.id] ?? 0,
+      _matched:    stats[c.id]?.matched  ?? 0,
+      _critical:   stats[c.id]?.critical ?? 0,
+      _warning:    stats[c.id]?.warning  ?? 0,
+      _cheaper:    stats[c.id]?.cheaper  ?? 0,
+      _parity:     stats[c.id]?.parity   ?? 0,
     }));
 
     sortState.bycomp = { col: null, dir: 1 };
     renderByCompRows(bycompData);
     updateSortHeaders('bycomp-table', 'bycomp', null);
   } catch (e) {
-    $('bycomp-tbody').innerHTML = `<tr><td colspan="8" style="color:var(--red);padding:8px">${e.message}</td></tr>`;
+    $('bycomp-tbody').innerHTML = `<tr><td colspan="9" style="color:var(--red);padding:8px">${e.message}</td></tr>`;
   }
 }
 
@@ -2056,10 +2063,11 @@ function sortByCompTable(col) {
   const { dir } = sortState.bycomp;
   const sorted = [...bycompData].sort((a, b) => {
     const getV = r => {
-      if (col === 'name')     return (r.name||'').toLowerCase();
-      if (col === 'domain')   return (r.domain||'').toLowerCase();
+      if (col === 'name')       return (r.name||'').toLowerCase();
+      if (col === 'domain')     return (r.domain||'').toLowerCase();
       if (col === 'vat_status') return (r.vat_status||'').toLowerCase();
-      if (col === 'matched')  return r._matched  ?? 0;
+      if (col === 'discovered') return r._discovered ?? 0;
+      if (col === 'matched')    return r._matched  ?? 0;
       if (col === 'critical') return r._critical ?? 0;
       if (col === 'warning')  return r._warning  ?? 0;
       if (col === 'cheaper')  return r._cheaper  ?? 0;
@@ -2073,31 +2081,35 @@ function sortByCompTable(col) {
 
 function renderByCompRows(comps) {
   const totals = comps.reduce((acc, c) => {
+    acc.discovered += c._discovered ?? 0;
     acc.matched  += c._matched  ?? 0;
     acc.critical += c._critical ?? 0;
     acc.warning  += c._warning  ?? 0;
     acc.cheaper  += c._cheaper  ?? 0;
     acc.parity   += c._parity   ?? 0;
     return acc;
-  }, { matched:0, critical:0, warning:0, cheaper:0, parity:0 });
+  }, { discovered:0, matched:0, critical:0, warning:0, cheaper:0, parity:0 });
 
   $('bycomp-tbody').innerHTML = comps.map(c => {
     const slug = slugify(c.name);
-    const noData = c._matched === 0;
+    const noMatch    = c._matched    === 0;
+    const noDiscover = c._discovered === 0;
     return `<tr class="tr-link" onclick="go('comp-detail',{compId:${c.id},compName:'${c.name.replace(/'/g,"\\'")}',compSlug:'${slug}',compDomain:'${c.domain}',compVat:'${c.vat_status}'})">
       <td style="font-weight:500">${c.name}</td>
       <td style="font-size:11px;color:var(--t2)">${c.domain}</td>
       <td>${vatPill(c.vat_status)}</td>
-      <td style="color:var(--t2)">${noData ? '<span style="color:var(--t3)">—</span>' : c._matched}</td>
-      <td style="font-weight:600">${noData ? '<span style="color:var(--t3)">—</span>' : (c._critical > 0 ? `<span style="color:var(--red)">${c._critical}</span>` : '<span style="color:var(--t3)">0</span>')}</td>
-      <td>${noData ? '<span style="color:var(--t3)">—</span>' : (c._warning > 0 ? `<span style="color:var(--amb);font-weight:500">${c._warning}</span>` : '<span style="color:var(--t3)">0</span>')}</td>
-      <td>${noData ? '<span style="color:var(--t3)">—</span>' : (c._cheaper > 0 ? `<span style="color:var(--grn)">${c._cheaper}</span>` : '<span style="color:var(--t3)">0</span>')}</td>
-      <td style="color:var(--t2)">${noData ? '<span style="color:var(--t3)">—</span>' : c._parity}</td>
+      <td style="color:var(--t2)">${noDiscover ? '<span style="color:var(--t3)">—</span>' : c._discovered}</td>
+      <td style="color:var(--t2)">${noMatch ? '<span style="color:var(--t3)">—</span>' : c._matched}</td>
+      <td style="font-weight:600">${noMatch ? '<span style="color:var(--t3)">—</span>' : (c._critical > 0 ? `<span style="color:var(--red)">${c._critical}</span>` : '<span style="color:var(--t3)">0</span>')}</td>
+      <td>${noMatch ? '<span style="color:var(--t3)">—</span>' : (c._warning > 0 ? `<span style="color:var(--amb);font-weight:500">${c._warning}</span>` : '<span style="color:var(--t3)">0</span>')}</td>
+      <td>${noMatch ? '<span style="color:var(--t3)">—</span>' : (c._cheaper > 0 ? `<span style="color:var(--grn)">${c._cheaper}</span>` : '<span style="color:var(--t3)">0</span>')}</td>
+      <td style="color:var(--t2)">${noMatch ? '<span style="color:var(--t3)">—</span>' : c._parity}</td>
     </tr>`;
   }).join('') + `<tr style="border-top:2px solid var(--border);font-weight:600;background:var(--bg)">
     <td style="color:var(--t2);font-size:11px">Total</td>
     <td></td>
     <td></td>
+    <td>${totals.discovered}</td>
     <td>${totals.matched}</td>
     <td style="color:var(--red)">${totals.critical}</td>
     <td style="color:var(--amb)">${totals.warning}</td>
