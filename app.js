@@ -1316,10 +1316,10 @@ function selectCat5(name) { catL5 = name; catPage = 1; renderCategoryLevel(); }
 ════════════════════════════════════════ */
 async function loadByCompetitor() {
   try {
-    const [{ data: comps }, { data: snaps }, { data: discovered }] = await Promise.all([
+    const [{ data: comps }, { data: snaps }, { data: druns }] = await Promise.all([
       sb.from('competitors').select('id,name,domain,vat_status,active').eq('active',true).order('name'),
       sb.from('latest_snapshots').select('competitor_id,diff_pct_normalised,diff_pct,competitor_price').not('competitor_price','is',null),
-      sb.from('competitor_matches').select('competitor_id'),
+      sb.from('discovery_runs').select('competitor_id,status,started_at,completed_at,urls_found,matches_written').order('started_at', {ascending:false}),
     ]);
 
     if (!comps?.length) {
@@ -1327,9 +1327,10 @@ async function loadByCompetitor() {
       return;
     }
 
-    const discoveredCount = {};
-    (discovered || []).forEach(r => {
-      discoveredCount[r.competitor_id] = (discoveredCount[r.competitor_id] || 0) + 1;
+    // Keep only the most recent run per competitor
+    const discoveryMap = {};
+    (druns || []).forEach(r => {
+      if (!discoveryMap[r.competitor_id]) discoveryMap[r.competitor_id] = r;
     });
 
     const stats = {};
@@ -1346,7 +1347,7 @@ async function loadByCompetitor() {
 
     bycompData = comps.map(c => ({
       ...c,
-      _discovered: discoveredCount[c.id] ?? 0,
+      _discovery: discoveryMap[c.id] || null,
       _matched:    stats[c.id]?.matched  ?? 0,
       _critical:   stats[c.id]?.critical ?? 0,
       _warning:    stats[c.id]?.warning  ?? 0,
@@ -2066,7 +2067,7 @@ function sortByCompTable(col) {
       if (col === 'name')       return (r.name||'').toLowerCase();
       if (col === 'domain')     return (r.domain||'').toLowerCase();
       if (col === 'vat_status') return (r.vat_status||'').toLowerCase();
-      if (col === 'discovered') return r._discovered ?? 0;
+      if (col === 'discovered') return r._discovery?.completed_at || '';
       if (col === 'matched')    return r._matched  ?? 0;
       if (col === 'critical') return r._critical ?? 0;
       if (col === 'warning')  return r._warning  ?? 0;
@@ -2081,24 +2082,36 @@ function sortByCompTable(col) {
 
 function renderByCompRows(comps) {
   const totals = comps.reduce((acc, c) => {
-    acc.discovered += c._discovered ?? 0;
     acc.matched  += c._matched  ?? 0;
     acc.critical += c._critical ?? 0;
     acc.warning  += c._warning  ?? 0;
     acc.cheaper  += c._cheaper  ?? 0;
     acc.parity   += c._parity   ?? 0;
     return acc;
-  }, { discovered:0, matched:0, critical:0, warning:0, cheaper:0, parity:0 });
+  }, { matched:0, critical:0, warning:0, cheaper:0, parity:0 });
 
   $('bycomp-tbody').innerHTML = comps.map(c => {
     const slug = slugify(c.name);
-    const noMatch    = c._matched    === 0;
-    const noDiscover = c._discovered === 0;
+    const noMatch = c._matched === 0;
+      const dr = c._discovery;
+      let discoverCell;
+      if (!dr) {
+        discoverCell = '<span style="color:var(--t3)">—</span>';
+      } else if (dr.status === 'running') {
+        discoverCell = '<span style="color:var(--amb)">⏳ Running</span>';
+      } else if (dr.status === 'failed') {
+        discoverCell = `<span style="color:var(--red)" title="${dr.notes||'Failed'}">⚠ Failed</span>`;
+      } else {
+        const d = new Date(dr.completed_at||dr.started_at);
+        const dateStr = d.toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+        const found = dr.urls_found != null ? `<div style="font-size:10px;color:var(--t3)">${dr.urls_found} URLs</div>` : '';
+        discoverCell = `<span style="color:var(--grn)">${dateStr}</span>${found}`;
+      }
     return `<tr class="tr-link" onclick="go('comp-detail',{compId:${c.id},compName:'${c.name.replace(/'/g,"\\'")}',compSlug:'${slug}',compDomain:'${c.domain}',compVat:'${c.vat_status}'})">
       <td style="font-weight:500">${c.name}</td>
       <td style="font-size:11px;color:var(--t2)">${c.domain}</td>
       <td>${vatPill(c.vat_status)}</td>
-      <td style="color:var(--t2)">${noDiscover ? '<span style="color:var(--t3)">—</span>' : c._discovered}</td>
+      <td>${discoverCell}</td>
       <td style="color:var(--t2)">${noMatch ? '<span style="color:var(--t3)">—</span>' : c._matched}</td>
       <td style="font-weight:600">${noMatch ? '<span style="color:var(--t3)">—</span>' : (c._critical > 0 ? `<span style="color:var(--red)">${c._critical}</span>` : '<span style="color:var(--t3)">0</span>')}</td>
       <td>${noMatch ? '<span style="color:var(--t3)">—</span>' : (c._warning > 0 ? `<span style="color:var(--amb);font-weight:500">${c._warning}</span>` : '<span style="color:var(--t3)">0</span>')}</td>
@@ -2109,7 +2122,7 @@ function renderByCompRows(comps) {
     <td style="color:var(--t2);font-size:11px">Total</td>
     <td></td>
     <td></td>
-    <td>${totals.discovered}</td>
+    <td></td>
     <td>${totals.matched}</td>
     <td style="color:var(--red)">${totals.critical}</td>
     <td style="color:var(--amb)">${totals.warning}</td>
