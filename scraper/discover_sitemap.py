@@ -765,6 +765,14 @@ def run_discovery():
 
         if not cfg:
             log.warning(f"No sitemap config for {cname} (id={cid}), skipping")
+            if discovery_run_db_id:
+                try:
+                    sb.table("discovery_runs").update({
+                        "status": "failed", "completed_at": datetime.now(timezone.utc).isoformat(),
+                        "notes": "No sitemap config",
+                    }).eq("id", discovery_run_db_id).execute()
+                except Exception:
+                    pass
             continue
 
         log.info(f"\n{'='*60}")
@@ -777,6 +785,19 @@ def run_discovery():
             "matches_written": 0, "no_match": 0,
         }
 
+        # Insert discovery_runs row — marks that we have attempted this competitor
+        try:
+            dr = sb.table("discovery_runs").insert({
+                "competitor_id": cid,
+                "status":        "running",
+                "started_at":    datetime.now(timezone.utc).isoformat(),
+            }).execute()
+            discovery_run_db_id = dr.data[0]["id"]
+            log.info(f"  discovery_runs row created: id={discovery_run_db_id}")
+        except Exception as e:
+            log.warning(f"  Could not create discovery_runs row: {e}")
+            discovery_run_db_id = None
+
         with httpx.Client(follow_redirects=True) as client:
 
             # Phase 1 — Harvest sitemap
@@ -787,6 +808,14 @@ def run_discovery():
 
             if not urls:
                 log.warning(f"  No URLs harvested for {cname}")
+                if discovery_run_db_id:
+                    try:
+                        sb.table("discovery_runs").update({
+                            "status": "failed", "completed_at": datetime.now(timezone.utc).isoformat(),
+                            "notes": "No URLs harvested from sitemap",
+                        }).eq("id", discovery_run_db_id).execute()
+                    except Exception:
+                        pass
                 continue
 
             # Phase 2 + 3 + 4 — Fetch, profile, pre-filter, Claude match
@@ -913,6 +942,18 @@ def run_discovery():
         log.info(f"  Claude calls:        {stats['claude_calls']}")
         log.info(f"  Matches written:     {stats['matches_written']}")
         log.info(f"  No match found:      {stats['no_match']}")
+
+        # Update discovery_runs row with completion stats
+        if discovery_run_db_id:
+            try:
+                sb.table("discovery_runs").update({
+                    "status":          "complete",
+                    "completed_at":    datetime.now(timezone.utc).isoformat(),
+                    "urls_found":      stats["urls_harvested"],
+                    "matches_written": stats["matches_written"],
+                }).eq("id", discovery_run_db_id).execute()
+            except Exception as e:
+                log.warning(f"  Could not update discovery_runs row: {e}")
 
 
 if __name__ == "__main__":
