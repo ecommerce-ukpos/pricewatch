@@ -1319,7 +1319,7 @@ async function loadByCompetitor() {
     const [{ data: comps }, { data: snaps }, { data: druns }] = await Promise.all([
       sb.from('competitors').select('id,name,domain,vat_status,active').eq('active',true).order('name'),
       sb.from('latest_snapshots').select('competitor_id,diff_pct_normalised,diff_pct,competitor_price').not('competitor_price','is',null),
-      sb.from('discovery_runs').select('competitor_id,status,started_at,completed_at,urls_found,matches_written').order('started_at', {ascending:false}),
+      sb.from('discovery_runs').select('competitor_id,status,completed_at,urls_found').order('started_at', {ascending:false}),
     ]);
 
     if (!comps?.length) {
@@ -2100,12 +2100,13 @@ function renderByCompRows(comps) {
       } else if (dr.status === 'running') {
         discoverCell = '<span style="color:var(--amb)">⏳ Running</span>';
       } else if (dr.status === 'failed') {
-        discoverCell = `<span style="color:var(--red)" title="${dr.notes||'Failed'}">⚠ Failed</span>`;
+        discoverCell = '<span style="color:var(--red)">⚠ Failed</span>';
       } else {
-        const d = new Date(dr.completed_at||dr.started_at);
-        const dateStr = d.toLocaleDateString('en-GB',{day:'numeric',month:'short'});
-        const found = dr.urls_found != null ? `<div style="font-size:10px;color:var(--t3)">${dr.urls_found} URLs</div>` : '';
-        discoverCell = `<span style="color:var(--grn)">${dateStr}</span>${found}`;
+        const dateStr = dr.completed_at
+          ? new Date(dr.completed_at).toLocaleDateString('en-GB',{day:'numeric',month:'short'})
+          : '—';
+        const urlCount = dr.urls_found != null ? dr.urls_found.toLocaleString() : '—';
+        discoverCell = `<span style="font-weight:500">${urlCount}</span><div style="font-size:10px;color:var(--t3)">${dateStr}</div>`;
       }
     return `<tr class="tr-link" onclick="go('comp-detail',{compId:${c.id},compName:'${c.name.replace(/'/g,"\\'")}',compSlug:'${slug}',compDomain:'${c.domain}',compVat:'${c.vat_status}'})">
       <td style="font-weight:500">${c.name}</td>
