@@ -139,18 +139,53 @@ COMPETITOR_SITEMAPS = {
          "filter":  lambda u: _in_path(u, "/products/") and _is_product_url(u)},
     11: {"sitemap": "https://indigodisplays.co.uk/sitemap.xml",
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
-    13: {"sitemap": "https://pavementsigns.com/gb/sitemap.xml",
-         "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
-    14: {"sitemap": "https://www.retailacrylics.co.uk/sitemap.xml",
-         "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
+    13: {
+        "mode": "category_crawl",  # no working /sitemap.xml on this site — see notes below
+        "category_urls": [
+            "https://pavementsigns.com/gb/categories/",
+            "https://pavementsigns.com/gb/categories/pavement-sign-accessories.aspx",
+            # NOTE: seed list only — walk https://pavementsigns.com/gb/categories/
+            # once to pull the full set of category URLs and add them here.
+        ],
+        "product_link_pattern": re.compile(r"/gb/products/[^/]+\.aspx$"),
+    },
+    14: {
+        "mode": "category_crawl",  # no working /sitemap.xml on this site — see notes below
+        "category_urls": [
+            "https://www.retailacrylics.co.uk/cubes--boxes-99-c.asp",
+            "https://www.retailacrylics.co.uk/pedestals-100-c.asp",
+            "https://www.retailacrylics.co.uk/trays-101-c.asp",
+            "https://www.retailacrylics.co.uk/display-cases-102-c.asp",
+            "https://www.retailacrylics.co.uk/product-display-103-c.asp",
+            "https://www.retailacrylics.co.uk/acrylic-sheets-72-c.asp",
+            "https://www.retailacrylics.co.uk/wedding--event-149-c.asp",
+            "https://www.retailacrylics.co.uk/printing-148-c.asp",
+            # confirmed live from the site's own homepage nav — spot-check
+            # against https://www.retailacrylics.co.uk/sitemap.asp for gaps.
+        ],
+        "product_link_pattern": re.compile(r"-\d+-p\.asp$"),
+    },
     15: {"sitemap": "https://www.shopfittingwarehouse.co.uk/sitemap.xml",
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
     16: {"sitemap": "https://www.sign-holders.co.uk/sitemap.xml",
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
     17: {"sitemap": "https://www.signwaves.co.uk/sitemap.xml",
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
-    18: {"sitemap": "https://www.snapframeswarehouse.co.uk/sitemap.xml",
-         "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
+    18: {
+        "mode": "category_crawl",  # no working /sitemap.xml on this site — see notes below
+        "category_urls": [
+            "https://www.snapframeswarehouse.co.uk/snap-frames",
+            "https://www.snapframeswarehouse.co.uk/bespoke-snap-frames-poster-frames-clip-frame",
+            "https://www.snapframeswarehouse.co.uk/external-lockable-poster-cases-from-snap-frames-warehouse",
+            "https://www.snapframeswarehouse.co.uk/snap-frames-warehouse-full-product-catalogue",
+            # NOTE: seed list only — this OpenCart site's full nav wasn't
+            # visible from search alone. Pull the top-level category list
+            # directly from the site's own nav menu and add the rest here.
+        ],
+        "product_link_pattern": re.compile(
+            r"snapframeswarehouse\.co\.uk/[A-Za-z0-9][A-Za-z0-9\-]+$"
+        ),
+    },
     19: {"sitemap": "https://www.theretailfactory.co.uk/sitemap.xml",
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
     20: {"sitemap": "https://www.uksignshop.co.uk/sitemap.xml",
@@ -353,6 +388,48 @@ def harvest_urls(client: httpx.Client, sitemap_url: str, url_filter,
         if len(urls) >= max_urls:
             break
     return urls
+
+
+def harvest_category_urls(client: httpx.Client, category_urls: list[str],
+                          product_link_pattern: "re.Pattern",
+                          max_pages_per_category: int = 15,
+                          page_param: str = "page") -> list[str]:
+    """
+    Fallback harvester for sites with no working /sitemap.xml.
+    Crawls each category/listing URL (and paginates it) collecting links
+    that match product_link_pattern. Stops paginating a category once a
+    page yields no new URLs.
+    """
+    from urllib.parse import urljoin
+
+    all_urls: set[str] = set()
+    for cat_url in category_urls:
+        page = 1
+        while page <= max_pages_per_category:
+            if page == 1:
+                url = cat_url
+            else:
+                sep = "&" if "?" in cat_url else "?"
+                url = f"{cat_url}{sep}{page_param}={page}"
+
+            html = _fetch_html(client, url)
+            if not html:
+                break
+
+            found_this_page = set()
+            for href in re.findall(r'href=["\']([^"\']+)["\']', html):
+                full = urljoin(url, href).split("#")[0]
+                if product_link_pattern.search(full):
+                    found_this_page.add(full)
+
+            new = found_this_page - all_urls
+            all_urls |= found_this_page
+
+            if page > 1 and not new:
+                break  # this page added nothing new — end of pagination
+            page += 1
+
+    return sorted(all_urls)
 
 
 # ── Page fetching & extraction ─────────────────────────────────────────────────
@@ -762,6 +839,7 @@ def run_discovery():
         cid   = comp["id"]
         cname = comp["name"]
         cfg   = COMPETITOR_SITEMAPS.get(cid)
+        discovery_run_db_id = None  # reset every iteration — never inherit a stale id from the previous competitor
 
         if not cfg:
             log.warning(f"No sitemap config for {cname} (id={cid}), skipping")
@@ -800,9 +878,15 @@ def run_discovery():
 
         with httpx.Client(follow_redirects=True) as client:
 
-            # Phase 1 — Harvest sitemap
-            log.info(f"Phase 1: Harvesting sitemap {cfg['sitemap']}")
-            urls = harvest_urls(client, cfg["sitemap"], cfg["filter"], MAX_PAGES)
+            # Phase 1 — Harvest (sitemap, or category-crawl fallback for sites with no working sitemap.xml)
+            if cfg.get("mode") == "category_crawl":
+                log.info(f"Phase 1: Category-crawling {len(cfg['category_urls'])} listing pages (no sitemap available)")
+                urls = harvest_category_urls(
+                    client, cfg["category_urls"], cfg["product_link_pattern"]
+                )
+            else:
+                log.info(f"Phase 1: Harvesting sitemap {cfg['sitemap']}")
+                urls = harvest_urls(client, cfg["sitemap"], cfg["filter"], MAX_PAGES)
             stats["urls_harvested"] = len(urls)
             log.info(f"  → {len(urls)} product URLs")
 
