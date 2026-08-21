@@ -1323,7 +1323,7 @@ async function loadByCompetitor() {
     ]);
 
     if (!comps?.length) {
-      $('bycomp-tbody').innerHTML = '<tr><td colspan="9" style="padding:20px;text-align:center;color:var(--t2)">No competitors found</td></tr>';
+      $('bycomp-tbody').innerHTML = '<tr><td colspan="10" style="padding:20px;text-align:center;color:var(--t2)">No competitors found</td></tr>';
       return;
     }
 
@@ -1359,7 +1359,7 @@ async function loadByCompetitor() {
     renderByCompRows(bycompData);
     updateSortHeaders('bycomp-table', 'bycomp', null);
   } catch (e) {
-    $('bycomp-tbody').innerHTML = `<tr><td colspan="9" style="color:var(--red);padding:8px">${e.message}</td></tr>`;
+    $('bycomp-tbody').innerHTML = `<tr><td colspan="10" style="color:var(--red);padding:8px">${e.message}</td></tr>`;
   }
 }
 
@@ -2064,6 +2064,7 @@ function sortByCompTable(col) {
   const { dir } = sortState.bycomp;
   const sorted = [...bycompData].sort((a, b) => {
     const getV = r => {
+      if (col === 'id')         return r.id ?? 0;
       if (col === 'name')       return (r.name||'').toLowerCase();
       if (col === 'domain')     return (r.domain||'').toLowerCase();
       if (col === 'vat_status') return (r.vat_status||'').toLowerCase();
@@ -2109,6 +2110,7 @@ function renderByCompRows(comps) {
         discoverCell = `<span style="font-weight:500">${urlCount}</span><div style="font-size:10px;color:var(--t3)">${dateStr}</div>`;
       }
     return `<tr class="tr-link" onclick="go('comp-detail',{compId:${c.id},compName:'${c.name.replace(/'/g,"\\'")}',compSlug:'${slug}',compDomain:'${c.domain}',compVat:'${c.vat_status}'})">
+      <td style="color:var(--t3);font-size:11px">${c.id}</td>
       <td style="font-weight:500">${c.name}</td>
       <td style="font-size:11px;color:var(--t2)">${c.domain}</td>
       <td>${vatPill(c.vat_status)}</td>
@@ -2120,6 +2122,7 @@ function renderByCompRows(comps) {
       <td style="color:var(--t2)">${noMatch ? '<span style="color:var(--t3)">—</span>' : c._parity}</td>
     </tr>`;
   }).join('') + `<tr style="border-top:2px solid var(--border);font-weight:600;background:var(--bg)">
+    <td></td>
     <td style="color:var(--t2);font-size:11px">Total</td>
     <td></td>
     <td></td>
