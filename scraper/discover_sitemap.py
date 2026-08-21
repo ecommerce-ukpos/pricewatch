@@ -153,7 +153,14 @@ COMPETITOR_SITEMAPS = {
     5:  {"sitemap": "https://displaypro.co.uk/sitemap.xml",
          "filter":  lambda u: _in_path(u, "/products/") and _is_product_url(u)},
     6:  {"sitemap": "https://displaysense.co.uk/sitemap.xml",
-         "filter":  lambda u: _has_depth(u, 1) and _is_product_url(u) and "displaysense" in u},
+         # Was _has_depth(u,1) and _is_product_url(u) and "displaysense" in u
+         # — the domain-substring check was a no-op (every URL on this
+         # domain trivially contains it), and is_category_url()'s <=2
+         # segment auto-reject would still have killed Shopify's real
+         # /products/<slug> path (2 segments) regardless of has_depth(1).
+         # Confirmed Shopify via /collections/, /collections/all URLs —
+         # same platform as Display Pro/Alplas/ScreenMoove, same fix.
+         "filter":  lambda u: _in_path(u, "/products/") and _is_product_url(u)},
     7:  {"sitemap": "https://www.displaywizard.co.uk/sitemap.xml",
          # Was filtering on _in_path(u, "/products/") — this WordPress site
          # has no "/products/" segment; real products sit at 2+ path
@@ -167,10 +174,30 @@ COMPETITOR_SITEMAPS = {
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
     9:  {"sitemap": "https://www.ghdisplay.co.uk/sitemap_index.xml",
          "filter":  lambda u: _in_path(u, "/product/", "/products/") and _is_product_url(u)},
-    10: {"sitemap": "https://www.harrisonproducts.com/xmlsitemap.php",
+    10: {"sitemap": "https://www.harrisonproducts.com/sitemap.xml",
+         # Was https://www.harrisonproducts.com/xmlsitemap.php — confirmed
+         # failing entirely ("No URLs harvested from sitemap", instant
+         # fail). That's a non-standard sitemap URL that's almost
+         # certainly stale/wrong. Site has a real /products/ landing page
+         # and deep category taxonomy (confirmed via their own HTML
+         # sitemap at /sitemap.php) — switching to the standard XML
+         # sitemap location. Filter logic unchanged (already correct
+         # pattern, just needs a working source URL). Verify via
+         # diagnostic log on first run.
          "filter":  lambda u: _in_path(u, "/products/") and _is_product_url(u)},
     11: {"sitemap": "https://indigodisplays.co.uk/sitemap.xml",
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
+    12: {"sitemap": "https://www.luminati.co.uk/sitemap.xml",
+         # Previously had NO config at all — discovery had never been
+         # attempted for this competitor. Site shows strong Shopify
+         # signals (faceted collection filtering UI, /all-products/
+         # listing page, standard Shopify delivery-threshold copy) — same
+         # platform as Display Pro (id 5), which is confirmed working with
+         # this exact filter. MEDIUM CONFIDENCE: no individual product URL
+         # was directly confirmed via search, only strong platform
+         # circumstantial evidence — verify via the diagnostic log
+         # (raw vs filtered URL counts) on first real run.
+         "filter":  lambda u: _in_path(u, "/products/") and _is_product_url(u)},
     13: {
         "mode": "category_crawl",  # no working /sitemap.xml on this site — see notes below
         "category_urls": [
@@ -206,13 +233,32 @@ COMPETITOR_SITEMAPS = {
     18: {
         "mode": "category_crawl",  # no working /sitemap.xml on this site — see notes below
         "category_urls": [
+            "https://www.snapframeswarehouse.co.uk/snap-frames-warehouse-full-product-catalogue",
             "https://www.snapframeswarehouse.co.uk/snap-frames",
             "https://www.snapframeswarehouse.co.uk/bespoke-snap-frames-poster-frames-clip-frame",
             "https://www.snapframeswarehouse.co.uk/external-lockable-poster-cases-from-snap-frames-warehouse",
-            "https://www.snapframeswarehouse.co.uk/snap-frames-warehouse-full-product-catalogue",
-            # NOTE: seed list only — this OpenCart site's full nav wasn't
-            # visible from search alone. Pull the top-level category list
-            # directly from the site's own nav menu and add the rest here.
+            "https://www.snapframeswarehouse.co.uk/Silver-Snap-Frames",
+            "https://www.snapframeswarehouse.co.uk/Coloured-Snap-Frames-Select-By-Colour",
+            "https://www.snapframeswarehouse.co.uk/Snap-Frames-Select-By-Size",
+            "https://www.snapframeswarehouse.co.uk/A0-Snap-Frames",
+            "https://www.snapframeswarehouse.co.uk/20x30-Snap-Frames",
+            "https://www.snapframeswarehouse.co.uk/32mm-snap-frames",
+            "https://www.snapframeswarehouse.co.uk/square-snap-frames",
+            "https://www.snapframeswarehouse.co.uk/weatherproof-snap-frames",
+            "https://www.snapframeswarehouse.co.uk/cheap-snap-frames-from-snap-frames-warehouse",
+            "https://www.snapframeswarehouse.co.uk/made-to-measure-snap-frames-from-snap-frames-warehouse",
+            "https://www.snapframeswarehouse.co.uk/Convex-Backlighters",
+            # Confirmed 43 URLs was too thin (competitor sells more than
+            # this per known market position). Expanded from 4 to 15 real
+            # category seed URLs found via search. This crawler doesn't
+            # recursively follow links discovered within a seed page — it
+            # only extracts product-shaped links from the pages listed
+            # here directly — so coverage is bounded by how many category
+            # pages we seed with, not by how big the actual catalogue is.
+            # Still likely incomplete (e.g. no A-boards/pavement-signs
+            # category URL found despite the site advertising them) —
+            # check the resulting URL count against known catalogue size
+            # after the next run and keep expanding if still thin.
         ],
         "product_link_pattern": re.compile(
             r"snapframeswarehouse\.co\.uk/[A-Za-z0-9][A-Za-z0-9\-]+$"
@@ -223,7 +269,25 @@ COMPETITOR_SITEMAPS = {
     20: {"sitemap": "https://www.uksignshop.co.uk/sitemap.xml",
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
     21: {"sitemap": "https://www.ultimadisplays.com/sitemap.xml",
-         "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
+         # Was _has_depth(u,2) and _is_product_url(u) — but confirmed real
+         # product pages here are depth-1 with short cryptic slugs (e.g.
+         # /orientplus, /casete, /ocel, /door — each verified as an actual
+         # product via its own description text), no /product/ prefix at
+         # all. The old depth>=2 requirement killed every one of them.
+         # Category/info pages sit at the same depth-1 shape though, so
+         # depth alone can't discriminate — exclude known non-product
+         # slugs by name plus the standard content-signal exclusion.
+         # MEDIUM CONFIDENCE — deny-list may be incomplete; verify via
+         # diagnostic log (raw vs filtered count) on first run.
+         "filter":  lambda u: _has_depth(u, 1) and not _is_content_url(u) and not any(
+             seg in u.lower() for seg in (
+                 "/about-us", "/applications", "/display-applications-uses",
+                 "/tourism", "/newproducts", "/welcome-to-our-store",
+                 "/resources-hub", "/login", "/brands", "/industries",
+                 "/customer-support", "/brochures", "/become-a-trade-partner",
+                 "/legal", "/terms", "/cookies",
+             )
+         )},
     22: {"sitemap": "https://www.verydisplays.com/sitemap_index.xml",
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
     23: {"sitemap": "https://www.vkf-renzel.co.uk/sitemap-product.xml.gz",
@@ -238,8 +302,26 @@ COMPETITOR_SITEMAPS = {
          "filter":  lambda u: True},
     24: {"sitemap": "https://visualdisplays.co.uk/sitemap.xml",
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
+    25: {"sitemap": "https://www.topregal.co.uk/en/sitemap.xml",
+         # Previously had NO config at all — discovery had never been
+         # attempted for this competitor. Site shows "Article No. #####"
+         # product identifiers and a product-comparison tool — same UI
+         # pattern as VKF Renzel's JTL-Shop platform — but every URL
+         # surfaced via search was a category listing page (e.g.
+         # /en/shelving-racks/, /en/protection-security/), not an
+         # individual product page. LOW CONFIDENCE — could not confirm
+         # real product URL shape. If this is also JTL-Shop, the sitemap
+         # index may split into category/product files like VKF Renzel's
+         # sitemap-category.xml.gz / sitemap-product.xml.gz — check the
+         # diagnostic log's "Sitemap index: N child sitemap(s)" line on
+         # first run and switch to a direct product-file harvest if so.
+         "filter":  lambda u: _has_depth(u, 2) and not _is_content_url(u)},
     26: {"sitemap": "https://screenmoove.com/sitemap.xml",
-         "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
+         # Was _has_depth(u,2) and _is_product_url(u) — confirmed Shopify
+         # platform via site's own copy ("linked to its dedicated Shopify
+         # collection URL") plus a real product URL found via search:
+         # /products/digital-signage-software. HIGH CONFIDENCE.
+         "filter":  lambda u: _in_path(u, "/products/") and _is_product_url(u)},
     27: {
         "mode": "category_crawl",  # /sitemap.xml is a real 404 on this site — see notes below
         "category_urls": [
@@ -269,6 +351,17 @@ COMPETITOR_SITEMAPS = {
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
     29: {"sitemap": "https://www.viking-direct.co.uk/sitemap.xml",
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
+    30: {"sitemap": "https://www.signholdersdirect.co.uk/sitemap.xml",
+         # Previously had NO config at all — discovery had never been
+         # attempted for this competitor. Very sparse web presence (small
+         # site, thin search index) — no individual product URL could be
+         # confirmed. Note: this is a completely separate company from
+         # "Sign Holders" (id 16, sign-holders.co.uk) despite the similar
+         # name — don't conflate the two. Also one of the six CF-proxied
+         # domains (now correctly routed since the CF_PROXY_URL fix).
+         # LOW CONFIDENCE — safe generic filter (avoids the is_category_url
+         # landmine); verify via diagnostic log on first real run.
+         "filter":  lambda u: _has_depth(u, 2) and not _is_content_url(u)},
 }
 
 # ── Synonym groups ─────────────────────────────────────────────────────────────
