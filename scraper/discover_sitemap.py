@@ -366,28 +366,55 @@ def _fetch_xml(client: httpx.Client, url: str) -> Optional[ET.Element]:
 
 
 def harvest_urls(client: httpx.Client, sitemap_url: str, url_filter,
-                 max_urls: int = 50000) -> list[str]:
+                 max_urls: int = 50000, _depth: int = 0) -> list[str]:
     root = _fetch_xml(client, sitemap_url)
     if root is None:
         return []
+
     tag = root.tag.lower()
+    indent = "  " * _depth
+
+    def _find_all(parent, local_name):
+        # Namespace-agnostic fallback: some sitemap generators declare a
+        # nonstandard or missing default namespace, which silently breaks
+        # the sm:-prefixed findall() below (0 results, no error, no
+        # exception — just a wrong empty answer). {*} matches any
+        # namespace (or none) for the given local tag name.
+        found = parent.findall(f".//sm:{local_name}", NS)
+        if not found:
+            found = parent.findall(f".//{{*}}{local_name}")
+        return found
+
     if "sitemapindex" in tag:
+        children = _find_all(root, "sitemap")
+        log.info(f"  {indent}Sitemap index {sitemap_url}: {len(children)} child sitemap(s)")
         urls = []
-        for el in root.findall(".//sm:sitemap/sm:loc", NS):
-            child = (el.text or "").strip()
+        for sm_el in children:
+            loc_el = sm_el.find("sm:loc", NS)
+            if loc_el is None:
+                loc_el = sm_el.find("{*}loc")
+            child = (loc_el.text or "").strip() if loc_el is not None else ""
             if child:
-                urls.extend(harvest_urls(client, child, url_filter, max_urls - len(urls)))
+                urls.extend(harvest_urls(client, child, url_filter, max_urls - len(urls), _depth + 1))
             if len(urls) >= max_urls:
                 break
         return urls[:max_urls]
-    urls = []
-    for el in root.findall(".//sm:url/sm:loc", NS):
-        u = (el.text or "").strip()
-        if u and url_filter(u):
-            urls.append(u)
-        if len(urls) >= max_urls:
-            break
-    return urls
+
+    loc_els = _find_all(root, "loc")
+    raw_urls = [(el.text or "").strip() for el in loc_els]
+    raw_urls = [u for u in raw_urls if u]
+
+    urls = [u for u in raw_urls if url_filter(u)]
+    log.info(
+        f"  {indent}{sitemap_url}: {len(raw_urls)} raw URL(s) in file, "
+        f"{len(urls)} passed the product-URL filter"
+    )
+    if raw_urls and not urls:
+        log.info(f"  {indent}Filtered out everything — sample raw URLs: {raw_urls[:3]}")
+    elif not raw_urls:
+        log.info(f"  {indent}Root tag was '{root.tag}' — 0 <loc> elements found at all (check for a namespace or format the parser doesn't recognise)")
+
+    return urls[:max_urls]
 
 
 def harvest_category_urls(client: httpx.Client, category_urls: list[str],
