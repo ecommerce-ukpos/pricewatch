@@ -47,6 +47,11 @@ on:
         required: false
         default: ''
         type: string
+      max_pages:
+        description: 'Max product pages to fetch per competitor during discovery (default 2000 — raise for large catalogues)'
+        required: false
+        default: '2000'
+        type: string
 jobs:
   run:
     runs-on: ubuntu-22.04
@@ -95,4 +100,5 @@ jobs:
           DISCOVER_SKU_OFFSET:   ${{ github.event.inputs.discover_sku_offset || '0' }}
           MIN_CONFIDENCE:        ${{ github.event.inputs.min_confidence || '0' }}
           COMPETITOR_IDS:        ${{ github.event.inputs.competitor_ids || '' }}
+          MAX_PAGES:             ${{ github.event.inputs.max_pages || '2000' }}
         run: python scraper/discover_sitemap.py
