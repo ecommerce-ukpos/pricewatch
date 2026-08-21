@@ -10,27 +10,27 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.0.0/dist/tabler-icons.min.css">
 </head>
 <body>
-
-<div class="card">
-  <div class="logo-wrap">
-    <div class="logo"><span class="uk">UK</span><span class="pos">POS</span></div>
+<div class="auth-shell">
+<div class="auth-card">
+  <div class="auth-logo">
+    <div class="logo" style="display:inline-flex;margin-bottom:10px"><span class="uk">UK</span><span class="pos">POS</span></div>
     <div style="font-size:17px;font-weight:500">PriceWatch Pro</div>
     <div style="font-size:11px;color:var(--t2);text-transform:uppercase;letter-spacing:.08em;margin-top:2px">Competitive price intelligence</div>
   </div>
 
   <!-- Tab switcher -->
-  <div class="tabs">
-    <button id="tab-login"    class="tab active"  onclick="showTab('login')">Sign in</button>
-    <button id="tab-register" class="tab"         onclick="showTab('register')">Request access</button>
+  <div class="auth-tabs">
+    <button id="tab-login"    class="auth-tab active"  onclick="showTab('login')">Sign in</button>
+    <button id="tab-register" class="auth-tab"         onclick="showTab('register')">Request access</button>
   </div>
 
   <!-- Login form -->
   <form id="form-login" onsubmit="handleLogin(event)">
-    <div class="field">
+    <div class="auth-field">
       <label>Email</label>
       <input id="login-email" type="email" required autocomplete="email" placeholder="you@ukpos.com">
     </div>
-    <div class="field">
+    <div class="auth-field">
       <label>Password</label>
       <div style="position:relative">
         <input id="login-password" type="password" required autocomplete="current-password" style="width:100%;padding-right:38px">
@@ -41,41 +41,41 @@
         </button>
       </div>
     </div>
-    <button type="submit" class="submit" id="login-btn">Sign in</button>
-    <button type="button" class="link-btn" onclick="handleForgotPassword()">Forgot password?</button>
-    <div id="login-msg" class="msg"></div>
+    <button type="submit" class="auth-submit" id="login-btn">Sign in</button>
+    <button type="button" class="auth-link" onclick="handleForgotPassword()">Forgot password?</button>
+    <div id="login-msg" class="auth-msg"></div>
   </form>
 
   <!-- Register form -->
   <form id="form-register" style="display:none" onsubmit="handleRequestAccess(event)">
     <p style="font-size:11px;color:var(--t2);margin-bottom:14px;line-height:1.5">Submit your work email — the administrator will review and send a set-password link once approved.</p>
-    <div class="field">
+    <div class="auth-field">
       <label>Work email</label>
       <input id="reg-email" type="email" required placeholder="you@ukpos.com">
     </div>
-    <div class="field">
+    <div class="auth-field">
       <label>Full name (optional)</label>
       <input id="reg-name" type="text" placeholder="Jane Smith" autocomplete="name">
     </div>
-    <button type="submit" class="submit" id="reg-btn">Submit request</button>
-    <div id="reg-msg" class="msg"></div>
+    <button type="submit" class="auth-submit" id="reg-btn">Submit request</button>
+    <div id="reg-msg" class="auth-msg"></div>
   </form>
 
   <!-- Pending approval state -->
   <div id="view-pending" style="display:none;text-align:center">
     <div style="font-size:14px;font-weight:500;margin-bottom:8px">Awaiting approval</div>
     <p style="font-size:12px;color:var(--t2);margin-bottom:16px;line-height:1.5">Your request is in the queue. You'll receive an email when the administrator approves your account.</p>
-    <button class="submit" onclick="signOut()">Sign out</button>
+    <button class="auth-submit" onclick="signOut()">Sign out</button>
   </div>
 
   <!-- Rejected state -->
   <div id="view-rejected" style="display:none;text-align:center">
     <div style="font-size:14px;font-weight:500;margin-bottom:8px">Request declined</div>
     <p style="font-size:12px;color:var(--t2);margin-bottom:16px">Contact the administrator if you believe this is an error.</p>
-    <button class="submit" onclick="signOut()">Sign out</button>
+    <button class="auth-submit" onclick="signOut()">Sign out</button>
   </div>
 </div>
-
+</div>
 <script>
 const SUPABASE_URL   = 'https://uaqakssusydpjzrcznhb.supabase.co';
 const SUPABASE_ANON  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhcWFrc3N1c3lkcGp6cmN6bmhiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3NDM3ODUsImV4cCI6MjA5NDMxOTc4NX0.OM0XBJsFb6hlLKXLoNpahuH4zzGcnNR3W-bzKfKPZ-w';
@@ -128,7 +128,7 @@ function showTab(which) {
 function showMsg(id, text, type) {
   const el = document.getElementById(id);
   el.textContent  = text;
-  el.className    = `msg ${type}`;
+  el.className    = `auth-msg ${type}`;
 }
 
 function togglePassword() {

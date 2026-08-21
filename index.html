@@ -12,7 +12,7 @@
 </head>
 <body>
 
-<!-- ════════════════ MAIN APP ════════════════ -->
+<!-- ════════════════ MAIN APP. ════════════════ -->
 <div id="view-app" class="shell" style="display:none">
 
   <!-- TOPBAR -->
@@ -83,7 +83,7 @@
           <button class="btn sm" onclick="exportAlerts()"><i class="ti ti-download"></i> Export CSV</button>
         </div>
       </div>
-      <div class="content">
+      <div class="content" style="overflow-y:auto">
         <div class="note note-warn" id="alerts-data-note" style="display:none">
           <i class="ti ti-alert-triangle"></i>
           <div>Alerts are based on unreviewed matches — treat percentages as indicative until matches are confirmed in the <span style="font-weight:500;cursor:pointer;text-decoration:underline" onclick="go('review')">Review Queue</span>.</div>
@@ -232,17 +232,19 @@
         <div class="cmd-sub">Click a competitor to view their matched SKUs</div>
       </div>
       <div class="content">
-        <div class="card-0p">
+        <div class="tw">
           <table id="bycomp-table"><thead><tr>
-            <th class="sortable" style="border-left:3px solid transparent" onclick="sortByCompTable('name')">Competitor</th>
+            <th class="sortable" onclick="sortByCompTable('id')">ID</th>
+            <th class="sortable" onclick="sortByCompTable('name')">Competitor</th>
             <th class="sortable" onclick="sortByCompTable('domain')">Domain</th>
             <th class="sortable" onclick="sortByCompTable('vat_status')">VAT</th>
-            <th class="sortable" onclick="sortByCompTable('matched')">Matched SKUs</th>
+            <th class="sortable" onclick="sortByCompTable('discovered')">Discovered</th>
+            <th class="sortable" onclick="sortByCompTable('matched')">Matched</th>
             <th class="sortable" onclick="sortByCompTable('critical')">Critical</th>
             <th class="sortable" onclick="sortByCompTable('warning')">Warning</th>
             <th class="sortable" onclick="sortByCompTable('cheaper')">We're cheaper</th>
             <th class="sortable" onclick="sortByCompTable('parity')">Parity</th>
-          </tr></thead><tbody id="bycomp-tbody"><tr><td colspan="8"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table>
+          </tr></thead><tbody id="bycomp-tbody"><tr><td colspan="10"><div class="loading"><span class="spinner"></span></div></td></tr></tbody></table>
         </div>
       </div>
     </div>

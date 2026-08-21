@@ -287,10 +287,17 @@ function go(name, opts = {}) {
   }[name];
   if (navKey && $('nav-' + navKey)) $('nav-' + navKey).classList.add('active');
 
-  if (name === 'skus') {
+if (name === 'skus') {
     const q = $('skuQ');
     if (q) q.value = '';
+    if (opts.filter !== undefined) {
+      const fd = $('fDiff');
+      if (fd) fd.value = opts.filter;
+      const hashFilter = opts.filter ? '?filter=' + opts.filter : '';
+      history.replaceState(null, '', '#skus' + hashFilter);
+    }
     if (!skusLoaded) { skusLoaded = true; loadSKUs(); }
+    else loadSKUs();
   }
   if (name === 'review')      loadReview();
   if (name === 'bycat')       loadByCategory();
@@ -315,6 +322,9 @@ function restoreRoute() {
         else go('bycomp');
       });
     }
+} else if (hash.startsWith('skus')) {
+    const m = hash.match(/\?filter=([^&]+)/);
+    go('skus', m ? { filter: m[1] } : {});
   } else if (PANEL_MAP[hash]) {
     go(hash);
   } else {
@@ -423,23 +433,33 @@ async function loadDashboard() {
     const d = await authFetch('/dashboard');
     const m = d.metrics || {};
 
-    $('m-crit').textContent  = m.critical  ?? '—';
+$('m-crit').textContent  = m.critical  ?? '—';
     $('m-warn').textContent  = m.warning   ?? '—';
     $('m-cheap').textContent = m.cheapest  ?? '—';
     $('m-oos').textContent   = m.oos       ?? '—';
 
+    [
+      ['m-crit',  'crit'],
+      ['m-warn',  'warn'],
+      ['m-cheap', 'cheap'],
+      ['m-oos',   'oos'],
+    ].forEach(([mvId, filter]) => {
+      const card = $(mvId)?.closest('.metric');
+      if (card) {
+        card.style.cursor = 'pointer';
+        card.title = 'View filtered SKUs';
+        card.onclick = () => { skusLoaded = false; go('skus', { filter }); };
+      }
+    });
+
     const reviewCount = m.review || 0;
-    if (reviewCount > 0) {
-      $('nav-review-badge').textContent = reviewCount.toLocaleString();
-      $('nav-review-badge').style.display = '';
-    }
     const critCount = m.critical || 0;
     if (critCount > 0) {
       $('nav-alerts-badge').textContent = critCount;
       $('nav-alerts-badge').style.display = '';
     }
 
-    $('sidebar-foot').innerHTML = `<strong>${(d.sku_count||0).toLocaleString()}</strong> SKUs · <strong>${d.competitor_count||23}</strong> competitors<br><strong>${(d.snapshot_count||0).toLocaleString()}</strong> snapshots`;
+    $('sidebar-foot').innerHTML = `<strong>${(d.sku_count||0).toLocaleString()}</strong> SKUs · <strong>${d.competitor_count||0}</strong> competitors<br><strong>${(d.match_count||0).toLocaleString()}</strong> matched pairs`;
 
     if (d.last_run) {
       const r = d.last_run;
@@ -626,10 +646,9 @@ async function loadSKUs() {
     const d = await authFetch(url);
     const rows = d.data || [];
     if (d.total !== undefined) skuTotal = d.total;
-    else if (rows.length < skuLimit) skuTotal = (skuPage-1)*skuLimit + rows.length;
 
     if (!rows.length) {
-      $('skus-sub').textContent = `${skuTotal.toLocaleString()} SKUs`;
+      $('skus-sub').textContent = `${skuTotal.toLocaleString()} snapshots`;
       $('sku-tbody').innerHTML = '<tr><td colspan="13" style="text-align:center;color:var(--t2);padding:20px">No matches found</td></tr>';
       $('sku-pagination').innerHTML = '';
       return;
@@ -707,7 +726,7 @@ function applySkuCompetitorFilter() {
 
   $('skus-sub').textContent = comp
     ? `${rows.length.toLocaleString()} of ${skusAllData.length.toLocaleString()} SKUs matched by ${comp}`
-    : `${skuTotal.toLocaleString()} SKUs`;
+    : `${rows.length < skuLimit ? ((skuPage-1)*skuLimit + rows.length).toLocaleString() : skuPage > 1 ? 'Page ' + skuPage : rows.length.toLocaleString() + '+ SKUs'}`;
 
   if (!rows.length) {
     $('sku-tbody').innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--t2);padding:20px">No SKUs matched by this competitor</td></tr>';
@@ -742,6 +761,8 @@ function applySkuCompetitorFilter() {
 
 function filterSKUs() {
   const comp = $('fComp')?.value || '';
+  const diff = $('fDiff')?.value || '';
+  history.replaceState(null, '', diff ? '#skus?filter=' + diff : '#skus');
   if (comp && skusAllData.length) { applySkuCompetitorFilter(); return; }
   skuPage = 1;
   loadSKUs();
@@ -851,7 +872,20 @@ function filterReview() {
   const showing = rows.length;
   const tabLabel = {review:'needs review',auto:'AI matched',human:'confirmed',amended:'needs rescrape',rejected:'rejected'}[matchTab];
   $('review-sub').textContent = (q||comp) ? `${showing} matches (filtered)` : `${showing} ${tabLabel}`;
-
+const sendAllBtn = $('send-all-rescrape');
+  if (matchTab === 'amended') {
+    if (!sendAllBtn) {
+      const btn = document.createElement('button');
+      btn.className = 'btn sm prim';
+      btn.id = 'send-all-rescrape';
+      btn.innerHTML = '<i class="ti ti-player-play"></i> Send all for rescrape';
+      btn.onclick = sendAllForRescrape;
+      document.querySelector('#p-review .cmd-actions').appendChild(btn);
+    }
+  } else {
+    if (sendAllBtn) sendAllBtn.remove();
+  }
+   
   if (!rows.length) {
     const msgs = {
       review:   ['ti-circle-check','var(--grn)','All caught up — no matches need review'],
@@ -1282,15 +1316,22 @@ function selectCat5(name) { catL5 = name; catPage = 1; renderCategoryLevel(); }
 ════════════════════════════════════════ */
 async function loadByCompetitor() {
   try {
-    const [{ data: comps }, { data: snaps }] = await Promise.all([
+    const [{ data: comps }, { data: snaps }, { data: druns }] = await Promise.all([
       sb.from('competitors').select('id,name,domain,vat_status,active').eq('active',true).order('name'),
-      sb.from('latest_snapshots').select('competitor_id,diff_pct_normalised,diff_pct,competitor_price').not('competitor_price','is',null)
+      sb.from('latest_snapshots').select('competitor_id,diff_pct_normalised,diff_pct,competitor_price').not('competitor_price','is',null),
+      sb.from('discovery_runs').select('competitor_id,status,completed_at,urls_found').order('started_at', {ascending:false}),
     ]);
 
     if (!comps?.length) {
-      $('bycomp-tbody').innerHTML = '<tr><td colspan="8" style="padding:20px;text-align:center;color:var(--t2)">No competitors found</td></tr>';
+      $('bycomp-tbody').innerHTML = '<tr><td colspan="10" style="padding:20px;text-align:center;color:var(--t2)">No competitors found</td></tr>';
       return;
     }
+
+    // Keep only the most recent run per competitor
+    const discoveryMap = {};
+    (druns || []).forEach(r => {
+      if (!discoveryMap[r.competitor_id]) discoveryMap[r.competitor_id] = r;
+    });
 
     const stats = {};
     (snaps || []).forEach(s => {
@@ -1306,18 +1347,19 @@ async function loadByCompetitor() {
 
     bycompData = comps.map(c => ({
       ...c,
-      _matched:  stats[c.id]?.matched  ?? 0,
-      _critical: stats[c.id]?.critical ?? 0,
-      _warning:  stats[c.id]?.warning  ?? 0,
-      _cheaper:  stats[c.id]?.cheaper  ?? 0,
-      _parity:   stats[c.id]?.parity   ?? 0,
+      _discovery: discoveryMap[c.id] || null,
+      _matched:    stats[c.id]?.matched  ?? 0,
+      _critical:   stats[c.id]?.critical ?? 0,
+      _warning:    stats[c.id]?.warning  ?? 0,
+      _cheaper:    stats[c.id]?.cheaper  ?? 0,
+      _parity:     stats[c.id]?.parity   ?? 0,
     }));
 
     sortState.bycomp = { col: null, dir: 1 };
     renderByCompRows(bycompData);
     updateSortHeaders('bycomp-table', 'bycomp', null);
   } catch (e) {
-    $('bycomp-tbody').innerHTML = `<tr><td colspan="8" style="color:var(--red);padding:8px">${e.message}</td></tr>`;
+    $('bycomp-tbody').innerHTML = `<tr><td colspan="10" style="color:var(--red);padding:8px">${e.message}</td></tr>`;
   }
 }
 
@@ -1478,13 +1520,34 @@ async function loadSkuDetail(opts) {
         </div>
       </div>`;
 
-    const { data: snaps } = await sb.from('latest_snapshots').select('*,skus(unit_qty)').eq('sku_id', currentSkuId).order('diff_pct_normalised', {ascending:true, nullsFirst:false});
-    const rows = snaps || [];
+const [{ data: snaps }, { data: allComps }] = await Promise.all([
+      sb.from('latest_snapshots').select('*,skus(unit_qty)').eq('sku_id', currentSkuId).order('diff_pct_normalised', {ascending:true, nullsFirst:false}),
+      sb.from('competitors').select('id,name,domain,vat_status').eq('active', true).order('name'),
+    ]);
 
-    if (!rows.length) {
-      $('sku-comp-tbody').innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--t2);padding:20px">No competitor data yet</td></tr>';
-      return;
-    }
+    const snapMap = {};
+    (snaps || []).forEach(s => { snapMap[s.competitor_id] = s; });
+
+    const rows = (allComps || []).map(c => {
+      const snap = snapMap[c.id];
+      return snap
+        ? { ...snap, _hasMatch: true }
+        : {
+            sku_id: currentSkuId,
+            competitor_id: c.id,
+            competitor_name: c.name,
+            competitor_domain: c.domain,
+            competitor_vat: c.vat_status,
+            competitor_price: null,
+            competitor_url: null,
+            diff_pct: null,
+            diff_pct_normalised: null,
+            availability: null,
+            scraped_at: null,
+            confidence: null,
+            _hasMatch: false,
+          };
+    });
 
     skuCompData = rows;
     sortState.skuComp = { col: null, dir: 1 };
@@ -1907,7 +1970,44 @@ async function scrapeRow(skuId, competitorId, btn) {
     alert('Scrape failed: ' + e.message);
   }
 }
-
+async function queueRescrape(skuId, competitorId, btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader" style="font-size:13px"></i>';
+  try {
+    const { error } = await sb.from('competitor_matches')
+      .update({ match_status: 'amended', updated_at: new Date().toISOString() })
+      .eq('sku_id', skuId)
+      .eq('competitor_id', competitorId);
+    if (error) throw new Error(error.message);
+    btn.innerHTML = '<i class="ti ti-check" style="font-size:13px;color:var(--grn)"></i> Queued';
+  } catch(e) {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    alert('Failed to queue: ' + e.message);
+  }
+}
+async function sendAllForRescrape() {
+  const btn = $('send-all-rescrape');
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Dispatching…';
+  try {
+    const token = await getToken();
+    const res = await fetch('https://uaqakssusydpjzrcznhb.supabase.co/functions/v1/smart-function', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Dispatch failed');
+    btn.innerHTML = '<i class="ti ti-check"></i> Queued for rescrape';
+    setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 10000);
+  } catch(e) {
+    btn.innerHTML = orig;
+    btn.disabled = false;
+    alert('Failed to dispatch: ' + e.message);
+  }
+}
 async function manualRefresh() {
   const btn = event.target.closest('button');
   const orig = btn.innerHTML;
@@ -1964,10 +2064,12 @@ function sortByCompTable(col) {
   const { dir } = sortState.bycomp;
   const sorted = [...bycompData].sort((a, b) => {
     const getV = r => {
-      if (col === 'name')     return (r.name||'').toLowerCase();
-      if (col === 'domain')   return (r.domain||'').toLowerCase();
+      if (col === 'id')         return r.id ?? 0;
+      if (col === 'name')       return (r.name||'').toLowerCase();
+      if (col === 'domain')     return (r.domain||'').toLowerCase();
       if (col === 'vat_status') return (r.vat_status||'').toLowerCase();
-      if (col === 'matched')  return r._matched  ?? 0;
+      if (col === 'discovered') return r._discovery?.completed_at || '';
+      if (col === 'matched')    return r._matched  ?? 0;
       if (col === 'critical') return r._critical ?? 0;
       if (col === 'warning')  return r._warning  ?? 0;
       if (col === 'cheaper')  return r._cheaper  ?? 0;
@@ -1980,20 +2082,57 @@ function sortByCompTable(col) {
 }
 
 function renderByCompRows(comps) {
+  const totals = comps.reduce((acc, c) => {
+    acc.matched  += c._matched  ?? 0;
+    acc.critical += c._critical ?? 0;
+    acc.warning  += c._warning  ?? 0;
+    acc.cheaper  += c._cheaper  ?? 0;
+    acc.parity   += c._parity   ?? 0;
+    return acc;
+  }, { matched:0, critical:0, warning:0, cheaper:0, parity:0 });
+
   $('bycomp-tbody').innerHTML = comps.map(c => {
     const slug = slugify(c.name);
-    const noData = c._matched === 0;
+    const noMatch = c._matched === 0;
+      const dr = c._discovery;
+      let discoverCell;
+      if (!dr) {
+        discoverCell = '<span style="color:var(--t3)">—</span>';
+      } else if (dr.status === 'running') {
+        discoverCell = '<span style="color:var(--amb)">⏳ Running</span>';
+      } else if (dr.status === 'failed') {
+        discoverCell = '<span style="color:var(--red)">⚠ Failed</span>';
+      } else {
+        const dateStr = dr.completed_at
+          ? new Date(dr.completed_at).toLocaleDateString('en-GB',{day:'numeric',month:'short'})
+          : '—';
+        const urlCount = dr.urls_found != null ? dr.urls_found.toLocaleString() : '—';
+        discoverCell = `<span style="font-weight:500">${urlCount}</span><div style="font-size:10px;color:var(--t3)">${dateStr}</div>`;
+      }
     return `<tr class="tr-link" onclick="go('comp-detail',{compId:${c.id},compName:'${c.name.replace(/'/g,"\\'")}',compSlug:'${slug}',compDomain:'${c.domain}',compVat:'${c.vat_status}'})">
+      <td style="color:var(--t3);font-size:11px">${c.id}</td>
       <td style="font-weight:500">${c.name}</td>
       <td style="font-size:11px;color:var(--t2)">${c.domain}</td>
       <td>${vatPill(c.vat_status)}</td>
-      <td style="color:var(--t2)">${noData ? '<span style="color:var(--t3)">—</span>' : c._matched}</td>
-      <td style="font-weight:600">${noData ? '<span style="color:var(--t3)">—</span>' : (c._critical > 0 ? `<span style="color:var(--red)">${c._critical}</span>` : '<span style="color:var(--t3)">0</span>')}</td>
-      <td>${noData ? '<span style="color:var(--t3)">—</span>' : (c._warning > 0 ? `<span style="color:var(--amb);font-weight:500">${c._warning}</span>` : '<span style="color:var(--t3)">0</span>')}</td>
-      <td>${noData ? '<span style="color:var(--t3)">—</span>' : (c._cheaper > 0 ? `<span style="color:var(--grn)">${c._cheaper}</span>` : '<span style="color:var(--t3)">0</span>')}</td>
-      <td style="color:var(--t2)">${noData ? '<span style="color:var(--t3)">—</span>' : c._parity}</td>
+      <td>${discoverCell}</td>
+      <td style="color:var(--t2)">${noMatch ? '<span style="color:var(--t3)">—</span>' : c._matched}</td>
+      <td style="font-weight:600">${noMatch ? '<span style="color:var(--t3)">—</span>' : (c._critical > 0 ? `<span style="color:var(--red)">${c._critical}</span>` : '<span style="color:var(--t3)">0</span>')}</td>
+      <td>${noMatch ? '<span style="color:var(--t3)">—</span>' : (c._warning > 0 ? `<span style="color:var(--amb);font-weight:500">${c._warning}</span>` : '<span style="color:var(--t3)">0</span>')}</td>
+      <td>${noMatch ? '<span style="color:var(--t3)">—</span>' : (c._cheaper > 0 ? `<span style="color:var(--grn)">${c._cheaper}</span>` : '<span style="color:var(--t3)">0</span>')}</td>
+      <td style="color:var(--t2)">${noMatch ? '<span style="color:var(--t3)">—</span>' : c._parity}</td>
     </tr>`;
-  }).join('');
+  }).join('') + `<tr style="border-top:2px solid var(--border);font-weight:600;background:var(--bg)">
+    <td></td>
+    <td style="color:var(--t2);font-size:11px">Total</td>
+    <td></td>
+    <td></td>
+    <td></td>
+    <td>${totals.matched}</td>
+    <td style="color:var(--red)">${totals.critical}</td>
+    <td style="color:var(--amb)">${totals.warning}</td>
+    <td style="color:var(--grn)">${totals.cheaper}</td>
+    <td style="color:var(--t2)">${totals.parity}</td>
+  </tr>`;
 }
 
 function sortSkusTable(col) {
@@ -2163,8 +2302,8 @@ function renderSkuCompRows(rows) {
           ${hasUrl?'Edit URL':'Add URL'}
         </button>
       </td>
-      <td><button class="btn sm ghost" id="scrape-${rowId}" onclick="scrapeRow('${r.sku_id}',${r.competitor_id},this)" title="Re-scrape this competitor now"><i class="ti ti-refresh" style="font-size:13px"></i></button></td>
-    </tr>
+      <td><button class="btn sm ghost" id="scrape-${rowId}" onclick="queueRescrape('${r.sku_id}',${r.competitor_id},this)" title="Rescrape"><i class="ti ti-refresh" style="font-size:13px"></i> Rescrape</button></td>
+      </tr>
     <tr id="skurow-edit-${rowId}" style="display:none;background:var(--bb)">
       <td colspan="10" style="padding:10px 12px">
         <div style="font-size:11px;font-weight:500;margin-bottom:6px;color:var(--blu)">

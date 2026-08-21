@@ -69,19 +69,6 @@ STOP_WORDS = {
     "holders","holder","signs","sign","displays","display",
 }
 
-# ── Pack qty patterns ──────────────────────────────────────────────────────────
-PACK_QTY_PATTERNS = [
-    r"(?<!\d\s)(?<!\d)\bx\s*(\d+)\b",
-    r"\bpack\s+of\s+(\d+)\b",
-    r"\b(\d+)\s*pack\b",
-    r"\bset\s+of\s+(\d+)\b",
-    r"\bbox\s+of\s+(\d+)\b",
-    r"\bbag\s+of\s+(\d+)\b",
-    r"\bper\s+(\d+)\b",
-    r"\bqty\s*[:\-]?\s*(\d+)\b",
-    r"\b(\d+)\s*x\b(?!\s*\d)",
-]
-
 # ── Category URL signals (used by scrape.py to skip listing pages) ─────────────
 CATEGORY_URL_SIGNALS = [
     "/collections/", "/categories/", "/category/", "/c/",
@@ -187,16 +174,49 @@ def normalise_price(price: float, vat: str) -> float:
 
 
 def extract_pack_qty(title: str) -> Optional[int]:
-    """Extract pack quantity from a product title. Returns None if not found or qty=1."""
+    """Extract pack quantity from a product title. Returns None if not found or qty=1.
+
+    Rules:
+      - Any number immediately followed by a unit of measurement (cm, mm, m, ft,
+        inch, kg, g, etc.) is a dimension and is ignored entirely.
+      - A number counts as a quantity only when followed by: pack, pk, /pk,
+        x (with no dimensional number after it), or when it appears in a clear
+        pack-quantity phrase (pack of N, set of N, box of N, qty N, etc.).
+    """
     if not title:
         return None
     t = title.lower()
-    for pattern in PACK_QTY_PATTERNS:
-        m = re.search(pattern, t, re.I)
+
+    # Mask out all dimensional numbers so later patterns cannot match them.
+    # e.g. "100 x 4cm" → "100 x DIM", "80cm x 2m" → "DIM x DIM"
+    t_masked = re.sub(
+        r"\d+(?:\.\d+)?\s*(?:cm|mm|m\b|ft|inch(?:es)?|\"|kg\b|g\b)",
+        "DIM",
+        t,
+        flags=re.I,
+    )
+
+    # Patterns checked in priority order against the masked string.
+    QUANTITY_PATTERNS = [
+        r"\bpack\s+of\s+(\d+)\b",        # pack of 10
+        r"\bset\s+of\s+(\d+)\b",          # set of 10
+        r"\bbox\s+of\s+(\d+)\b",          # box of 10
+        r"\bbag\s+of\s+(\d+)\b",          # bag of 10
+        r"\bper\s+(\d+)\b",               # per 10
+        r"\bqty\s*[:\-]?\s*(\d+)\b",      # qty: 10
+        r"\b(\d+)\s*/?\s*pk\b",           # 10pk / 10/pk
+        r"\b(\d+)\s*pack\b",              # 10pack / 10 pack
+        r"\bx\s*(\d+)\b(?!\s*DIM)",       # x 10 — skipped if followed by masked dimension
+        r"\b(\d+)\s*x\b(?!\s*\d)",        # 10x (nothing numeric follows)
+    ]
+
+    for pattern in QUANTITY_PATTERNS:
+        m = re.search(pattern, t_masked, re.I)
         if m:
             qty = int(m.group(1))
-            if 2 <= qty <= 500:  # was 10000 — anything larger is almost certainly a dimension
+            if 2 <= qty <= 500:
                 return qty
+
     return None
 
 
