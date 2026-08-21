@@ -121,16 +121,48 @@ def _in_path(url: str, *segs: str) -> bool:
 COMPETITOR_SITEMAPS = {
     1:  {"sitemap": "https://www.alplas.com/sitemap.xml",
          "filter":  lambda u: _in_path(u, "/product/") and _is_product_url(u)},
-    2:  {"sitemap": "https://www.chalkboardsuk.co.uk/sitemap.xml",
-         "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
+    2:  {"sitemap": "https://www.chalkboardsuk.co.uk/store-products-sitemap.xml",
+         # Was https://www.chalkboardsuk.co.uk/sitemap.xml with filter
+         # _has_depth(u,2) and _is_product_url(u) — but every real product
+         # on this Wix site is a single path segment (e.g. /welcome-sign-stand),
+         # and is_category_url() in common.py auto-rejects ANY url with <=2
+         # path segments, so that filter could never pass a single URL here.
+         # Wix already splits its sitemap into a dedicated products-only file
+         # (vs. blog-posts/blog-categories/store-categories/pages), so we
+         # just harvest that file directly and accept everything in it.
+         "filter":  lambda u: True},
     4:  {"sitemap": "https://www.discountdisplays.co.uk/sitemap.xml",
-         "filter":  lambda u: _in_path(u, "/products/") and _is_product_url(u)},
+         # Was filtering on _in_path(u, "/products/") — but this site has
+         # no "/products/" segment anywhere; it's a legacy static-HTML site
+         # where both products AND category/info pages live flat under
+         # /html/*.html at identical depth, so URL shape alone can't fully
+         # separate them. We filter to /html/ + exclude known non-product
+         # pages by name; any category page that slips through just gets a
+         # wasted (harmless) Claude match attempt rather than a bad write,
+         # since matches are still gated by confidence threshold downstream.
+         "filter":  lambda u: _in_path(u, "/html/") and not _is_content_url(u) and not any(
+             seg in u for seg in (
+                 "delivery-returns", "resource-centre", "trade.html",
+                 "digital-signage.html", "indoor-displays.html", "outdoor-displays.html",
+                 "products-a-z.html", "new-products.html", "promotional-products.html",
+                 "special-offers.html", "bespoke-projects", "testimonials",
+                 "guides-and-advice", "request-a-quote", "plant-list", "cutting-capabilities",
+                 "artwork-preparation", "artwork-design-service", "artwork-upload",
+             )
+         )},
     5:  {"sitemap": "https://displaypro.co.uk/sitemap.xml",
          "filter":  lambda u: _in_path(u, "/products/") and _is_product_url(u)},
     6:  {"sitemap": "https://displaysense.co.uk/sitemap.xml",
          "filter":  lambda u: _has_depth(u, 1) and _is_product_url(u) and "displaysense" in u},
     7:  {"sitemap": "https://www.displaywizard.co.uk/sitemap.xml",
-         "filter":  lambda u: _in_path(u, "/products/") and _is_product_url(u)},
+         # Was filtering on _in_path(u, "/products/") — this WordPress site
+         # has no "/products/" segment; real products sit at 2+ path
+         # segments like /roller-banners/luxe-roller-banner-stands/, and
+         # category landing pages are mostly 1 segment (/roller-banners/).
+         # Deliberately NOT using _is_product_url()/is_category_url() here —
+         # that helper auto-rejects any URL with <=2 path segments, which
+         # would kill exactly the 2-segment product URLs this site uses.
+         "filter":  lambda u: _has_depth(u, 2) and not _is_content_url(u)},
     8:  {"sitemap": "https://www.gadsby.co.uk/sitemaps-1-sitemap.xml",
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
     9:  {"sitemap": "https://www.ghdisplay.co.uk/sitemap_index.xml",
@@ -200,8 +232,31 @@ COMPETITOR_SITEMAPS = {
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
     26: {"sitemap": "https://screenmoove.com/sitemap.xml",
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
-    27: {"sitemap": "https://www.3ddisplays.co.uk/sitemap.xml",
-         "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
+    27: {
+        "mode": "category_crawl",  # /sitemap.xml is a real 404 on this site — see notes below
+        "category_urls": [
+            "https://www.3ddisplays.co.uk/sitemap",
+            # The site's own human sitemap page — lists every top-level
+            # category (Retail Displays & POS, Trays and Tubs, Shelving,
+            # Card Display Stands, Slatwall Panels, Exhibition Displays &
+            # Panels, Display Cabinets, etc.). Seeding with this one page
+            # should surface the top-level category links; add specific
+            # category URLs below if coverage from this alone proves thin.
+            "https://www.3ddisplays.co.uk/exhibition-displays-panels-c276",
+            "https://www.3ddisplays.co.uk/card-display-stands-c11",
+            "https://www.3ddisplays.co.uk/display-cabinets-c10",
+        ],
+        # This platform uses a 3-tier taxonomy: -c### for categories/
+        # subcategories, -t### for product/type listing pages (e.g.
+        # /card-display-stands-c11/exhibition-card-racks-c54/card-racks-t478).
+        # We don't have visibility into individual per-SKU product-detail
+        # URLs (if they exist separately from -t### listing pages), so this
+        # pattern accepts both tiers as candidates — some -c### entries may
+        # be pure subcategories rather than individual products. Confidence
+        # here is lower than the other category_crawl configs; worth
+        # spot-checking match quality after the first run.
+        "product_link_pattern": re.compile(r"-[ct]\d+(?:/|$)"),
+    },
     28: {"sitemap": "https://www.bludisplay.co.uk/sitemap.xml",
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
     29: {"sitemap": "https://www.viking-direct.co.uk/sitemap.xml",
