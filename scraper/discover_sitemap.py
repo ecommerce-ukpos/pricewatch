@@ -226,8 +226,16 @@ COMPETITOR_SITEMAPS = {
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
     22: {"sitemap": "https://www.verydisplays.com/sitemap_index.xml",
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
-    23: {"sitemap": "https://www.vkf-renzel.co.uk/sitemap.xml",
-         "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
+    23: {"sitemap": "https://www.vkf-renzel.co.uk/sitemap-product.xml.gz",
+         # Was https://www.vkf-renzel.co.uk/sitemap.xml with the generic
+         # _has_depth(u,2) and _is_product_url(u) filter — confirmed via
+         # diagnostic log that this killed all 5,772 real product URLs
+         # (0 passed) while correctly rejecting the 919 category URLs in
+         # sitemap-category.xml.gz. This is a JTL-Shop platform, which
+         # already splits its sitemap index into dedicated category and
+         # product files — same situation as Chalkboards UK's Wix setup.
+         # Harvest the product file directly and accept everything in it.
+         "filter":  lambda u: True},
     24: {"sitemap": "https://visualdisplays.co.uk/sitemap.xml",
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
     26: {"sitemap": "https://screenmoove.com/sitemap.xml",
@@ -414,7 +422,29 @@ def _fetch_xml(client: httpx.Client, url: str) -> Optional[ET.Element]:
         content = r.content
         if content[:2] == b"\x1f\x8b":
             content = gzip.decompress(content)
-        return ET.fromstring(content)
+        try:
+            return ET.fromstring(content)
+        except ET.ParseError as e:
+            # Some sitemap generators (commonly WordPress/Yoast) emit a
+            # leading BOM, stray whitespace, or a duplicate/misplaced
+            # <?xml ...?> / <?xml-stylesheet ...?> declaration before the
+            # real prolog — expat rejects all of these with "XML or text
+            # declaration not at start of entity" even though the actual
+            # sitemap content is completely valid. Strip everything before
+            # the real root element and retry with a clean synthetic
+            # declaration rather than giving up on an otherwise-good file.
+            log.debug(f"  Initial XML parse failed for {url} ({e}), retrying with sanitised content")
+            cleaned = content.lstrip(b"\xef\xbb\xbf").lstrip()
+            m = re.search(rb"<(urlset|sitemapindex)[\s>]", cleaned)
+            if m:
+                cleaned = b'<?xml version="1.0" encoding="UTF-8"?>\n' + cleaned[m.start():]
+                try:
+                    return ET.fromstring(cleaned)
+                except ET.ParseError as e2:
+                    log.warning(f"  Sitemap fetch error {url}: {e2}")
+                    return None
+            log.warning(f"  Sitemap fetch error {url}: {e}")
+            return None
     except Exception as e:
         log.warning(f"  Sitemap fetch error {url}: {e}")
         return None
