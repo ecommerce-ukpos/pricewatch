@@ -174,17 +174,28 @@ COMPETITOR_SITEMAPS = {
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
     9:  {"sitemap": "https://www.ghdisplay.co.uk/sitemap_index.xml",
          "filter":  lambda u: _in_path(u, "/product/", "/products/") and _is_product_url(u)},
-    10: {"sitemap": "https://www.harrisonproducts.com/sitemap.xml",
-         # Was https://www.harrisonproducts.com/xmlsitemap.php — confirmed
-         # failing entirely ("No URLs harvested from sitemap", instant
-         # fail). That's a non-standard sitemap URL that's almost
-         # certainly stale/wrong. Site has a real /products/ landing page
-         # and deep category taxonomy (confirmed via their own HTML
-         # sitemap at /sitemap.php) — switching to the standard XML
-         # sitemap location. Filter logic unchanged (already correct
-         # pattern, just needs a working source URL). Verify via
-         # diagnostic log on first run.
-         "filter":  lambda u: _in_path(u, "/products/") and _is_product_url(u)},
+    10: {
+        "mode": "category_crawl",  # both xmlsitemap.php and sitemap.xml failed instantly — no working XML sitemap on this site
+        "category_urls": [
+            "https://www.harrisonproducts.com/products/",
+            "https://www.harrisonproducts.com/shop-by/shop-by-industry/",
+            "https://www.harrisonproducts.com/brands/",
+            "https://www.harrisonproducts.com/product-catalogue/",
+            # LOW CONFIDENCE — tried both the non-standard xmlsitemap.php
+            # and the standard /sitemap.xml; both failed instantly with
+            # "No URLs harvested", matching the genuine-no-sitemap
+            # signature seen on Pavement Signs/Retail Acrylics/3D
+            # Displays, not a filter problem. Site has a real HTML sitemap
+            # at /sitemap.php listing deep category names (Shelf Edge
+            # Solutions, Data Strips, Shelf Talkers, etc.) but no
+            # confirmed URL slugs for those categories — only the seeds
+            # above are confirmed live. No individual product-detail URL
+            # was confirmed via search either, so product_link_pattern
+            # below is a best-effort guess. Check diagnostic log closely
+            # on first run and refine both the seed list and pattern.
+        ],
+        "product_link_pattern": re.compile(r"harrisonproducts\.com/[a-z0-9][a-z0-9\-]{4,}/?$"),
+    },
     11: {"sitemap": "https://indigodisplays.co.uk/sitemap.xml",
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
     12: {"sitemap": "https://www.luminati.co.uk/sitemap.xml",
@@ -271,14 +282,23 @@ COMPETITOR_SITEMAPS = {
     21: {"sitemap": "https://www.ultimadisplays.com/sitemap.xml",
          # Was _has_depth(u,2) and _is_product_url(u) — but confirmed real
          # product pages here are depth-1 with short cryptic slugs (e.g.
-         # /orientplus, /casete, /ocel, /door — each verified as an actual
-         # product via its own description text), no /product/ prefix at
-         # all. The old depth>=2 requirement killed every one of them.
-         # Category/info pages sit at the same depth-1 shape though, so
-         # depth alone can't discriminate — exclude known non-product
-         # slugs by name plus the standard content-signal exclusion.
-         # MEDIUM CONFIDENCE — deny-list may be incomplete; verify via
-         # diagnostic log (raw vs filtered count) on first run.
+         # /orientplus, /casete, /ocel, /door — verified via description
+         # text, though re-checking these are "Products tagged with 'X'"
+         # pages, i.e. tag/filter listings that happen to show one
+         # product for narrow tags, not confirmed standalone product
+         # pages). No /product/ prefix at all. The old depth>=2
+         # requirement killed every one of them regardless.
+         # UNRESOLVED — this still failed "No URLs harvested" after the
+         # fix. Two possible causes, distinguishable via the diagnostic
+         # log on next run: (1) if raw count is 0, this site's sitemap.xml
+         # genuinely doesn't exist/resolve — switch to category_crawl
+         # seeded with the confirmed tag pages (/orientplus, /casete,
+         # /ocel, /door, /arch, /display, /kk114a) plus try locating a
+         # genuine "browse all" catalogue page, noting the site may also
+         # gate its full catalogue behind login ("request access to our
+         # online ordering platform"), which would cap any approach's
+         # coverage; (2) if raw count is >0 but filtered=0, this deny-list
+         # is too aggressive — loosen it.
          "filter":  lambda u: _has_depth(u, 1) and not _is_content_url(u) and not any(
              seg in u.lower() for seg in (
                  "/about-us", "/applications", "/display-applications-uses",
