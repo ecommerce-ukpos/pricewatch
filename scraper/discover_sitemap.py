@@ -120,7 +120,13 @@ def _in_path(url: str, *segs: str) -> bool:
 
 COMPETITOR_SITEMAPS = {
     1:  {"sitemap": "https://www.alplas.com/sitemap.xml",
-         "filter":  lambda u: _in_path(u, "/product/") and _is_product_url(u)},
+         # Was _in_path(u, "/product/") and _is_product_url(u) — but
+         # _is_product_url() wraps is_category_url() which auto-rejects ANY
+         # URL with <=2 path segments. Alplas product URLs are exactly 2
+         # segments (/product/slug/), so that check killed every real product.
+         # _in_path(u, "/product/") alone is sufficient — category pages
+         # won't have /product/ in their path.
+         "filter":  lambda u: _in_path(u, "/product/") and not _is_content_url(u)},
     2:  {"sitemap": "https://www.chalkboardsuk.co.uk/store-products-sitemap.xml",
          # Was https://www.chalkboardsuk.co.uk/sitemap.xml with filter
          # _has_depth(u,2) and _is_product_url(u) — but every real product
