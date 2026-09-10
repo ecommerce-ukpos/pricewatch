@@ -733,6 +733,10 @@ async def scrape_match(
             fetch_image=image_needs_refresh(match),
             sku=sku,
         )
+        if result is None:
+            log.warning(f"  scrape_product_page returned None for {url}")
+            snapshot["error_message"] = "scrape_product_page returned None"
+            raise Exception("scrape_product_page returned None")
         price      = result["price"]
         comp_title = result["title"] or match.get("competitor_title", "")
 
