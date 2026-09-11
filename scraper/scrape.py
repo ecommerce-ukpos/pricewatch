@@ -799,6 +799,8 @@ async def scrape_match(
     except Exception as e:
         snapshot["error_message"] = str(e)[:200]
         log.error(f"  Exception {sku['sku_id']} × {competitor['domain']}: {e}")
+        import traceback
+        log.error(f"  Traceback:\n{traceback.format_exc()}")
     finally:
         await ctx.close()
 
