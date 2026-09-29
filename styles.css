@@ -124,7 +124,7 @@ a:hover{text-decoration-color:var(--blu)}
 .si-diff.warn{color:#fbbf24}
 
 /* ── Scrollable content ── */
-.content{flex:1;overflow-y:auto;padding:14px 18px;display:flex;flex-direction:column;gap:12px}
+.content{flex:1;min-height:0;overflow-y:auto;padding:14px 18px;display:flex;flex-direction:column;gap:12px}
 
 /* ── Cards ── */
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--rl);padding:14px 16px}
@@ -252,8 +252,6 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
 
 /* ── SKU hero ── */
 .sku-hero{display:flex;gap:16px;align-items:flex-start}
-.sku-hero{display:flex;gap:16px;align-items:flex-start}
-#panel-sku-detail{overflow-y:auto}
 .sku-img{width:72px;height:72px;border-radius:var(--r);border:1px solid var(--border);background:var(--bg);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--t3)}
 .sku-id-badge{font-family:'SF Mono',monospace;font-size:14px;color:var(--blu);margin-bottom:3px}
 .sku-name{font-size:17px;font-weight:500;margin-bottom:5px}
