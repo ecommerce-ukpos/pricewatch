@@ -895,9 +895,36 @@ const sendAllBtn = $('send-all-rescrape');
       rejected: ['ti-x','var(--t3)','No rejected matches'],
     };
     const [icon, color, text] = msgs[matchTab] || ['ti-circle-check','var(--t2)','Nothing here'];
+
+    // When a filter returns 0, check other tabs so user knows where to find matches
+    let crossTabHint = '';
+    if (q || comp) {
+      const tabDefs = [
+        { key: 'review',   label: 'Needs review',   test: r => r.match_status === 'review'  && r.human_reviewed === false },
+        { key: 'human',    label: 'Confirmed',       test: r => r.match_status === 'matched' && r.human_reviewed === true  },
+        { key: 'auto',     label: 'AI matched',      test: r => r.match_status === 'matched' && r.human_reviewed === false },
+        { key: 'amended',  label: 'Needs rescrape',  test: r => r.match_status === 'amended' },
+        { key: 'rejected', label: 'Rejected',        test: r => r.match_status === 'rejected' },
+      ];
+      const textMatches = r =>
+        (!q || r.sku_id?.toLowerCase().includes(q) ||
+          (r.skus?.short_title||'').toLowerCase().includes(q) ||
+          (r.competitors?.name||'').toLowerCase().includes(q) ||
+          (r.competitor_title||'').toLowerCase().includes(q)) &&
+        (!comp || r.competitors?.name === comp);
+
+      const found = tabDefs.filter(t => t.key !== matchTab && reviewAllRows.filter(t.test).filter(textMatches).length > 0);
+      if (found.length) {
+        crossTabHint = `<div style="margin-top:10px;font-size:12px">Found in: ${
+          found.map(t => `<a href="#" style="color:var(--blu);text-decoration:underline" onclick="event.preventDefault();setMatchTab('${t.key}')">${t.label}</a>`).join(', ')
+        }</div>`;
+      }
+    }
+
     $('review-tbody').innerHTML = `<tr><td colspan="13"><div style="text-align:center;color:var(--t2);padding:40px">
       <i class="ti ${icon}" style="font-size:28px;display:block;margin-bottom:8px;color:${color}"></i>
-      ${q||comp ? 'No matches for that filter' : text}
+      ${q||comp ? 'No matches for that filter on this tab' : text}
+      ${crossTabHint}
     </div></td></tr>`;
     $('review-pagination').innerHTML = '';
     return;
