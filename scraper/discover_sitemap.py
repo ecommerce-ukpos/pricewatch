@@ -528,8 +528,10 @@ def _fetch_xml(client: httpx.Client, url: str) -> Optional[ET.Element]:
                 return None
             r = client.post(CF_PROXY_URL, json={"url": url}, timeout=30)
             data = r.json()
+            log.debug(f"  CF proxy status={data.get('status')} for {url}")
             raw = data.get("html", "") or ""
             content = raw.encode() if isinstance(raw, str) else raw
+            log.debug(f"  CF proxy content[:400]: {content[:400]}")
         else:
             r = client.get(url, timeout=30, follow_redirects=True,
                            headers={"User-Agent": _ua(), "Accept-Encoding": "gzip, deflate"})
@@ -558,9 +560,9 @@ def _fetch_xml(client: httpx.Client, url: str) -> Optional[ET.Element]:
                 try:
                     return ET.fromstring(cleaned)
                 except ET.ParseError as e2:
-                    log.warning(f"  Sitemap fetch error {url}: {e2}")
+                    log.warning(f"  Sitemap fetch error {url}: {e2} — content[:300]: {content[:300]}")
                     return None
-            log.warning(f"  Sitemap fetch error {url}: {e}")
+            log.warning(f"  Sitemap fetch error {url}: {e} — content[:300]: {content[:300]}")
             return None
     except Exception as e:
         log.warning(f"  Sitemap fetch error {url}: {e}")
