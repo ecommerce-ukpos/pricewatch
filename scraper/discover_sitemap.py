@@ -248,8 +248,14 @@ COMPETITOR_SITEMAPS = {
     17: {"sitemap": "https://www.signwaves.co.uk/sitemap.xml",
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
     18: {
-        "mode": "category_crawl",  # no working /sitemap.xml on this site — see notes below
+        "mode": "category_crawl",  # OpenCart site — HTML sitemap at ?route=information/sitemap
         "category_urls": [
+            "https://www.snapframeswarehouse.co.uk/index.php?route=information/sitemap",
+            # HTML sitemap lists all product links in one page — single seed is sufficient.
+            # Previous approach used 15 hand-picked category URLs which gave incomplete
+            # coverage (no A-boards/pavement-signs etc). The HTML sitemap should cover
+            # the full catalogue. Retaining previous category seeds below as fallback
+            # in case the sitemap page is blocked or returns no usable links.
             "https://www.snapframeswarehouse.co.uk/snap-frames-warehouse-full-product-catalogue",
             "https://www.snapframeswarehouse.co.uk/snap-frames",
             "https://www.snapframeswarehouse.co.uk/bespoke-snap-frames-poster-frames-clip-frame",
@@ -265,17 +271,6 @@ COMPETITOR_SITEMAPS = {
             "https://www.snapframeswarehouse.co.uk/cheap-snap-frames-from-snap-frames-warehouse",
             "https://www.snapframeswarehouse.co.uk/made-to-measure-snap-frames-from-snap-frames-warehouse",
             "https://www.snapframeswarehouse.co.uk/Convex-Backlighters",
-            # Confirmed 43 URLs was too thin (competitor sells more than
-            # this per known market position). Expanded from 4 to 15 real
-            # category seed URLs found via search. This crawler doesn't
-            # recursively follow links discovered within a seed page — it
-            # only extracts product-shaped links from the pages listed
-            # here directly — so coverage is bounded by how many category
-            # pages we seed with, not by how big the actual catalogue is.
-            # Still likely incomplete (e.g. no A-boards/pavement-signs
-            # category URL found despite the site advertising them) —
-            # check the resulting URL count against known catalogue size
-            # after the next run and keep expanding if still thin.
         ],
         "product_link_pattern": re.compile(
             r"snapframeswarehouse\.co\.uk/[A-Za-z0-9][A-Za-z0-9\-]+$"
@@ -328,20 +323,13 @@ COMPETITOR_SITEMAPS = {
          "filter":  lambda u: True},
     24: {"sitemap": "https://visualdisplays.co.uk/sitemap.xml",
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
-    25: {"sitemap": "https://www.topregal.co.uk/en/sitemap.xml",
-         # Previously had NO config at all — discovery had never been
-         # attempted for this competitor. Site shows "Article No. #####"
-         # product identifiers and a product-comparison tool — same UI
-         # pattern as VKF Renzel's JTL-Shop platform — but every URL
-         # surfaced via search was a category listing page (e.g.
-         # /en/shelving-racks/, /en/protection-security/), not an
-         # individual product page. LOW CONFIDENCE — could not confirm
-         # real product URL shape. If this is also JTL-Shop, the sitemap
-         # index may split into category/product files like VKF Renzel's
-         # sitemap-category.xml.gz / sitemap-product.xml.gz — check the
-         # diagnostic log's "Sitemap index: N child sitemap(s)" line on
-         # first run and switch to a direct product-file harvest if so.
-         "filter":  lambda u: _has_depth(u, 2) and not _is_content_url(u)},
+    25: {"sitemap": "https://www.topregal.co.uk/sitemaps/shop_2_sitemap_products_en.xml",
+         # Direct product sitemap — confirmed by UKPOS 2026-10-05.
+         # Previously pointed at /en/sitemap.xml (the sitemap index) which
+         # yielded only category pages. This file is the dedicated product
+         # sitemap for the JTL-Shop installation (same platform as VKF Renzel).
+         # Accept all URLs from the product file without further filtering.
+         "filter":  lambda u: True},
     26: {"sitemap": "https://screenmoove.com/sitemap.xml",
          # Was _has_depth(u,2) and _is_product_url(u) — confirmed Shopify
          # platform via site's own copy ("linked to its dedicated Shopify
