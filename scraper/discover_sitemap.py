@@ -522,12 +522,21 @@ def _ua() -> str:
 
 def _fetch_xml(client: httpx.Client, url: str) -> Optional[ET.Element]:
     try:
-        r = client.get(url, timeout=30, follow_redirects=True,
-                       headers={"User-Agent": _ua(), "Accept-Encoding": "gzip, deflate"})
-        if r.status_code != 200:
-            log.warning(f"  HTTP {r.status_code} fetching sitemap {url}")
-            return None
-        content = r.content
+        if _needs_proxy(url):
+            if not CF_PROXY_URL:
+                log.warning(f"  CF_PROXY_URL not set, skipping {url}")
+                return None
+            r = client.post(CF_PROXY_URL, json={"url": url}, timeout=30)
+            data = r.json()
+            raw = data.get("html", "") or ""
+            content = raw.encode() if isinstance(raw, str) else raw
+        else:
+            r = client.get(url, timeout=30, follow_redirects=True,
+                           headers={"User-Agent": _ua(), "Accept-Encoding": "gzip, deflate"})
+            if r.status_code != 200:
+                log.warning(f"  HTTP {r.status_code} fetching sitemap {url}")
+                return None
+            content = r.content
         if content[:2] == b"\x1f\x8b":
             content = gzip.decompress(content)
         try:
