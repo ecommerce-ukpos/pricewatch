@@ -130,6 +130,8 @@ CF_PROXY_DOMAINS = {
     "signwaves.co.uk",
     "sign-holders.co.uk",
     "signholdersdirect.co.uk",
+    "snapframeswarehouse.co.uk",
+    "topregal.co.uk",
 }
 
 

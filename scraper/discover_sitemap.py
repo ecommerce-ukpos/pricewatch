@@ -89,6 +89,7 @@ _competitor_ids = [int(i.strip()) for i in os.getenv("COMPETITOR_IDS", "").split
 CF_PROXY_DOMAINS = {
     "vkf-renzel.co.uk", "displaypro.co.uk", "shopfittingwarehouse.co.uk",
     "signwaves.co.uk", "sign-holders.co.uk", "signholdersdirect.co.uk",
+    "snapframeswarehouse.co.uk", "topregal.co.uk",
 }
 
 def _needs_proxy(url: str) -> bool:
