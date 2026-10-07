@@ -125,6 +125,9 @@ a:hover{text-decoration-color:var(--blu)}
 
 /* ── Scrollable content ── */
 .content{flex:1;min-height:0;overflow-y:auto;padding:14px 18px;display:flex;flex-direction:column;gap:12px}
+/* children of a flex column must not shrink: .card-0p has overflow:hidden (min-height:0) so it was being squashed
+   to fit the viewport instead of overflowing, which left nothing to scroll and clipped the table */
+.content>*{flex-shrink:0}
 
 /* ── Cards ── */
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--rl);padding:14px 16px}
