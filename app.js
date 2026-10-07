@@ -944,13 +944,14 @@ const sendAllBtn = $('send-all-rescrape');
   if (rs?.col) {
     const getV = r => {
       const sku  = r.skus || {};
-      const snap = r._snap || {};
+      const v    = reviewView(r);
+      const snap = v.snap;
       if (rs.col === 'sku_id')          return r.sku_id||'';
       if (rs.col === 'short_title')     return (sku.short_title||'').toLowerCase();
       if (rs.col === 'competitor_name') return (r.competitors?.name||'').toLowerCase();
       if (rs.col === 'our_price')       return parseFloat(sku.price_ex_vat||0);
-      if (rs.col === 'their_price')     { const raw = snap.competitor_price ? parseFloat(snap.competitor_price) : null; return raw ? normalisePrice(raw, snap.competitor_vat||'unknown') : 999999; }
-      if (rs.col === 'diff')            return parseFloat(snap.diff_pct_normalised ?? snap.diff_pct ?? 0);
+      if (rs.col === 'their_price')     return v.theirEx ?? 999999;
+      if (rs.col === 'diff')            return v.diff ?? 999999;
       if (rs.col === 'confidence')      return parseFloat(r.confidence||0);
       if (rs.col === 'match_source')    return r.match_source||'';
       if (rs.col === 'reviewed_at')     return r.reviewed_at ? new Date(r.reviewed_at).getTime() : 0;
@@ -986,14 +987,32 @@ function renderReviewPage() {
     </div>`;
 }
 
+// Single source of truth for what a Match Manager row displays: price, VAT, gap.
+// Used by BOTH the row renderer and the column sorts so sorting always matches the screen.
+// Review rows with an indicative price ignore any stored snapshot (it predates the
+// current variant-level URL, so it is stale).
+function reviewView(r) {
+  const sku  = r.skus || {};
+  const comp = r.competitors || {};
+  const useIndicative = r.match_status === 'review' && r.indicative_price != null;
+  const snap = useIndicative ? {} : (r._snap || {});
+  const ourPriceEx = sku.price_ex_vat ? parseFloat(sku.price_ex_vat) : null;
+  const hasSnap    = !!snap.competitor_price;
+  const indicative = !hasSnap && r.indicative_price ? parseFloat(r.indicative_price) : null;
+  const theirRaw   = hasSnap ? parseFloat(snap.competitor_price) : indicative;
+  const theirVat   = snap.competitor_vat || snap.competitor_vat_default || comp.vat_status || 'unknown';
+  const theirEx    = theirRaw ? normalisePrice(theirRaw, theirVat) : null;
+  const indDiff    = (indicative && theirEx && ourPriceEx) ? ((theirEx - ourPriceEx) / ourPriceEx) * 100 : null;
+  const diff       = snap.diff_pct_normalised ?? snap.diff_pct ?? indDiff;
+  return { snap, ourPriceEx, indicative, theirRaw, theirVat, theirEx, diff };
+}
+
 function renderReviewRows(rows) {
   $('review-tbody').innerHTML = rows.map(r => {
     const sku   = r.skus        || {};
     const comp  = r.competitors || {};
-    // Review rows with an indicative price: any stored snapshot predates the current
-    // (variant-level) URL, so it is stale — ignore it and use the indicative price.
-    const useIndicative = r.match_status === 'review' && r.indicative_price != null;
-    const snap  = useIndicative ? {} : (r._snap || {});
+    const view  = reviewView(r);
+    const snap  = view.snap;
 
     const ourPriceEx = sku.price_ex_vat ? parseFloat(sku.price_ex_vat) : null;
     const unitQty    = sku.unit_qty && sku.unit_qty > 1 ? sku.unit_qty : null;
@@ -1001,17 +1020,9 @@ function renderReviewRows(rows) {
     const ourUrl     = sku.product_url || (sku.slug ? `https://www.ukpos.com/${sku.slug}?vat=0` : '#');
     const ourThumb   = thumbUrl(sku.image_url||'', 50, 50);
 
-    const hasSnap   = !!snap.competitor_price;
-    const indicative = !hasSnap && r.indicative_price ? parseFloat(r.indicative_price) : null;
-    const theirRaw  = hasSnap ? parseFloat(snap.competitor_price) : indicative;
-    const theirVat  = snap.competitor_vat || snap.competitor_vat_default || comp.vat_status || 'unknown';
-    const theirEx   = theirRaw ? normalisePrice(theirRaw, theirVat) : null;
+    const { indicative, theirRaw, theirVat, theirEx } = view;
     const theirPerU = (unitQty && theirEx) ? theirEx / unitQty : null;
-
-    // Review rows have no scrape yet: show an indicative diff vs our price so the
-    // reviewer can sanity-check the match. Marked indicative; never stored as a snapshot.
-    const indDiff = (indicative && theirEx && ourPriceEx) ? ((theirEx - ourPriceEx) / ourPriceEx) * 100 : null;
-    const diff = snap.diff_pct_normalised ?? snap.diff_pct ?? indDiff;
+    const diff = view.diff;
 
     const statusPill = {
       review:   `<span style="background:var(--ab);color:var(--amb);border-radius:4px;padding:2px 7px;font-size:11px;font-weight:500">Needs review</span>`,
@@ -1111,13 +1122,14 @@ function sortReviewTable(col) {
   const getV = r => {
     const sku  = r.skus || {};
     const comp = r.competitors || {};
-    const snap = r._snap || {};
+    const v    = reviewView(r);
+    const snap = v.snap;
     if (col === 'sku_id')          return r.sku_id||'';
     if (col === 'short_title')     return (sku.short_title||'').toLowerCase();
     if (col === 'competitor_name') return (comp.name||'').toLowerCase();
     if (col === 'our_price')       return parseFloat(sku.price_ex_vat||0);
-    if (col === 'their_price')     { const raw = snap.competitor_price ? parseFloat(snap.competitor_price) : null; return raw ? normalisePrice(raw, snap.competitor_vat||'unknown') : 999999; }
-    if (col === 'diff')            return parseFloat(snap.diff_pct_normalised ?? snap.diff_pct ?? 0);
+    if (col === 'their_price')     return v.theirEx ?? 999999;
+    if (col === 'diff')            return v.diff ?? 999999;
     if (col === 'confidence')      return parseFloat(r.confidence||0);
     if (col === 'match_source')    return r.match_source||'';
     if (col === 'reviewed_at')     return r.reviewed_at ? new Date(r.reviewed_at).getTime() : 0;
