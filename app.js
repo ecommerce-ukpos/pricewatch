@@ -421,8 +421,6 @@ async function saveMyAccount() {
     $('ma-msg').className = 'auth-msg ok';
     $('ma-msg').style.display = 'block';
     $('ma-password').value = '';
-    $('ma-current-password').value = '';
-    if ($('ma-current-wrap')) $('ma-current-wrap').style.display = 'none';
   } catch (err) {
     $('ma-msg').textContent = err.message;
     $('ma-msg').className = 'auth-msg err';
