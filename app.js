@@ -811,6 +811,7 @@ async function loadReview() {
           id, sku_id, competitor_id, competitor_url, competitor_title,
           competitor_image_url, confidence, match_status, match_source,
           human_reviewed, reviewed_at, updated_at, notes, previous_url,
+          indicative_price,
           skus!inner(sku_id, short_title, price_ex_vat, product_url, image_url, slug, unit_qty),
           competitors!inner(name, domain, vat_status)
         `)
@@ -997,12 +998,17 @@ function renderReviewRows(rows) {
     const ourUrl     = sku.product_url || (sku.slug ? `https://www.ukpos.com/${sku.slug}?vat=0` : '#');
     const ourThumb   = thumbUrl(sku.image_url||'', 50, 50);
 
-    const theirRaw  = snap.competitor_price ? parseFloat(snap.competitor_price) : null;
+    const hasSnap   = !!snap.competitor_price;
+    const indicative = !hasSnap && r.indicative_price ? parseFloat(r.indicative_price) : null;
+    const theirRaw  = hasSnap ? parseFloat(snap.competitor_price) : indicative;
     const theirVat  = snap.competitor_vat || snap.competitor_vat_default || comp.vat_status || 'unknown';
     const theirEx   = theirRaw ? normalisePrice(theirRaw, theirVat) : null;
     const theirPerU = (unitQty && theirEx) ? theirEx / unitQty : null;
 
-    const diff = snap.diff_pct_normalised ?? snap.diff_pct;
+    // Review rows have no scrape yet: show an indicative diff vs our price so the
+    // reviewer can sanity-check the match. Marked indicative; never stored as a snapshot.
+    const indDiff = (indicative && theirEx && ourPriceEx) ? ((theirEx - ourPriceEx) / ourPriceEx) * 100 : null;
+    const diff = snap.diff_pct_normalised ?? snap.diff_pct ?? indDiff;
 
     const statusPill = {
       review:   `<span style="background:var(--ab);color:var(--amb);border-radius:4px;padding:2px 7px;font-size:11px;font-weight:500">Needs review</span>`,
@@ -1078,6 +1084,7 @@ function renderReviewRows(rows) {
       <td style="white-space:nowrap;font-weight:500">
         ${theirEx
           ? `${fmtPrice(theirEx)} ${vatPill(theirVat)}
+             ${indicative ? `<div style="font-size:10px;font-weight:600;color:var(--amb);margin-top:2px" title="Read from the competitor's variant data, not yet scraped">INDICATIVE</div>` : ''}
              ${theirPerU ? `<div style="font-size:11px;font-weight:600;background:#fef08a;color:#854d0e;border-radius:3px;padding:1px 5px;display:inline-block;margin-top:2px">${fmtPrice(theirPerU)}/unit</div>` : ''}`
           : `<span style="color:var(--t3);font-size:12px">Not yet scraped</span>`}
       </td>
