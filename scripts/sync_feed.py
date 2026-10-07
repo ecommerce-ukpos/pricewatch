@@ -14,6 +14,8 @@ sync_runs, and the process exits non-zero so GitHub emails the repo owner):
   - fewer items than FEED_MIN_RATIO (default 85%) of the SKUs we already hold
   - fewer than 95% of items carry a parseable price
 
+price_ex_vat is the live selling price (g:sale_price when set); the list price is kept in
+regular_price_ex_vat with on_sale=true. Sales >50% off are listed in the run notes.
 Existing SKUs only get price, availability, image, URL and last_feed_sync updated
 (titles etc. are left alone). SKUs new to the feed are inserted in full.
 
@@ -33,7 +35,9 @@ from pathlib import Path
 import httpx
 
 sys.path.insert(0, str(Path(__file__).parent))
-from import_feed import item_to_row  # noqa: E402
+from import_feed import NS, item_to_row, parse_price  # noqa: E402
+
+BIG_SALE = 0.5  # flag sales deeper than 50% off for human review
 
 MIN_RATIO = float(os.environ.get("FEED_MIN_RATIO", "0.85"))
 MIN_PRICED = 0.95
@@ -120,6 +124,13 @@ def run(sb, url, dry_run, trigger):
                 unpriced += 1
                 continue
             r["availability"] = norm_avail(r["availability"])
+            # Live selling price = g:sale_price when present and lower, else g:price.
+            el = it.find("g:sale_price", NS)
+            sale = parse_price((el.text or "").strip()) if el is not None else None
+            r["regular_price_ex_vat"] = r["price_ex_vat"]
+            r["on_sale"] = bool(sale and 0 < sale < r["price_ex_vat"])
+            if r["on_sale"]:
+                r["price_ex_vat"] = sale
             rows[r["sku_id"]] = r
         if len(rows) < MIN_PRICED * len(items):
             raise FeedError(f"Only {len(rows)}/{len(items)} feed items had a usable id+price. Nothing written.")
@@ -137,12 +148,17 @@ def run(sb, url, dry_run, trigger):
             if norm_avail(old["availability"]) != r["availability"]:
                 changed_avail += 1
             upd_rows.append({"sku_id": sku, "price_ex_vat": r["price_ex_vat"],
+                             "regular_price_ex_vat": r["regular_price_ex_vat"], "on_sale": r["on_sale"],
                              "availability": r["availability"], "image_url": r["image_url"],
                              "product_url": r["product_url"], "last_feed_sync": now})
         missing = len(set(existing) - set(rows))
+        big = sorted(f'{k} £{v["regular_price_ex_vat"]:.2f}->£{v["price_ex_vat"]:.2f}' for k, v in rows.items()
+                     if v["on_sale"] and v["price_ex_vat"] < BIG_SALE * v["regular_price_ex_vat"])
+        n_sale = sum(1 for v in rows.values() if v["on_sale"])
 
         summary = (f"{len(items)} feed items; {changed_price} prices changed, {changed_avail} stock "
-                   f"changes, {len(new_rows)} new SKUs, {missing} SKUs absent from feed, {unpriced} unusable items")
+                   f"changes, {len(new_rows)} new SKUs, {missing} SKUs absent from feed, {unpriced} unusable items; "
+                   f"{n_sale} on sale" + (f"; >50% off, please check: {', '.join(big)}" if big else ""))
         print(summary)
 
         if dry_run:
