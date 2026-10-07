@@ -403,31 +403,33 @@ async function onSignedIn(session) {
 function openMyAccount() { go('settings'); goSett('account'); }
 
 async function saveMyAccount() {
-  const name = $('ma-name').value.trim();
-  const pw   = $('ma-password').value;
+  const name    = $('ma-name').value.trim();
+  const pw      = $('ma-password').value;
+  const current = $('ma-current-password').value;
   $('ma-msg').style.display = 'none';
   try {
     const { error: dbErr } = await sb.from('profiles').update({ full_name: name }).eq('id', currentProfile.id);
     if (dbErr) throw new Error(dbErr.message);
     if (pw) {
       if (pw.length < 8) throw new Error('Password must be at least 8 characters.');
+      if (!current) throw new Error('Please enter your current password to set a new one.');
+      // Re-authenticate silently so Supabase accepts the password change
+      // without requiring a full sign-out / sign-in cycle.
+      const { error: reAuthErr } = await sb.auth.signInWithPassword({
+        email: currentProfile.email,
+        password: current,
+      });
+      if (reAuthErr) throw new Error('Current password is incorrect.');
       const { error: pwErr } = await sb.auth.updateUser({ password: pw });
-      if (pwErr) {
-        // Supabase requires a fresh login session for password changes.
-        // If the session was silently refreshed in the background (common after
-        // leaving the tab open), it no longer qualifies. Sign out → sign back in → retry.
-        if (pwErr.message?.toLowerCase().includes('reauthentication') ||
-            pwErr.status === 422) {
-          throw new Error('For security, password changes require a fresh login. Please sign out and sign back in, then try again.');
-        }
-        throw new Error(pwErr.message);
-      }
+      if (pwErr) throw new Error(pwErr.message);
     }
     currentProfile.full_name = name;
     $('ma-msg').textContent = 'Changes saved.';
     $('ma-msg').className = 'auth-msg ok';
     $('ma-msg').style.display = 'block';
     $('ma-password').value = '';
+    $('ma-current-password').value = '';
+    $('ma-current-wrap').style.display = 'none';
   } catch (err) {
     $('ma-msg').textContent = err.message;
     $('ma-msg').className = 'auth-msg err';
