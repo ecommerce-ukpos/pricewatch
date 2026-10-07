@@ -403,42 +403,18 @@ async function onSignedIn(session) {
 function openMyAccount() { go('settings'); goSett('account'); }
 
 async function saveMyAccount() {
-  const name    = $('ma-name').value.trim();
-  const pw      = $('ma-password').value;
-  const current = $('ma-current-password').value;
+  const name = $('ma-name').value.trim();
+  const pw   = $('ma-password').value;
   $('ma-msg').style.display = 'none';
   try {
     const { error: dbErr } = await sb.from('profiles').update({ full_name: name }).eq('id', currentProfile.id);
     if (dbErr) throw new Error(dbErr.message);
     if (pw) {
       if (pw.length < 8) throw new Error('Password must be at least 8 characters.');
-      let pwErr;
-      if (current) {
-        // Re-authenticate silently so Supabase accepts the password change.
-        const { error: reAuthErr } = await sb.auth.signInWithPassword({
-          email: currentProfile.email,
-          password: current,
-        });
-        if (reAuthErr) throw new Error('Current password is incorrect.');
-        ({ error: pwErr } = await sb.auth.updateUser({ password: pw }));
-      } else {
-        ({ error: pwErr } = await sb.auth.updateUser({ password: pw }));
-      }
-      // If Supabase still requires reauthentication (e.g. no password was ever set),
-      // send a password reset email so the user can set one from a fresh session.
-      if (pwErr) {
-        if (pwErr.message?.toLowerCase().includes('reauthentication') || pwErr.status === 422) {
-          await sb.auth.resetPasswordForEmail(currentProfile.email, {
-            redirectTo: window.location.origin + window.location.pathname,
-          });
-          $('ma-msg').innerHTML = 'You haven\'t set a password yet. We\'ve sent a <strong>password reset link</strong> to ' + currentProfile.email + ' — click it to set your password.';
-          $('ma-msg').className = 'auth-msg ok';
-          $('ma-msg').style.display = 'block';
-          $('ma-password').value = '';
-          return;
-        }
-        throw new Error(pwErr.message);
-      }
+      // Use admin API via Edge Function — bypasses Supabase reauthentication requirement.
+      // The user is already authenticated; we pass their JWT for identity verification.
+      const res = await authPost('/update-password', { password: pw });
+      if (res?.error) throw new Error(res.error);
     }
     currentProfile.full_name = name;
     $('ma-msg').textContent = 'Changes saved.';
@@ -446,7 +422,7 @@ async function saveMyAccount() {
     $('ma-msg').style.display = 'block';
     $('ma-password').value = '';
     $('ma-current-password').value = '';
-    $('ma-current-wrap').style.display = 'none';
+    if ($('ma-current-wrap')) $('ma-current-wrap').style.display = 'none';
   } catch (err) {
     $('ma-msg').textContent = err.message;
     $('ma-msg').className = 'auth-msg err';
