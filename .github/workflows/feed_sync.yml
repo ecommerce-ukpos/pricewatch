@@ -1,0 +1,35 @@
+name: UKPOS Feed Sync
+on:
+  schedule:
+    # Weekly, Monday 00:00 UTC — before the 01:00 competitor scrape so gaps use fresh UKPOS prices
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (check feed, write nothing)?'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+jobs:
+  sync:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install supabase httpx
+      - name: Sync UKPOS prices from Shoptimised feed
+        # Any failure (URL changed, bad/truncated feed) exits non-zero => GitHub emails the owner
+        env:
+          UKPOS_FEED_URL:       ${{ secrets.UKPOS_FEED_URL }}
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          TRIGGER:              ${{ github.event_name == 'schedule' && 'scheduled' || 'manual' }}
+          DRY:                  ${{ github.event.inputs.dry_run }}
+        run: |
+          python scripts/sync_feed.py --trigger "$TRIGGER" $([ "$DRY" = "true" ] && echo --dry-run)
