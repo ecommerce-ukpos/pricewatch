@@ -990,7 +990,10 @@ function renderReviewRows(rows) {
   $('review-tbody').innerHTML = rows.map(r => {
     const sku   = r.skus        || {};
     const comp  = r.competitors || {};
-    const snap  = r._snap || {};
+    // Review rows with an indicative price: any stored snapshot predates the current
+    // (variant-level) URL, so it is stale — ignore it and use the indicative price.
+    const useIndicative = r.match_status === 'review' && r.indicative_price != null;
+    const snap  = useIndicative ? {} : (r._snap || {});
 
     const ourPriceEx = sku.price_ex_vat ? parseFloat(sku.price_ex_vat) : null;
     const unitQty    = sku.unit_qty && sku.unit_qty > 1 ? sku.unit_qty : null;
