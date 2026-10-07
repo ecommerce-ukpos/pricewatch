@@ -299,7 +299,7 @@ if (name === 'skus') {
     if (!skusLoaded) { skusLoaded = true; loadSKUs(); }
     else loadSKUs();
   }
-  if (name === 'review')      loadReview();
+  if (name === 'review')      { if (!reviewLoaded) loadReview(); else filterReview(); }
   if (name === 'bycat')       loadByCategory();
   if (name === 'bycomp')      loadByCompetitor();
   if (name === 'schedule')    loadRuns();
@@ -776,6 +776,7 @@ let reviewPage   = 1;
 let reviewLimit  = 50;
 let reviewAllRows = [];
 let reviewData    = [];
+let reviewLoaded  = false;
 
 function setMatchTab(tab) {
   matchTab   = tab;
@@ -826,6 +827,7 @@ async function loadReview() {
       _snap: snapMap[`${m.sku_id}__${m.competitor_id}`] || {},
     }));
 
+    reviewLoaded = true;
     updateMatchTabCounts();
     filterReview();
   } catch(e) {
