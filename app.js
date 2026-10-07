@@ -412,16 +412,33 @@ async function saveMyAccount() {
     if (dbErr) throw new Error(dbErr.message);
     if (pw) {
       if (pw.length < 8) throw new Error('Password must be at least 8 characters.');
-      if (!current) throw new Error('Please enter your current password to set a new one.');
-      // Re-authenticate silently so Supabase accepts the password change
-      // without requiring a full sign-out / sign-in cycle.
-      const { error: reAuthErr } = await sb.auth.signInWithPassword({
-        email: currentProfile.email,
-        password: current,
-      });
-      if (reAuthErr) throw new Error('Current password is incorrect.');
-      const { error: pwErr } = await sb.auth.updateUser({ password: pw });
-      if (pwErr) throw new Error(pwErr.message);
+      let pwErr;
+      if (current) {
+        // Re-authenticate silently so Supabase accepts the password change.
+        const { error: reAuthErr } = await sb.auth.signInWithPassword({
+          email: currentProfile.email,
+          password: current,
+        });
+        if (reAuthErr) throw new Error('Current password is incorrect.');
+        ({ error: pwErr } = await sb.auth.updateUser({ password: pw }));
+      } else {
+        ({ error: pwErr } = await sb.auth.updateUser({ password: pw }));
+      }
+      // If Supabase still requires reauthentication (e.g. no password was ever set),
+      // send a password reset email so the user can set one from a fresh session.
+      if (pwErr) {
+        if (pwErr.message?.toLowerCase().includes('reauthentication') || pwErr.status === 422) {
+          await sb.auth.resetPasswordForEmail(currentProfile.email, {
+            redirectTo: window.location.origin + window.location.pathname,
+          });
+          $('ma-msg').innerHTML = 'You haven\'t set a password yet. We\'ve sent a <strong>password reset link</strong> to ' + currentProfile.email + ' — click it to set your password.';
+          $('ma-msg').className = 'auth-msg ok';
+          $('ma-msg').style.display = 'block';
+          $('ma-password').value = '';
+          return;
+        }
+        throw new Error(pwErr.message);
+      }
     }
     currentProfile.full_name = name;
     $('ma-msg').textContent = 'Changes saved.';
