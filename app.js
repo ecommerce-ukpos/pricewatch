@@ -810,7 +810,7 @@ async function loadReview() {
           competitors!inner(name, domain, vat_status)
         `)
         .order('updated_at', { ascending: false })
-        .limit(3000),
+        .range(0, 4999),
       sb.from('latest_snapshots')
         .select('sku_id, competitor_id, competitor_price, competitor_vat, competitor_vat_default, diff_pct, diff_pct_normalised, availability, scraped_at'),
     ]);
