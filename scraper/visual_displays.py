@@ -67,6 +67,12 @@ def variant_url(url: str, variant_id) -> str:
     return f"{_base(url)}?variant={variant_id}"
 
 
+def _child_code(raw) -> str:
+    """Their variant SKUs are sometimes 'PARENT / CHILD' (e.g. 'MAC2 / MAC2A1K');
+    our sku_id is the child code, so compare on the part after the last '/'."""
+    return str(raw or "").split("/")[-1].strip().upper()
+
+
 def _price_gbp(v: dict) -> Optional[float]:
     p = v.get("price")
     if p is None:
@@ -85,7 +91,7 @@ def match_vd_variant(product: dict, sku_id: str, url: str) -> Optional[VDMatch]:
         return None
 
     want = sku_id.strip().upper()
-    hit = next((v for v in variants if str(v.get("sku") or "").strip().upper() == want), None)
+    hit = next((v for v in variants if _child_code(v.get("sku")) == want), None)
     reason = "sku"
 
     if hit is None and len(variants) == 1:
