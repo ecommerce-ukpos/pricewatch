@@ -102,6 +102,11 @@ from display_wizard import (
     scrape_dw_page,
     DISPLAY_WIZARD_DOMAIN,
 )
+from visual_displays import (
+    VISUAL_DISPLAYS_DOMAIN,
+    match_vd_variant,
+    js_url as vd_js_url,
+)
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -211,6 +216,19 @@ async def _extract_shopify_json_price(url: str, context: BrowserContext) -> Opti
     except Exception:
         pass
     return None
+
+
+async def _fetch_shopify_product_js(js_endpoint: str, context: BrowserContext) -> Optional[dict]:
+    """Fetch a Shopify /products/<handle>.js payload (all variants, with SKUs)."""
+    page = await context.new_page()
+    try:
+        await page.goto(js_endpoint, wait_until="domcontentloaded", timeout=10000)
+        return json.loads(await page.inner_text("body"))
+    except Exception:
+        return None
+    finally:
+        try: await page.close()
+        except Exception: pass
 
 
 async def _extract_jsonld_price(page: Page) -> Optional[float]:
@@ -451,6 +469,7 @@ async def scrape_product_page(
         "_dd_variant_url": None,
         "_alplas_variation_url": None,
         "_dw_variant_url": None,
+        "_vd_variant_url": None,
     }
 
     if is_category_url(url):
@@ -629,6 +648,30 @@ async def scrape_product_page(
                 if not price:
                     price = await _extract_main_price(page)
 
+        # ── Visual Displays: Shopify, match OUR child SKU to THEIR variant SKU ──
+        # The page and variants[0] show the default child variant, so a bare
+        # product URL gives the wrong price for every other size. Match on
+        # variant.sku == our sku_id, then price and URL come from that variant.
+        # Multi-variant product with no SKU match → no price (never guess).
+        elif VISUAL_DISPLAYS_DOMAIN in competitor_domain and sku:
+            product_js = await _fetch_shopify_product_js(vd_js_url(url), context)
+            if product_js:
+                vd = match_vd_variant(product_js, sku.get("sku_id", ""), url)
+                if vd:
+                    price = vd.price
+                    if not vd.available:
+                        result["availability"] = "out_of_stock"
+                    result["_vd_variant_url"] = vd.url
+                    log.debug(
+                        f"  VD variant price: £{price} sku={vd.sku} "
+                        f"variant={vd.variant_id} ({vd.reason})"
+                    )
+                else:
+                    price = None
+                    result["error"] = f"No Visual Displays variant with SKU {sku.get('sku_id')}"
+            else:
+                log.debug("  VD product .js unavailable — falling back to generic extraction")
+
         # ── Snap Frames Warehouse: custom OpenCart theme ───────────────────────
         # No standard price class — prices in <h2> inside ul.list-unstyled.
         # First <h2> is single-unit price; subsequent ones are tier prices.
@@ -726,6 +769,7 @@ async def scrape_match(
         "_dd_variant_url":     None,
         "_alplas_variation_url": None,
         "_dw_variant_url":     None,
+        "_vd_variant_url":     None,
     }
 
     ctx = await new_stealth_context(browser)
@@ -749,6 +793,7 @@ async def scrape_match(
         snapshot["_dd_variant_url"]       = result.get("_dd_variant_url")
         snapshot["_alplas_variation_url"] = result.get("_alplas_variation_url")
         snapshot["_dw_variant_url"]       = result.get("_dw_variant_url")
+        snapshot["_vd_variant_url"]       = result.get("_vd_variant_url")
 
         if price:
             our_price  = float(sku["price_ex_vat"])
@@ -926,6 +971,15 @@ async def run_scraper(trigger: str = "scheduled"):
                     log.info(
                         f"  DW: persisting variant URL for {sku['sku_id']} "
                         f"→ {dw_vurl}"
+                    )
+
+                # ── Persist canonical Visual Displays variant URL ──────────────
+                vd_vurl = snap.get("_vd_variant_url")
+                if vd_vurl and vd_vurl != url:
+                    match_updates["competitor_url"] = vd_vurl
+                    log.info(
+                        f"  VD: persisting variant URL for {sku['sku_id']} "
+                        f"→ {vd_vurl}"
                     )
 
                 # ── Promote 'amended' → 'matched' once we get any usable result ──
