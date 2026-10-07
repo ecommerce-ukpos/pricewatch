@@ -218,7 +218,8 @@ function slugify(name) {
 let cachedToken = null;
 
 async function getToken() {
-  if (cachedToken) return cachedToken;
+  // Always fetch the current session so we get the latest token after any
+  // silent JWT refresh — a stale cachedToken causes 401s on Edge Function calls.
   const { data: { session } } = await sb.auth.getSession();
   cachedToken = session?.access_token || null;
   return cachedToken;
