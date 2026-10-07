@@ -155,6 +155,11 @@ async def run(rows, dry_run, force, csv_path, concurrency, sb):
 
                 if vm.url == row["competitor_url"]:
                     stats["already_correct"] += 1
+                    if row["match_status"] == "review" and not dry_run:
+                        sb.table("competitor_matches").update({
+                            "indicative_price": vm.price,
+                            "indicative_price_at": datetime.now(timezone.utc).isoformat(),
+                        }).eq("id", row["id"]).execute()
                     continue
                 if dry_run:
                     log.info(f"    [DRY RUN] id={row['id']} → {vm.url}")
@@ -162,6 +167,8 @@ async def run(rows, dry_run, force, csv_path, concurrency, sb):
 
                 payload = {
                     "competitor_url": vm.url,
+                    "indicative_price": vm.price,
+                    "indicative_price_at": datetime.now(timezone.utc).isoformat(),
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                 }
                 if row["match_status"] in ("matched", "amended"):
