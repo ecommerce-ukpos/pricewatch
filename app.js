@@ -363,7 +363,8 @@ async function bootstrap() {
       window.location.href = 'login.html';
       return;
     }
-    if (['SIGNED_IN','TOKEN_REFRESHED','USER_UPDATED','INITIAL_SESSION'].includes(event)) {
+    // TOKEN_REFRESHED / USER_UPDATED: just keep the token fresh, don't re-init panels
+    if (['SIGNED_IN', 'INITIAL_SESSION'].includes(event)) {
       await onSignedIn(session);
     }
   });
@@ -933,6 +934,29 @@ const sendAllBtn = $('send-all-rescrape');
   }
 
   reviewData = rows;
+
+  // Re-apply active sort so column-sort choice survives tab switches and filter changes
+  const rs = sortState.review;
+  if (rs?.col) {
+    const getV = r => {
+      const sku  = r.skus || {};
+      const snap = r._snap || {};
+      if (rs.col === 'sku_id')          return r.sku_id||'';
+      if (rs.col === 'short_title')     return (sku.short_title||'').toLowerCase();
+      if (rs.col === 'competitor_name') return (r.competitors?.name||'').toLowerCase();
+      if (rs.col === 'our_price')       return parseFloat(sku.price_ex_vat||0);
+      if (rs.col === 'their_price')     { const raw = snap.competitor_price ? parseFloat(snap.competitor_price) : null; return raw ? normalisePrice(raw, snap.competitor_vat||'unknown') : 999999; }
+      if (rs.col === 'diff')            return parseFloat(snap.diff_pct_normalised ?? snap.diff_pct ?? 0);
+      if (rs.col === 'confidence')      return parseFloat(r.confidence||0);
+      if (rs.col === 'match_source')    return r.match_source||'';
+      if (rs.col === 'reviewed_at')     return r.reviewed_at ? new Date(r.reviewed_at).getTime() : 0;
+      if (rs.col === 'availability')    return (snap.availability||'').toLowerCase();
+      if (rs.col === 'scraped_at')      return snap.scraped_at ? new Date(snap.scraped_at).getTime() : 0;
+      return '';
+    };
+    reviewData.sort((a, b) => cmpVal(getV(a), getV(b), rs.dir));
+  }
+
   renderReviewPage();
 }
 
