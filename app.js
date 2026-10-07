@@ -412,7 +412,16 @@ async function saveMyAccount() {
     if (pw) {
       if (pw.length < 8) throw new Error('Password must be at least 8 characters.');
       const { error: pwErr } = await sb.auth.updateUser({ password: pw });
-      if (pwErr) throw new Error(pwErr.message);
+      if (pwErr) {
+        // Supabase requires a fresh session for password changes.
+        // Trigger reauthentication (sends OTP to user's email), then ask them to try again.
+        if (pwErr.message?.toLowerCase().includes('reauthentication') ||
+            pwErr.status === 422) {
+          await sb.auth.reauthenticate();
+          throw new Error('For security, a confirmation has been sent to your email. Click the link in that email, then come back here and save your new password.');
+        }
+        throw new Error(pwErr.message);
+      }
     }
     currentProfile.full_name = name;
     $('ma-msg').textContent = 'Changes saved.';
