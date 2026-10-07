@@ -1463,12 +1463,15 @@ function renderCompDetail() {
     if(t==='r')crit++; else if(t==='a')warn++; else if(t==='g')good++; else par++;
   });
 
+  const total = skus.length;
+  const pctOf = n => total ? ((n / total) * 100).toFixed(1) + '%' : '0.0%';
+
   $('comp-detail-stats').innerHTML = `
-    <div class="comp-stat"><div class="cs-val">${skus.length}</div><div class="cs-label">Matched SKUs</div></div>
-    <div class="comp-stat"><div class="cs-val" style="color:var(--red)">${crit}</div><div class="cs-label">Critical</div></div>
-    <div class="comp-stat"><div class="cs-val" style="color:var(--amb)">${warn}</div><div class="cs-label">Warning</div></div>
-    <div class="comp-stat"><div class="cs-val" style="color:var(--t2)">${par}</div><div class="cs-label">Parity</div></div>
-    <div class="comp-stat"><div class="cs-val" style="color:var(--grn)">${good}</div><div class="cs-label">We're cheaper</div></div>`;
+    <div class="comp-stat"><div class="cs-val">${total}</div><div class="cs-pct">&nbsp;</div><div class="cs-label">Matched SKUs</div></div>
+    <div class="comp-stat"><div class="cs-val" style="color:var(--red)">${crit}</div><div class="cs-pct">${pctOf(crit)}</div><div class="cs-label">Critical</div></div>
+    <div class="comp-stat"><div class="cs-val" style="color:var(--amb)">${warn}</div><div class="cs-pct">${pctOf(warn)}</div><div class="cs-label">Warning</div></div>
+    <div class="comp-stat"><div class="cs-val" style="color:var(--t2)">${par}</div><div class="cs-pct">${pctOf(par)}</div><div class="cs-label">Parity</div></div>
+    <div class="comp-stat"><div class="cs-val" style="color:var(--grn)">${good}</div><div class="cs-pct">${pctOf(good)}</div><div class="cs-label">We're cheaper</div></div>`;
 
   $('comp-sku-grid').innerHTML = skus.length ? skus.map(s => {
     const diff = s.diff_pct_normalised ?? s.diff_pct;
