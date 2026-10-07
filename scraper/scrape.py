@@ -757,16 +757,16 @@ async def scrape_match(
             our_title_qty = extract_pack_qty(sku.get("short_title", "")) or 1
             our_col_qty   = sku.get("unit_qty") or 1
             our_qty  = our_title_qty if our_title_qty > 1 else our_col_qty
-            comp_qty = extract_pack_qty(comp_title) or 1
 
-            snapshot["competitor_unit_qty"] = comp_qty
+            # Step 1: raw price comparison
+            raw_diff = diff_pct(our_price, their_ex)
 
-            if our_qty == comp_qty and their_ex and our_price:
-                ratio = max(our_price, their_ex) / min(our_price, their_ex)
-                if ratio >= 1.5:
-                    snapshot["pack_qty_flag"] = (
-                        f"raw price gap {ratio:.1f}× with no pack signal — verify pack sizes"
-                    )
+            # Step 2: only look for pack qty in product TITLE if gap is large (>40%)
+            comp_qty = 1
+            if abs(raw_diff) > 40:
+                comp_qty = extract_pack_qty(comp_title) or 1
+
+            snapshot["competitor_unit_qty"] = comp_qty if comp_qty > 1 else None
 
             if our_qty != comp_qty:
                 our_per_unit   = per_unit_price(our_price, our_qty)
@@ -780,7 +780,7 @@ async def scrape_match(
                     f"{' [amended→matched]' if was_amended else ''}"
                 )
             else:
-                normalised_diff = diff_pct(our_price, their_ex)
+                normalised_diff = raw_diff
                 log.info(
                     f"  ✓ {competitor['domain']:35s} "
                     f"£{price:>7.2f} ({snapshot['competitor_vat']:7s}) "

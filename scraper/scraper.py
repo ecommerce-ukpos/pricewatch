@@ -1005,15 +1005,17 @@ class PriceScraper:
                 their_ex  = normalise_price(price, snapshot["competitor_vat"])
 
                 # ── Per-unit normalisation ─────────────────────────────────────
-                # If pack quantities differ on either side, normalise both prices
-                # to per-unit before computing diff_pct_normalised.
-                # Cases:
-                #   our_qty=100, comp_qty=1   → we sell pack, they sell single
-                #   our_qty=1,   comp_qty=100 → we sell single, they sell pack
-                #   our_qty=100, comp_qty=100 → like-for-like, no normalisation
-                #   our_qty=1,   comp_qty=1   → both singles, no normalisation
-                our_qty  = sku.get("unit_qty") or 1
-                comp_qty = extract_pack_qty(comp_title) or 1
+                # Step 1: compare raw prices.
+                # Step 2: only if the raw gap is large (>40%), try to find a pack
+                #         quantity in the competitor's product TITLE (not full HTML)
+                #         to explain the difference — e.g. they sell singles, we
+                #         sell a pack of 100.
+                our_qty = sku.get("unit_qty") or 1
+                raw_diff = diff_pct(our_price, their_ex)
+
+                comp_qty = 1
+                if abs(raw_diff) > 40:
+                    comp_qty = extract_pack_qty(comp_title) or 1
 
                 if our_qty != comp_qty:
                     our_per_unit   = per_unit_price(our_price, our_qty)
@@ -1026,7 +1028,7 @@ class PriceScraper:
                         f"→ per-unit diff {normalised_diff:+.1f}%  conf {confidence}%"
                     )
                 else:
-                    normalised_diff = diff_pct(our_price, their_ex)
+                    normalised_diff = raw_diff
                     log.info(
                         f"  ✓ {competitor['domain']:35s} "
                         f"£{price:>7.2f} ({snapshot['competitor_vat']:7s}) "

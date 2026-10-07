@@ -987,16 +987,12 @@ def write_snapshot(sb, sku: dict, competitor_id: int, url: str,
     vat    = vat_status or detect_vat(body_text)
     ex_vat = normalise_price(raw_price, vat)
 
-    # Per-unit normalisation — if competitor sells different pack size
-    comp_qty = extract_pack_qty(body_text) or 1
-    our_qty  = unit_qty or 1
-
-    # Normalised diff (per-unit comparison)
-    our_per_unit  = our_price / our_qty  if our_qty  > 1 else our_price
-    comp_per_unit = ex_vat    / comp_qty if comp_qty > 1 else ex_vat
-
-    dp            = diff_pct(our_per_unit, comp_per_unit) if our_per_unit else 0
-    dp_normalised = dp  # discovery snapshots don't have separate normalised diff
+    # Provisional diff — no pack-qty normalisation at discovery time.
+    # extract_pack_qty on a full HTML body produces too many false positives
+    # (review counts, pixel dimensions, etc).  The proper scrape run uses the
+    # product title and will overwrite these values correctly.
+    dp = diff_pct(our_price, ex_vat) if our_price else 0
+    dp_normalised = dp
 
     availability = "out_of_stock" if detect_oos(body_text) else "in_stock"
 
@@ -1013,7 +1009,7 @@ def write_snapshot(sb, sku: dict, competitor_id: int, url: str,
             "diff_pct":             dp,
             "diff_pct_normalised":  dp_normalised,
             "confidence":           confidence,
-            "competitor_unit_qty":  comp_qty if comp_qty > 1 else None,
+            "competitor_unit_qty":  None,  # set by proper scrape run, not discovery
             "pack_qty_flag":        "discovery_provisional",
         }).execute()
         log.debug(f"    Snapshot written: £{ex_vat:.2f} {vat} diff={dp:+.1f}%")
