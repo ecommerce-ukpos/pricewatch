@@ -1527,7 +1527,7 @@ function compDistSvg(rows) {
     bins[Math.max(0, Math.min(N - 1, Math.floor((d - LO) / BIN)))]++;
   });
   const max = Math.max(1, ...bins);
-  const W = 380, H = 96, pl = 30, pr = 8, pt = 6, pb = 28;
+  const W = 760, H = 144, pl = 30, pr = 8, pt = 6, pb = 28;
   const pw = W - pl - pr, ph = H - pt - pb;
   const X = v => pl + ((v - LO) / (HI - LO)) * pw;
   const Y = c => pt + ph - (c / max) * ph;
@@ -1549,7 +1549,7 @@ function compDistSvg(rows) {
     const a = LO + i * BIN;
     return `<rect x="${X(a)}" y="${pt}" width="${pw / N}" height="${ph}" fill="transparent"><title>${a <= LO ? '≤' : ''}${a}% to ${a + BIN >= HI ? '≥' : ''}${a + BIN}%: ${c} SKU${c === 1 ? '' : 's'}</title></rect>`;
   }).join('');
-  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img" aria-label="Distribution of price difference across matched SKUs">
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Distribution of price difference across matched SKUs">
     ${zones}
     <line x1="${pl}" x2="${W - pr}" y1="${pt + ph}" y2="${pt + ph}" stroke="var(--t3)"/>
     <line x1="${pl}" x2="${pl}" y1="${pt}" y2="${pt + ph}" stroke="var(--t3)"/>

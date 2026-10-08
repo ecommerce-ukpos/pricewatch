@@ -443,4 +443,4 @@ tr.row-m td:first-child{border-left:3px solid var(--abd);padding-left:8px}
 .tier-m{background:var(--wb);border-color:var(--wbd)}.tier-m .sc-id,.tier-m .sc-diff{color:var(--amb)}
 .dr-comp-row.tier-m{background:rgba(133,79,11,.02);border-color:var(--wbd)}
 .comp-stats-bar{align-items:center}
-.comp-dist{flex:1 1 300px;min-width:280px;max-width:440px;margin-left:auto;padding-left:20px}
+.comp-dist{flex:0 1 760px;min-width:380px;margin-left:32px;padding-left:20px}
