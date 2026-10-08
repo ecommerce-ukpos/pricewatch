@@ -23,16 +23,33 @@ LD = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.S)
 HDR = {"User-Agent": "Mozilla/5.0 (compatible; PriceWatch-site-import/1.0)"}
 
 
+ERRORS = {}
+
+
 def get(client, url):
     for a in range(3):
         try:
-            r = client.get(url, headers=HDR, timeout=60, follow_redirects=True)
+            r = client.get(url, headers=HDR, timeout=45, follow_redirects=True)
             if r.status_code == 200:
                 return r.text
-        except Exception:
-            pass
+            ERRORS[f"HTTP {r.status_code}"] = ERRORS.get(f"HTTP {r.status_code}", 0) + 1
+        except Exception as e:
+            k = type(e).__name__
+            ERRORS[k] = ERRORS.get(k, 0) + 1
         time.sleep(2 * (a + 1))
     return None
+
+
+def log(status, notes, attempted=0, ok=0, failed=0):
+    try:
+        from supabase import create_client
+        sb = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
+        sb.table("sync_runs").insert({"trigger": "manual", "status": status, "scrape_mode": "site_import",
+                                      "completed_at": datetime.now(timezone.utc).isoformat(),
+                                      "skus_attempted": attempted, "skus_succeeded": ok, "skus_failed": failed,
+                                      "notes": notes[:4000]}).execute()
+    except Exception as e:
+        print("could not log:", e)
 
 
 def parse_page(url, html):
@@ -71,6 +88,7 @@ def main():
     with httpx.Client() as c:
         sm = get(c, f"{BASE}/sitemap.xml")
         if not sm:
+            log("failed", f"site import: could not download sitemap.xml {ERRORS}")
             sys.exit("Could not download sitemap.xml")
         urls = [u for u in re.findall(r"<loc>([^<]+)</loc>", sm)
                 if u.count("/") == 3 and u.rstrip("/") != BASE]
@@ -83,9 +101,12 @@ def main():
             time.sleep(0.2)
             return u, (None if h is None else parse_page(u, h))
 
-        found, failed, nonproduct = {}, 0, 0
+        found, failed, nonproduct, done = {}, 0, 0, 0
         with ThreadPoolExecutor(max_workers=4) as ex:
             for u, rows in ex.map(work, urls):
+                done += 1
+                if done % 100 == 0:
+                    print(f"{done}/{len(urls)} pages, {len(found)} SKUs, {failed} failed", flush=True)
                 if rows is None:
                     failed += 1
                 elif not rows:
@@ -93,7 +114,9 @@ def main():
                 for r in rows or []:
                     found.setdefault(r["sku"].upper(), r)
     if failed > 0.3 * len(urls):
-        sys.exit(f"Too many failed pages ({failed}/{len(urls)}) — site may be blocking this runner")
+        msg = f"site import FAILED: {failed}/{len(urls)} pages failed, errors {ERRORS}"
+        log("failed", msg, len(urls), 0, failed)
+        sys.exit(msg)
 
     from supabase import create_client
     sb = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
