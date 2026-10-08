@@ -91,7 +91,9 @@
         <div class="metrics">
           <div class="metric m-r"><span class="ml">Critical &gt;<span id="thresh-red-label">10</span>%</span><span class="mv" id="m-crit">—</span><span class="ms">action needed</span></div>
           <div class="metric m-a"><span class="ml">Warning <span id="thresh-amb-label">5</span>–<span id="thresh-red-label2">10</span>%</span><span class="mv" id="m-warn">—</span><span class="ms">monitor closely</span></div>
-          <div class="metric m-g"><span class="ml">We're cheapest</span><span class="mv" id="m-cheap">—</span><span class="ms">competitive advantage</span></div>
+          <div class="metric m-w"><span class="ml">Watch <span id="thresh-par-label">1</span>–<span id="thresh-amb-label2">5</span>%</span><span class="mv" id="m-watch">—</span><span class="ms">slightly pricier</span></div>
+          <div class="metric m-gray"><span class="ml">Parity ±<span id="thresh-par-label2">1</span>%</span><span class="mv" id="m-par">—</span><span class="ms">level with them</span></div>
+          <div class="metric m-g"><span class="ml">We're cheaper</span><span class="mv" id="m-cheap">—</span><span class="ms">competitive advantage</span></div>
           <div class="metric m-gray"><span class="ml">Comp. OOS</span><span class="mv" id="m-oos">—</span><span class="ms">flagged, last price kept</span></div>
         </div>
         <div class="two-col">
@@ -172,6 +174,7 @@
             <option value="">All differentials</option>
             <option value="crit">Critical — we're most expensive</option>
             <option value="warn">Warning — 5–10% more expensive</option>
+            <option value="watch">Watch — 1–5% more expensive</option>
             <option value="par">At parity</option>
             <option value="cheap">We're cheaper</option>
           </select>

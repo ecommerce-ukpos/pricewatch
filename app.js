@@ -31,6 +31,8 @@ function applyThresholdCSS() {
   document.getElementById('thresh-red-label') && (document.getElementById('thresh-red-label').textContent = T.red);
   document.getElementById('thresh-red-label2') && (document.getElementById('thresh-red-label2').textContent = T.red);
   document.getElementById('thresh-amb-label') && (document.getElementById('thresh-amb-label').textContent = T.amb);
+  ['thresh-amb-label2'].forEach(i => document.getElementById(i) && (document.getElementById(i).textContent = T.amb));
+  ['thresh-par-label','thresh-par-label2'].forEach(i => document.getElementById(i) && (document.getElementById(i).textContent = T.par));
 }
 
 function isMobile() { return window.innerWidth <= 768; }
@@ -438,17 +440,21 @@ async function saveMyAccount() {
 ════════════════════════════════════════ */
 async function loadDashboard() {
   try {
-    const d = await authFetch('/dashboard');
+    const d = await authFetch(`/dashboard?red=${T.red}&amb=${T.amb}&par=${T.par}`);
     const m = d.metrics || {};
 
 $('m-crit').textContent  = m.critical  ?? '—';
     $('m-warn').textContent  = m.warning   ?? '—';
+    $('m-watch').textContent = m.watch     ?? '—';
+    $('m-par').textContent   = m.parity    ?? '—';
     $('m-cheap').textContent = m.cheapest  ?? '—';
     $('m-oos').textContent   = m.oos       ?? '—';
 
     [
       ['m-crit',  'crit'],
       ['m-warn',  'warn'],
+      ['m-watch', 'watch'],
+      ['m-par',   'par'],
       ['m-cheap', 'cheap'],
       ['m-oos',   'oos'],
     ].forEach(([mvId, filter]) => {
@@ -616,10 +622,10 @@ function buildDistChart(m) {
   distChart = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: ["Cheaper", "±Parity", `${T.amb}–${T.red}%`, `>${T.red}%`, "OOS"],
+      labels: ["Cheaper", "±Parity", `Watch ${T.par}–${T.amb}%`, `${T.amb}–${T.red}%`, `>${T.red}%`, "OOS"],
       datasets: [{
-        data: [m.cheapest||0, m.parity||0, m.warning||0, m.critical||0, m.oos||0],
-        backgroundColor: ['#639922','#888780','#BA7517','#A32D2D','#B4B2A9'],
+        data: [m.cheapest||0, m.parity||0, m.watch||0, m.warning||0, m.critical||0, m.oos||0],
+        backgroundColor: ['#639922','#888780','#E0B45A','#BA7517','#A32D2D','#B4B2A9'],
         borderRadius: 3, borderSkipped: false
       }]
     },
@@ -646,7 +652,7 @@ async function loadSKUs() {
   const stock = $('fStock')?.value || '';
   let url = `/skus?page=${skuPage}&limit=${skuLimit}`;
   if (q)     url += '&q='    + encodeURIComponent(q);
-  if (diff)  url += '&diff=' + diff;
+  if (diff)  url += '&diff=' + diff + `&red=${T.red}&amb=${T.amb}&par=${T.par}`;
   if (vat)   url += '&vat='  + vat;
   if (stock) url += '&stock='+ stock;
 
@@ -2189,13 +2195,7 @@ function saveThresholds() {
   buildLegend('comp-detail-legend');
   buildLegend('sku-detail-legend');
   if (compSkusAll.length) renderCompDetail();
-  if (distChart) buildDistChart({
-    cheapest:$('m-cheap').textContent||0,
-    parity:0,
-    warning:$('m-warn').textContent||0,
-    critical:$('m-crit').textContent||0,
-    oos:$('m-oos').textContent||0
-  });
+  loadDashboard();   // recount tiles and chart with the new thresholds
   const btn = event.target;
   const orig = btn.innerHTML;
   btn.innerHTML = '<i class="ti ti-check"></i> Saved';
