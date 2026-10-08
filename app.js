@@ -1542,6 +1542,9 @@ function compDistSvg(rows) {
   const zone = (a, b, fill) => `<rect x="${X(Math.max(a, LO))}" y="${pt}" width="${X(Math.min(b, HI)) - X(Math.max(a, LO))}" height="${ph}" fill="${fill}"/>`;
   const zones = zone(LO, -T.red, 'var(--rb)') + zone(-T.red, -T.amb, 'var(--ab)') + zone(-T.amb, -T.par, 'var(--wb)')
               + zone(-T.par, T.par, 'var(--bg)') + zone(T.par, HI, 'var(--gb)');
+  // Selected tiles darken their band by 10%
+  const bands = { r:[LO,-T.red], a:[-T.red,-T.amb], m:[-T.amb,-T.par], p:[-T.par,T.par], g:[T.par,HI] };
+  const shade = [...compTierFilter].filter(t => bands[t]).map(t => zone(bands[t][0], bands[t][1], 'rgba(0,0,0,.10)')).join('');
   const ticks = [-30, -20, -10, 0, 10, 20, 30].map(v =>
     `<line x1="${X(v)}" x2="${X(v)}" y1="${pt + ph}" y2="${pt + ph + 3}" stroke="var(--t3)"/>
      <text x="${X(v)}" y="${pt + ph + 12}" text-anchor="middle" font-size="9" fill="var(--t2)">${v > 0 ? '+' + v : v}</text>`).join('');
@@ -1550,7 +1553,7 @@ function compDistSvg(rows) {
     return `<rect x="${X(a)}" y="${pt}" width="${pw / N}" height="${ph}" fill="transparent"><title>${a <= LO ? '≤' : ''}${a}% to ${a + BIN >= HI ? '≥' : ''}${a + BIN}%: ${c} SKU${c === 1 ? '' : 's'}</title></rect>`;
   }).join('');
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Distribution of price difference across matched SKUs">
-    ${zones}
+    ${zones}${shade}
     <line x1="${pl}" x2="${W - pr}" y1="${pt + ph}" y2="${pt + ph}" stroke="var(--t3)"/>
     <line x1="${pl}" x2="${pl}" y1="${pt}" y2="${pt + ph}" stroke="var(--t3)"/>
     <path d="${area}" fill="var(--t2)" fill-opacity=".28"/>
