@@ -1,0 +1,26 @@
+name: UKPOS Site SKU Import (one-off)
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (scrape and report, write nothing)?'
+        required: false
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
+jobs:
+  import:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install supabase httpx
+      - name: Scrape ukpos.com and add missing variant SKUs
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          DRY:                  ${{ github.event.inputs.dry_run }}
+        run: python scripts/import_site_skus.py $([ "$DRY" = "true" ] && echo --dry-run)
