@@ -271,7 +271,7 @@
             <button class="icon-tog" id="tog-list" onclick="setCompView('list')" title="List"><i class="ti ti-list" style="font-size:14px"></i></button>
           </div>
           <input type="text" id="comp-filter-q" placeholder="Filter SKUs…" style="padding:5px 9px;border:1px solid var(--bm);border-radius:var(--r);font-size:12px;font-family:inherit;outline:none;width:170px" oninput="filterCompSKUs(this.value)" autocomplete="new-password" spellcheck="false">
-          <button class="btn sm"><i class="ti ti-download"></i> Export</button>
+          <button class="btn sm" onclick="exportCompSkus()" title="Export the SKUs currently shown (respects filter box and selected tiles)"><i class="ti ti-download"></i> Export CSV</button>
         </div>
       </div>
       <div class="comp-stats-bar" id="comp-detail-stats"></div>

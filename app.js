@@ -1645,6 +1645,44 @@ function filterCompSKUs(q) {
   renderCompDetail();
 }
 
+// Exports exactly what is on screen: the search box, any selected tiles, and the current column sort.
+function exportCompSkus() {
+  const rows = compVisibleRows();
+  if (!rows.length) { alert('No SKUs to export for the current filter.'); return; }
+  const tierName = { r:'Critical', a:'Warning', m:'Watch', p:'Parity', g:"We're cheaper" };
+  const out = [['SKU ID','Product','Our price (ex VAT)','Their price (ex VAT)','Their price (as listed)','Their VAT basis','Gap %','Status','Stock','Competitor URL','Last scraped']];
+  rows.forEach(s => {
+    const diff = s.diff_pct_normalised ?? s.diff_pct;
+    const raw  = s.competitor_price ? parseFloat(s.competitor_price) : null;
+    const vat  = s.competitor_vat || s.competitor_vat_default || 'unknown';
+    const ex   = raw ? normalisePrice(raw, vat) : null;
+    out.push([
+      s.sku_id,
+      s.short_title || '',
+      s.our_price != null ? parseFloat(s.our_price).toFixed(2) : '',
+      ex != null ? ex.toFixed(2) : '',
+      raw != null ? raw.toFixed(2) : '',
+      vat,
+      diff != null ? parseFloat(diff).toFixed(1) : '',
+      tierName[compTierOf(s)] || '',
+      s.availability || '',
+      s.competitor_url || '',
+      s.scraped_at || ''
+    ]);
+  });
+  const csv  = '﻿' + out.map(r => r.map(v => `"${String(v ?? '').replace(/"/g,'""')}"`).join(',')).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  const tiers = compTierFilter.size ? '-' + [...compTierFilter].map(t => tierName[t]).join('+').toLowerCase().replace(/[^a-z+]/g,'') : '';
+  a.href = url;
+  a.download = `${currentCompSlug || 'competitor'}${tiers}-${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 /* ════════════════════════════════════════
    SKU DETAIL PAGE
 ════════════════════════════════════════ */
