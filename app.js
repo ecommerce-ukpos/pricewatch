@@ -18,10 +18,10 @@ let drawerSkuId = null, drawerFromPanel = null;
 let distChart = null;
 
 /* Configurable thresholds — loaded from localStorage */
-let T = { red: 10, amb: 5, par: 2 };
+let T = { red: 10, amb: 5, par: 1 };
 (function loadThresholds() {
   try {
-    const saved = localStorage.getItem('pw_thresholds');
+    const saved = localStorage.getItem('pw_thresholds_v2');
     if (saved) T = {...T, ...JSON.parse(saved)};
   } catch(e) {}
   applyThresholdCSS();
@@ -159,12 +159,13 @@ function getTier(diff) {
   if (diff === null || diff === undefined) return 'par';
   if (diff <= -T.red) return 'r';
   if (diff <= -T.amb) return 'a';
-  if (diff >= T.par)  return 'g';
+  if (diff < -T.par)  return 'm';   // slightly cheaper at competitor: past parity, short of warning
+  if (diff > T.par)   return 'g';
   return 'p';
 }
 
 function diffClass(diff) {
-  return {r:'d-r', a:'d-a', g:'d-g', p:'d-p'}[getTier(diff)];
+  return {r:'d-r', a:'d-a', m:'d-m', g:'d-g', p:'d-p'}[getTier(diff)];
 }
 
 function diffLabel(diff) {
@@ -196,12 +197,13 @@ function buildLegend(elId) {
   e.innerHTML = `
     <div class="leg-item"><div class="leg-sw" style="background:var(--rb);border:1px solid var(--rbd)"></div>&gt;${T.red}% more exp.</div>
     <div class="leg-item"><div class="leg-sw" style="background:var(--ab);border:1px solid var(--abd)"></div>${T.amb}–${T.red}%</div>
+    <div class="leg-item"><div class="leg-sw" style="background:var(--wb);border:1px solid var(--wbd)"></div>${T.par}–${T.amb}% watch</div>
     <div class="leg-item"><div class="leg-sw" style="background:var(--bg);border:1px solid var(--border)"></div>±${T.par}% parity</div>
     <div class="leg-item"><div class="leg-sw" style="background:var(--gb);border:1px solid var(--gbd)"></div>We're cheaper</div>`;
 }
 
 function rowClass(diff) {
-  return {r:'row-r', a:'row-a', g:'row-g', p:'row-gray'}[getTier(diff)];
+  return {r:'row-r', a:'row-a', m:'row-m', g:'row-g', p:'row-gray'}[getTier(diff)];
 }
 
 function skuLink(row) {
@@ -1420,8 +1422,8 @@ async function loadByCompetitor() {
       if (!stats[cid]) stats[cid] = { matched:0, critical:0, warning:0, cheaper:0, parity:0 };
       stats[cid].matched++;
       if      (diff <= -T.red)               stats[cid].critical++;
-      else if (diff <= -T.amb)               stats[cid].warning++;
-      else if (diff >=  T.par)               stats[cid].cheaper++;
+      else if (diff <  -T.par)               stats[cid].warning++;   // includes the 'watch' band (-par to -amb)
+      else if (diff >   T.par)               stats[cid].cheaper++;
       else                                   stats[cid].parity++;
     });
 
@@ -1515,13 +1517,60 @@ function toggleCompTier(t) {
   renderCompDetail();
 }
 
+// Shaded distribution of % difference (x) vs number of SKUs (y), 2%-wide bins, ends clamp at ±30%.
+function compDistSvg(rows) {
+  const LO = -30, HI = 30, BIN = 2, N = (HI - LO) / BIN;
+  const bins = new Array(N).fill(0);
+  rows.forEach(r => {
+    const d = r.diff_pct_normalised ?? r.diff_pct;
+    if (d === null || d === undefined) return;
+    bins[Math.max(0, Math.min(N - 1, Math.floor((d - LO) / BIN)))]++;
+  });
+  const max = Math.max(1, ...bins);
+  const W = 380, H = 96, pl = 30, pr = 8, pt = 6, pb = 28;
+  const pw = W - pl - pr, ph = H - pt - pb;
+  const X = v => pl + ((v - LO) / (HI - LO)) * pw;
+  const Y = c => pt + ph - (c / max) * ph;
+  const pts = bins.map((c, i) => [X(LO + i * BIN + BIN / 2), Y(c)]);
+  let line = `M${X(LO)},${Y(bins[0])} L${pts[0][0]},${pts[0][1]}`;
+  for (let i = 1; i < pts.length; i++) {
+    const [x0, y0] = pts[i - 1], [x1, y1] = pts[i], mx = (x0 + x1) / 2;
+    line += ` C${mx},${y0} ${mx},${y1} ${x1},${y1}`;
+  }
+  line += ` L${X(HI)},${Y(bins[N - 1])}`;
+  const area = `${line} L${X(HI)},${pt + ph} L${X(LO)},${pt + ph} Z`;
+  const zone = (a, b, fill) => `<rect x="${X(Math.max(a, LO))}" y="${pt}" width="${X(Math.min(b, HI)) - X(Math.max(a, LO))}" height="${ph}" fill="${fill}"/>`;
+  const zones = zone(LO, -T.red, 'var(--rb)') + zone(-T.red, -T.amb, 'var(--ab)') + zone(-T.amb, -T.par, 'var(--wb)')
+              + zone(-T.par, T.par, 'var(--bg)') + zone(T.par, HI, 'var(--gb)');
+  const ticks = [-30, -20, -10, 0, 10, 20, 30].map(v =>
+    `<line x1="${X(v)}" x2="${X(v)}" y1="${pt + ph}" y2="${pt + ph + 3}" stroke="var(--t3)"/>
+     <text x="${X(v)}" y="${pt + ph + 12}" text-anchor="middle" font-size="9" fill="var(--t2)">${v > 0 ? '+' + v : v}</text>`).join('');
+  const hits = bins.map((c, i) => {
+    const a = LO + i * BIN;
+    return `<rect x="${X(a)}" y="${pt}" width="${pw / N}" height="${ph}" fill="transparent"><title>${a <= LO ? '≤' : ''}${a}% to ${a + BIN >= HI ? '≥' : ''}${a + BIN}%: ${c} SKU${c === 1 ? '' : 's'}</title></rect>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img" aria-label="Distribution of price difference across matched SKUs">
+    ${zones}
+    <line x1="${pl}" x2="${W - pr}" y1="${pt + ph}" y2="${pt + ph}" stroke="var(--t3)"/>
+    <line x1="${pl}" x2="${pl}" y1="${pt}" y2="${pt + ph}" stroke="var(--t3)"/>
+    <path d="${area}" fill="var(--t2)" fill-opacity=".28"/>
+    <path d="${line}" fill="none" stroke="var(--t2)" stroke-width="1.5" stroke-linejoin="round"/>
+    <text x="${pl - 4}" y="${pt + 8}" text-anchor="end" font-size="9" fill="var(--t2)">${max}</text>
+    <text x="${pl - 4}" y="${pt + ph}" text-anchor="end" font-size="9" fill="var(--t2)">0</text>
+    <text transform="translate(8 ${pt + ph / 2}) rotate(-90)" text-anchor="middle" font-size="9" fill="var(--t3)">SKUs</text>
+    ${ticks}
+    <text x="${pl + pw / 2}" y="${H - 3}" text-anchor="middle" font-size="9" fill="var(--t3)">% difference (negative = they are cheaper)</text>
+    ${hits}
+  </svg>`;
+}
+
 function renderCompDetail() {
   // Counts come from the search-filtered set so the tiles stay stable while tiles are toggled
   const base = compSkusFiltered;
-  let crit=0, warn=0, par=0, good=0;
+  let crit=0, warn=0, watch=0, par=0, good=0;
   base.forEach(s => {
     const t = compTierOf(s);
-    if(t==='r')crit++; else if(t==='a')warn++; else if(t==='g')good++; else par++;
+    if(t==='r')crit++; else if(t==='a')warn++; else if(t==='m')watch++; else if(t==='g')good++; else par++;
   });
 
   const skus  = compVisibleRows();
@@ -1539,8 +1588,10 @@ function renderCompDetail() {
     </button>
     ${tile('r', crit, 'var(--red)', pctOf(crit), 'Critical')}
     ${tile('a', warn, 'var(--amb)', pctOf(warn), 'Warning')}
+    ${tile('m', watch,'var(--amb)', pctOf(watch),'Watch')}
     ${tile('p', par,  'var(--t2)',  pctOf(par),  'Parity')}
-    ${tile('g', good, 'var(--grn)', pctOf(good), "We're cheaper")}`;
+    ${tile('g', good, 'var(--grn)', pctOf(good), "We're cheaper")}
+    <div class="comp-dist" id="comp-dist">${compDistSvg(base)}</div>`;
 
   $('comp-sku-grid').innerHTML = skus.length ? skus.map(s => {
     const diff = s.diff_pct_normalised ?? s.diff_pct;
@@ -1738,6 +1789,7 @@ async function openDrawer(skuId, name, price, fromPanel) {
       const tierColors = {
         r: { bg: 'var(--rb)', border: 'var(--rbd)', txt: 'var(--red)' },
         a: { bg: 'var(--ab)', border: 'var(--abd)', txt: 'var(--amb)' },
+        m: { bg: 'var(--wb)', border: 'var(--wbd)', txt: 'var(--amb)' },
         g: { bg: 'var(--gb)', border: 'var(--gbd)', txt: 'var(--grn)' },
         p: { bg: 'var(--bg)', border: 'var(--border)', txt: 'var(--t2)' },
         us:{ bg: '#111110',   border: 'var(--orange)', txt: '#fff' },
@@ -2068,7 +2120,7 @@ async function revokeUser(id, btn) {
 function updateThreshPreview() {
   const r = parseInt($('t-red').value) || 10;
   const a = parseInt($('t-amb').value) || 5;
-  const p = parseInt($('t-par').value) || 2;
+  const p = parseInt($('t-par').value) || 1;
   $('t-grn-derived').textContent = p;
   $('prev-r').textContent = `-${(r+2.4).toFixed(1)}%`;
   $('prev-a').textContent = `-${((r+a)/2).toFixed(1)}%`;
@@ -2080,6 +2132,7 @@ function updateThreshPreview() {
   let label, fg, bg;
   if (testDiff <= -r)      { label='Critical'; fg='var(--red)'; bg='var(--rb)'; }
   else if (testDiff <= -a) { label='Warning';  fg='var(--amb)'; bg='var(--ab)'; }
+  else if (testDiff < -p)  { label='Watch';    fg='var(--amb)'; bg='var(--wb)'; }
   else if (Math.abs(testDiff) <= p) { label='Parity'; fg='var(--t2)'; bg='var(--bg)'; }
   else                     { label='We\'re cheaper'; fg='var(--grn)'; bg='var(--gb)'; }
   live.innerHTML = `<span style="color:var(--t2)">A <strong>−8%</strong> differential would be classified as:</span> <span style="padding:3px 10px;border-radius:5px;font-weight:600;background:${bg};color:${fg}">${label}</span>`;
@@ -2088,8 +2141,8 @@ function updateThreshPreview() {
 function saveThresholds() {
   T.red = parseInt($('t-red').value) || 10;
   T.amb = parseInt($('t-amb').value) || 5;
-  T.par = parseInt($('t-par').value) || 2;
-  try { localStorage.setItem('pw_thresholds', JSON.stringify(T)); } catch(e) {}
+  T.par = parseInt($('t-par').value) || 1;
+  try { localStorage.setItem('pw_thresholds_v2', JSON.stringify(T)); } catch(e) {}
   applyThresholdCSS();
   buildLegend('comp-detail-legend');
   buildLegend('sku-detail-legend');
@@ -2110,7 +2163,7 @@ function saveThresholds() {
 function resetThresholds() {
   $('t-red').value = 10;
   $('t-amb').value = 5;
-  $('t-par').value = 2;
+  $('t-par').value = 1;
   updateThreshPreview();
 }
 
@@ -2419,7 +2472,7 @@ function renderSkuCompRows(rows) {
     const ex    = raw ? normalisePrice(raw, vat) : null;
     const tier  = getTier(diff);
     const barW  = Math.min(100, Math.abs(diff||0) * 4);
-    const barC  = {r:'var(--red)',a:'var(--amb)',g:'var(--grn)',p:'var(--t3)'}[tier];
+    const barC  = {r:'var(--red)',a:'var(--amb)',m:'var(--amb)',g:'var(--grn)',p:'var(--t3)'}[tier];
     const rowId = `${r.sku_id}-${r.competitor_id}`;
     const hasUrl = !!r.competitor_url;
     return `<tr class="${rowClass(diff)}" id="skurow-${rowId}">
