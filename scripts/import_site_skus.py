@@ -159,7 +159,7 @@ def main():
                     flush()
                     note = (f"{done}/{len(urls)} pages ({nonproduct} non-product, {failed} failed); {len(seen)} SKUs on site; "
                             f"{len(added)} {'would be ' if args.dry_run else ''}added, {len(skipped)} made-to-order skipped, "
-                            f"{mism} existing with different price (not changed)")
+                            f"{mism} existing with different price (not changed); errors {ERRORS}")
                     print(note, flush=True)
                     progress("running", note, done, len(added), failed)
                 if done >= 100 and failed > 0.5 * done:
