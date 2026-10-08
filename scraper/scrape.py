@@ -662,6 +662,9 @@ async def scrape_product_page(
                     if not vd.available:
                         result["availability"] = "out_of_stock"
                     result["_vd_variant_url"] = vd.url
+                    # Their variant SKU == our SKU, so it is the SAME item and pack:
+                    # compare list prices directly, no per-unit pack normalisation.
+                    result["_same_pack"] = (vd.reason == "sku")
                     log.debug(
                         f"  VD variant price: £{price} sku={vd.sku} "
                         f"variant={vd.variant_id} ({vd.reason})"
@@ -794,6 +797,7 @@ async def scrape_match(
         snapshot["_alplas_variation_url"] = result.get("_alplas_variation_url")
         snapshot["_dw_variant_url"]       = result.get("_dw_variant_url")
         snapshot["_vd_variant_url"]       = result.get("_vd_variant_url")
+        same_pack = bool(result.get("_same_pack"))
 
         if price:
             our_price  = float(sku["price_ex_vat"])
@@ -808,10 +812,12 @@ async def scrape_match(
 
             # Step 2: only look for pack qty in product TITLE if gap is large (>40%)
             comp_qty = 1
-            if abs(raw_diff) > 40:
+            if same_pack:
+                comp_qty = our_qty
+            elif abs(raw_diff) > 40:
                 comp_qty = extract_pack_qty(comp_title) or 1
 
-            snapshot["competitor_unit_qty"] = comp_qty if comp_qty > 1 else None
+            snapshot["competitor_unit_qty"] = comp_qty if comp_qty > 1 and not same_pack else None
 
             if our_qty != comp_qty:
                 our_per_unit   = per_unit_price(our_price, our_qty)
@@ -834,8 +840,11 @@ async def scrape_match(
                 )
 
             snapshot["competitor_price"]    = price
-            snapshot["diff_pct"]            = diff_pct(our_price, price)
-            snapshot["diff_pct_normalised"] = normalised_diff
+            # numeric(6,2) columns: clamp so one extreme value can never make the
+            # whole snapshot insert fail (that silently dropped 51 VD rows once)
+            _clamp = lambda v: None if v is None else max(-9999.99, min(9999.99, v))
+            snapshot["diff_pct"]            = _clamp(diff_pct(our_price, price))
+            snapshot["diff_pct_normalised"] = _clamp(normalised_diff)
         else:
             log.info(
                 f"  ✗ {competitor['domain']:35s} "
@@ -997,6 +1006,12 @@ async def run_scraper(trigger: str = "scheduled"):
                             f"  ⚠ {sku['sku_id']} × {comp['domain']} "
                             f"amended but page error/unavailable — keeping as amended"
                         )
+
+                # Any successful scrape clears the "waiting to be scraped" flag
+                # (previously only 'amended' rows were cleared, so it stuck forever)
+                if (not was_amended and match.get("awaiting_scrape")
+                        and snap["availability"] not in ("error", "unavailable")):
+                    match_updates["awaiting_scrape"] = False
 
                 if len(match_updates) > 1:
                     sb.table("competitor_matches").update(match_updates).eq(
