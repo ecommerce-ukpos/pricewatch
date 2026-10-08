@@ -40,7 +40,7 @@ def get(client, url):
     return None
 
 
-def log(status, notes, attempted=0, ok=0, failed=0):
+def _unused_log(status, notes, attempted=0, ok=0, failed=0):
     try:
         from supabase import create_client
         sb = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
@@ -85,39 +85,6 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     args = ap.parse_args()
 
-    with httpx.Client() as c:
-        sm = get(c, f"{BASE}/sitemap.xml")
-        if not sm:
-            log("failed", f"site import: could not download sitemap.xml {ERRORS}")
-            sys.exit("Could not download sitemap.xml")
-        urls = [u for u in re.findall(r"<loc>([^<]+)</loc>", sm)
-                if u.count("/") == 3 and u.rstrip("/") != BASE]
-        if args.limit:
-            urls = urls[:args.limit]
-        print(f"{len(urls)} candidate pages")
-
-        def work(u):
-            h = get(c, u + "?vat=0")
-            time.sleep(0.2)
-            return u, (None if h is None else parse_page(u, h))
-
-        found, failed, nonproduct, done = {}, 0, 0, 0
-        with ThreadPoolExecutor(max_workers=4) as ex:
-            for u, rows in ex.map(work, urls):
-                done += 1
-                if done % 100 == 0:
-                    print(f"{done}/{len(urls)} pages, {len(found)} SKUs, {failed} failed", flush=True)
-                if rows is None:
-                    failed += 1
-                elif not rows:
-                    nonproduct += 1
-                for r in rows or []:
-                    found.setdefault(r["sku"].upper(), r)
-    if failed > 0.3 * len(urls):
-        msg = f"site import FAILED: {failed}/{len(urls)} pages failed, errors {ERRORS}"
-        log("failed", msg, len(urls), 0, failed)
-        sys.exit(msg)
-
     from supabase import create_client
     sb = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
     have, start = {}, 0
@@ -129,35 +96,81 @@ def main():
             break
         start += 1000
 
-    missing = [r for k, r in found.items() if k not in have]
-    excluded = [r for r in missing if SKIP.search(r["sku"])]
-    to_add = [r for r in missing if not SKIP.search(r["sku"])]
-    mism = sum(1 for k, r in found.items() if k in have and abs(have[k] - r["price"]) > 0.01)
-    summary = (f"site import: {len(urls)} pages ({nonproduct} non-product, {failed} failed); {len(found)} SKUs on site; "
-               f"{len(found) - len(missing)} already held ({mism} with a different price - not changed); "
-               f"{len(excluded)} made-to-order SKUs skipped; {len(to_add)} added: "
-               + ", ".join(r["sku"] for r in to_add))
-    print(summary)
-    if args.dry_run:
-        sb.table("sync_runs").insert({"trigger": "manual", "status": "complete", "scrape_mode": "site_import_dry",
-                                      "completed_at": datetime.now(timezone.utc).isoformat(),
-                                      "skus_attempted": len(found), "skus_succeeded": 0, "skus_failed": failed,
-                                      "notes": ("DRY RUN - nothing added. " + summary)[:4000]}).execute()
-        return
+    mode = "site_import_dry" if args.dry_run else "site_import"
+    run_id = sb.table("sync_runs").insert({"trigger": "manual", "status": "running", "scrape_mode": mode,
+                                           "notes": "starting"}).execute().data[0]["id"]
 
-    rows = []
-    for r in to_add:
-        handle = r["page"].rsplit("/", 1)[-1]
-        rows.append({"sku_id": r["sku"], "short_title": r["parent"][:200], "full_title": r["variant"][:500],
-                     "slug": f"{handle}-doprw-{r['sku']}", "price_ex_vat": r["price"],
-                     "regular_price_ex_vat": r["price"], "on_sale": False, "availability": r["avail"],
-                     "product_url": f"{r['page']}?vat=0#sku:{r['sku'].lower()}", "active": True})
-    for i in range(0, len(rows), 100):
-        sb.table("skus").upsert(rows[i:i + 100], on_conflict="sku_id", ignore_duplicates=True).execute()
-    sb.table("sync_runs").insert({"trigger": "manual", "status": "complete", "scrape_mode": "site_import",
-                                  "completed_at": datetime.now(timezone.utc).isoformat(),
-                                  "skus_attempted": len(found), "skus_succeeded": len(rows),
-                                  "skus_failed": failed, "notes": summary[:4000]}).execute()
+    def progress(status, notes, attempted=0, ok=0, failed=0, done=False):
+        payload = {"status": status, "notes": notes[:4000], "skus_attempted": attempted,
+                   "skus_succeeded": ok, "skus_failed": failed}
+        if done:
+            payload["completed_at"] = datetime.now(timezone.utc).isoformat()
+        sb.table("sync_runs").update(payload).eq("id", run_id).execute()
+
+    with httpx.Client() as c:
+        sm = get(c, f"{BASE}/sitemap.xml")
+        if not sm:
+            progress("failed", f"site import: could not download sitemap.xml {ERRORS}", done=True)
+            sys.exit("Could not download sitemap.xml")
+        urls = [u for u in re.findall(r"<loc>([^<]+)</loc>", sm)
+                if u.count("/") == 3 and u.rstrip("/") != BASE]
+        if args.limit:
+            urls = urls[:args.limit]
+        print(f"{len(urls)} candidate pages", flush=True)
+
+        def work(u):
+            h = get(c, u + "?vat=0")
+            time.sleep(0.2)
+            return u, (None if h is None else parse_page(u, h))
+
+        seen, added, skipped, buf = set(), [], [], []
+        failed = nonproduct = done = mism = 0
+
+        def flush():
+            nonlocal buf
+            if buf and not args.dry_run:
+                sb.table("skus").upsert(buf, on_conflict="sku_id", ignore_duplicates=True).execute()
+            buf = []
+
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            for u, rows in ex.map(work, urls):
+                done += 1
+                if rows is None:
+                    failed += 1
+                elif not rows:
+                    nonproduct += 1
+                for r in rows or []:
+                    k = r["sku"].upper()
+                    if k in seen:
+                        continue
+                    seen.add(k)
+                    if k in have:
+                        mism += abs(have[k] - r["price"]) > 0.01
+                    elif SKIP.search(r["sku"]):
+                        skipped.append(r["sku"])
+                    else:
+                        added.append(r["sku"])
+                        handle = r["page"].rsplit("/", 1)[-1]
+                        buf.append({"sku_id": r["sku"], "short_title": r["parent"][:200], "full_title": r["variant"][:500],
+                                    "slug": f"{handle}-doprw-{r['sku']}", "price_ex_vat": r["price"],
+                                    "regular_price_ex_vat": r["price"], "on_sale": False, "availability": r["avail"],
+                                    "product_url": f"{r['page']}?vat=0#sku:{r['sku'].lower()}", "active": True})
+                if done % 100 == 0 or done == len(urls):
+                    flush()
+                    note = (f"{done}/{len(urls)} pages ({nonproduct} non-product, {failed} failed); {len(seen)} SKUs on site; "
+                            f"{len(added)} {'would be ' if args.dry_run else ''}added, {len(skipped)} made-to-order skipped, "
+                            f"{mism} existing with different price (not changed)")
+                    print(note, flush=True)
+                    progress("running", note, done, len(added), failed)
+                if done >= 100 and failed > 0.5 * done:
+                    msg = f"site import FAILED: {failed}/{done} pages failed, errors {ERRORS}"
+                    progress("failed", msg, done, len(added), failed, done=True)
+                    sys.exit(msg)
+    final = (f"{'DRY RUN - ' if args.dry_run else ''}site import complete: {len(urls)} pages ({nonproduct} non-product, "
+             f"{failed} failed); {len(seen)} SKUs on site; {len(added)} added, {len(skipped)} made-to-order skipped, "
+             f"{mism} existing with different price (not changed). Added: " + ", ".join(added))
+    print(final)
+    progress("complete", final, len(urls), len(added), failed, done=True)
 
 
 if __name__ == "__main__":
