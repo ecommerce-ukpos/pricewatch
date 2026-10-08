@@ -387,7 +387,7 @@ async function onSignedIn(session) {
   $('ma-name').value  = currentProfile.full_name || '';
 
   $('view-app').style.display = 'grid';
-  if (currentProfile.role === 'super_admin') {
+  if (currentProfile.role === 'super_admin' || (currentProfile.email || '').toLowerCase() === AUDIT_VIEWER) {
     const usersTab = $('sn-users');
     if (usersTab) usersTab.style.display = '';
   }
@@ -1945,14 +1945,16 @@ async function setCompActive(compId, active) {
    SETTINGS — USERS
 ════════════════════════════════════════ */
 async function loadUsers() {
-  if (currentProfile?.role !== 'super_admin') {
+  const isAdmin = currentProfile?.role === 'super_admin';
+  const isAuditor = (currentProfile?.email || '').toLowerCase() === AUDIT_VIEWER;
+  if (!isAdmin && !isAuditor) {
     $('users-list').innerHTML = '<div style="color:var(--t2);font-size:12px;padding:12px">Admin access required to manage users.</div>';
     $('pending-list').innerHTML = '';
     return;
   }
   try {
     const { data: profiles } = await sb.from('profiles').select('*').eq('status','approved').order('requested_at');
-    const { data: requests } = await sb.from('access_requests').select('*').order('requested_at');
+    const { data: requests } = isAdmin ? await sb.from('access_requests').select('*').order('requested_at') : { data: [] };
     $('users-sub').textContent = `${(profiles||[]).length} active users`;
     const canAudit = (currentProfile?.email || '').toLowerCase() === AUDIT_VIEWER;
     if (!canAudit && $('audit-panel')) $('audit-panel').style.display = 'none';
@@ -1967,7 +1969,7 @@ async function loadUsers() {
           <div style="font-size:11px;color:var(--t2)">${p.full_name||'—'} · ${p.role==='super_admin'?'Admin':'User'}</div>
         </div>
         <span class="badge ${p.role==='super_admin'?'':'b-g'}" style="${p.role==='super_admin'?'background:var(--os);color:var(--orange)':''}">${p.role==='super_admin'?'Admin':'Active'}</span>
-        ${!isMe ? `<button class="btn sm ghost danger" onclick="event.stopPropagation();revokeUser('${p.id}',this)"><i class="ti ti-user-off"></i></button>` : ''}
+        ${!isMe && isAdmin ? `<button class="btn sm ghost danger" onclick="event.stopPropagation();revokeUser('${p.id}',this)"><i class="ti ti-user-off"></i></button>` : ''}
       </div>`;
     }).join('') || '<div style="color:var(--t2);font-size:12px;padding:12px">No approved users.</div>';
 
