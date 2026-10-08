@@ -1554,6 +1554,7 @@ function compDistSvg(rows) {
     <line x1="${pl}" x2="${W - pr}" y1="${pt + ph}" y2="${pt + ph}" stroke="var(--t3)"/>
     <line x1="${pl}" x2="${pl}" y1="${pt}" y2="${pt + ph}" stroke="var(--t3)"/>
     <path d="${area}" fill="var(--t2)" fill-opacity=".28"/>
+    <line x1="${X(0)}" x2="${X(0)}" y1="${pt}" y2="${pt + ph}" stroke="var(--t2)" stroke-width="1" stroke-dasharray="2 3"/>
     <path d="${line}" fill="none" stroke="var(--t2)" stroke-width="1.5" stroke-linejoin="round"/>
     <text x="${pl - 4}" y="${pt + 8}" text-anchor="end" font-size="9" fill="var(--t2)">${max}</text>
     <text x="${pl - 4}" y="${pt + ph}" text-anchor="end" font-size="9" fill="var(--t2)">0</text>
