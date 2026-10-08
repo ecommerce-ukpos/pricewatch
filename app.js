@@ -381,6 +381,7 @@ async function onSignedIn(session) {
     return;
   }
   currentProfile = profiles[0];
+  logLogin(session);
   $('header-email').textContent = currentProfile.email || '—';
   $('ma-email').value = currentProfile.email || '';
   $('ma-name').value  = currentProfile.full_name || '';
@@ -1953,18 +1954,20 @@ async function loadUsers() {
     const { data: profiles } = await sb.from('profiles').select('*').eq('status','approved').order('requested_at');
     const { data: requests } = await sb.from('access_requests').select('*').order('requested_at');
     $('users-sub').textContent = `${(profiles||[]).length} active users`;
+    const canAudit = (currentProfile?.email || '').toLowerCase() === AUDIT_VIEWER;
+    if (!canAudit && $('audit-panel')) $('audit-panel').style.display = 'none';
 
     $('users-list').innerHTML = (profiles||[]).map(p => {
       const initials = (p.full_name||p.email||'?').split(/[\s@]/)[0].slice(0,2).toUpperCase();
       const isMe = p.id === currentProfile.id;
-      return `<div class="user-row" style="padding:10px 14px">
+      return `<div class="user-row${canAudit?' clickable':''}" id="urow-${p.id}" ${canAudit?`onclick="showAudit('${p.id}','${(p.email||'').replace(/'/g,'')}')"`:''} style="padding:10px 14px">
         <div class="avatar" style="${p.role==='super_admin'?'background:var(--os);color:var(--orange)':''}">${initials}</div>
         <div style="flex:1">
           <div style="font-weight:500;font-size:12px">${p.email}</div>
           <div style="font-size:11px;color:var(--t2)">${p.full_name||'—'} · ${p.role==='super_admin'?'Admin':'User'}</div>
         </div>
         <span class="badge ${p.role==='super_admin'?'':'b-g'}" style="${p.role==='super_admin'?'background:var(--os);color:var(--orange)':''}">${p.role==='super_admin'?'Admin':'Active'}</span>
-        ${!isMe ? `<button class="btn sm ghost danger" onclick="revokeUser('${p.id}',this)"><i class="ti ti-user-off"></i></button>` : ''}
+        ${!isMe ? `<button class="btn sm ghost danger" onclick="event.stopPropagation();revokeUser('${p.id}',this)"><i class="ti ti-user-off"></i></button>` : ''}
       </div>`;
     }).join('') || '<div style="color:var(--t2);font-size:12px;padding:12px">No approved users.</div>';
 
@@ -1982,6 +1985,43 @@ async function loadUsers() {
   } catch (e) {
     $('users-list').innerHTML = `<div style="color:var(--red);font-size:12px;padding:12px">${e.message}</div>`;
   }
+}
+
+const AUDIT_VIEWER = 'apritchard@ukpos.com'; // UI hint only — /api/audit enforces this server-side
+
+function auditPlace(r) {
+  const p = [r.city, r.region, r.country].filter(Boolean);
+  return p.length ? p.join(', ') : 'Unknown location';
+}
+
+async function showAudit(userId, email) {
+  const panel = $('audit-panel'), body = $('audit-body');
+  if (!panel) return;
+  document.querySelectorAll('#users-list .user-row').forEach(r => r.classList.remove('sel'));
+  $('urow-' + userId)?.classList.add('sel');
+  panel.style.display = '';
+  $('audit-title').textContent = 'Login audit — ' + email;
+  body.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+  try {
+    const token = await getToken();
+    const res = await fetch('/api/audit?user_id=' + encodeURIComponent(userId), { headers: { Authorization: 'Bearer ' + token } });
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.error || res.status);
+    body.innerHTML = (j.data || []).map(r => `<div class="audit-row">
+        <div class="a-when">${new Date(r.logged_in_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}</div>
+        <div class="a-meta">${auditPlace(r)}${r.ip ? ' · ' + r.ip : ''}</div>
+      </div>`).join('') || '<div style="color:var(--t2);font-size:12px;padding:12px 0">No logins recorded yet — history starts from today.</div>';
+  } catch (e) {
+    body.innerHTML = `<div style="color:var(--red);font-size:12px;padding:12px 0">${e.message}</div>`;
+  }
+}
+
+async function logLogin(session) {
+  try {
+    if (sessionStorage.getItem('pw_login_logged') === session.access_token.slice(-16)) return;
+    const r = await fetch('/api/audit', { method: 'POST', headers: { Authorization: 'Bearer ' + session.access_token } });
+    if (r.ok) sessionStorage.setItem('pw_login_logged', session.access_token.slice(-16));
+  } catch (e) { /* never block the app */ }
 }
 
 async function approveUser(email, btn) {

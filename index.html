@@ -459,6 +459,8 @@
 
           <!-- USERS -->
           <div id="st-users" class="stab">
+           <div class="users-split">
+            <div class="users-col">
             <div class="card-0p" style="max-width:560px">
               <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
                 <div><div class="card-title">Team access</div><div class="card-sub" id="users-sub">Loading…</div></div>
@@ -473,6 +475,15 @@
               </div>
               <div id="pending-list" style="padding:0 4px"><div class="loading"><span class="spinner"></span></div></div>
             </div>
+            </div>
+            <div class="card-0p audit-panel" id="audit-panel" style="display:none">
+              <div style="padding:12px 14px;border-bottom:1px solid var(--border)">
+                <div class="card-title" id="audit-title">Login audit</div>
+                <div class="card-sub">Last 20 logins</div>
+              </div>
+              <div id="audit-body" style="padding:4px 14px 10px"></div>
+            </div>
+           </div>
           </div>
 
           <!-- MY ACCOUNT -->

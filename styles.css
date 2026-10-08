@@ -424,3 +424,15 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
 
 /* ── Chart ── */
 .chart-wrap{position:relative;height:180px}
+
+.users-split{display:flex;gap:16px;align-items:flex-start}
+.users-col{display:flex;flex-direction:column;gap:16px;flex:0 1 560px;min-width:0}
+.audit-panel{flex:1 1 320px;min-width:280px;max-width:520px}
+.user-row.clickable{cursor:pointer}
+.user-row.clickable:hover{background:var(--bg)}
+.user-row.sel{background:var(--bg);box-shadow:inset 3px 0 0 var(--orange)}
+.audit-row{padding:8px 0;border-bottom:1px solid var(--border);font-size:12px}
+.audit-row:last-child{border-bottom:none}
+.audit-row .a-when{font-weight:500}
+.audit-row .a-meta{color:var(--t2);font-size:11px;margin-top:2px}
+@media(max-width:900px){.users-split{flex-direction:column}.audit-panel{max-width:none;width:100%}}
