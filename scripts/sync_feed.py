@@ -167,6 +167,10 @@ def run(sb, url, dry_run, trigger):
             for i in range(0, len(batch), 100):
                 sb.table("skus").upsert(batch[i:i + 100], on_conflict="sku_id").execute()
 
+        # Our prices just changed, so every stored competitor gap is stale: re-derive them all
+        regap = sb.rpc("recompute_gaps").execute().data
+        summary += f"; gaps recalculated on {regap} competitor prices"
+        print(summary)
         log_run(sb, run_id, "complete", len(items), len(rows), unpriced, summary)
         return 0
     except Exception as e:  # noqa: BLE001
