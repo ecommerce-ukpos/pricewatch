@@ -1989,7 +1989,7 @@ async function loadUsers() {
   }
 }
 
-const AUDIT_VIEWER = 'apritchard@ukpos.com'; // UI hint only — /api/audit enforces this server-side
+const AUDIT_VIEWER = 'apritchard@ukpos.com'; // UI hint only — the get_login_audit() database function enforces this
 
 function auditPlace(r) {
   const p = [r.city, r.region, r.country].filter(Boolean);
@@ -2005,11 +2005,9 @@ async function showAudit(userId, email) {
   $('audit-title').textContent = 'Login audit — ' + email;
   body.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
   try {
-    const token = await getToken();
-    const res = await fetch('/api/audit?user_id=' + encodeURIComponent(userId), { headers: { Authorization: 'Bearer ' + token } });
-    const j = await res.json();
-    if (!res.ok) throw new Error(j.error || res.status);
-    body.innerHTML = (j.data || []).map(r => `<div class="audit-row">
+    const { data, error } = await sb.rpc('get_login_audit', { p_user_id: userId });
+    if (error) throw new Error(error.message);
+    body.innerHTML = (data || []).map(r => `<div class="audit-row">
         <div class="a-when">${new Date(r.logged_in_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}</div>
         <div class="a-meta">${auditPlace(r)}${r.ip ? ' · ' + r.ip : ''}</div>
       </div>`).join('') || '<div style="color:var(--t2);font-size:12px;padding:12px 0">No logins recorded yet — history starts from today.</div>';
@@ -2020,9 +2018,15 @@ async function showAudit(userId, email) {
 
 async function logLogin(session) {
   try {
-    if (sessionStorage.getItem('pw_login_logged') === session.access_token.slice(-16)) return;
-    const r = await fetch('/api/audit', { method: 'POST', headers: { Authorization: 'Bearer ' + session.access_token } });
-    if (r.ok) sessionStorage.setItem('pw_login_logged', session.access_token.slice(-16));
+    const key = session.access_token.slice(-16);
+    if (sessionStorage.getItem('pw_login_logged')) return;
+    let g = {};
+    try { g = await (await fetch('/api/geo')).json(); } catch (e) {}
+    const { error } = await sb.rpc('record_login', {
+      p_city: g.city || null, p_region: g.region || null, p_country: g.country || null,
+      p_ua: navigator.userAgent,
+    });
+    if (!error) sessionStorage.setItem('pw_login_logged', key);
   } catch (e) { /* never block the app */ }
 }
 
