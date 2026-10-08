@@ -13,6 +13,7 @@ let currentCompId = null, currentCompName = null, currentCompSlug = null;
 let currentSkuId = null;
 let compViewMode = 'grid';
 let compSkusAll = [], compSkusFiltered = [];
+let compTierFilter = new Set();   // selected tiles: 'r' critical, 'a' warning, 'p' parity, 'g' we're cheaper
 let drawerSkuId = null, drawerFromPanel = null;
 let distChart = null;
 
@@ -1466,6 +1467,7 @@ async function loadCompDetail(opts) {
     const { data: snaps } = await sb.from('latest_snapshots').select('*').eq('competitor_id', currentCompId).not('competitor_price','is',null).order('diff_pct_normalised', {ascending:true, nullsFirst:false});
     compSkusAll = snaps || [];
     compSkusFiltered = [...compSkusAll];
+    compTierFilter.clear();
     sortState.compSku = { col: null, dir: 1 };
     updateSortHeaders('comp-sku-table', 'compSku', null);
     renderCompDetail();
@@ -1477,23 +1479,67 @@ async function loadCompDetail(opts) {
   setCompView(defaultGrid ? 'grid' : 'list');
 }
 
+function compTierOf(s) {
+  const t = getTier(s.diff_pct_normalised ?? s.diff_pct);
+  return t === 'par' ? 'p' : t;
+}
+
+function compSortValue(r, col) {
+  const diff = r.diff_pct_normalised ?? r.diff_pct;
+  const raw  = r.competitor_price ? parseFloat(r.competitor_price) : null;
+  const vat  = r.competitor_vat || r.competitor_vat_default || 'unknown';
+  const ex   = raw ? normalisePrice(raw, vat) : null;
+  if (col === 'sku_id')      return (r.sku_id||'').toLowerCase();
+  if (col === 'short_title') return (r.short_title||'').toLowerCase();
+  if (col === 'our_price')   return parseFloat(r.our_price||0);
+  if (col === 'their_price') return ex ?? 999999;
+  if (col === 'diff')        return parseFloat(diff??0);
+  if (col === 'availability')return (r.availability||'').toLowerCase();
+  if (col === 'scraped_at')  return r.scraped_at ? new Date(r.scraped_at).getTime() : 0;
+  return '';
+}
+
+// Rows currently shown: search filter, then selected tiles (none selected = all), then column sort.
+function compVisibleRows() {
+  let rows = compTierFilter.size ? compSkusFiltered.filter(s => compTierFilter.has(compTierOf(s))) : [...compSkusFiltered];
+  const { col, dir } = sortState.compSku || {};
+  if (col) rows.sort((a, b) => cmpVal(compSortValue(a, col), compSortValue(b, col), dir));
+  return rows;
+}
+
+function toggleCompTier(t) {
+  if (t === 'all') compTierFilter.clear();
+  else if (compTierFilter.has(t)) compTierFilter.delete(t);
+  else compTierFilter.add(t);
+  renderCompDetail();
+}
+
 function renderCompDetail() {
-  const skus = compSkusFiltered;
+  // Counts come from the search-filtered set so the tiles stay stable while tiles are toggled
+  const base = compSkusFiltered;
   let crit=0, warn=0, par=0, good=0;
-  skus.forEach(s => {
-    const t = getTier(s.diff_pct_normalised??s.diff_pct);
+  base.forEach(s => {
+    const t = compTierOf(s);
     if(t==='r')crit++; else if(t==='a')warn++; else if(t==='g')good++; else par++;
   });
 
-  const total = skus.length;
+  const skus  = compVisibleRows();
+  const total = base.length;
   const pctOf = n => total ? ((n / total) * 100).toFixed(1) + '%' : '0.0%';
+  const sel   = compTierFilter;
+  const tile  = (key, val, color, pct, label) => `
+    <button type="button" class="comp-stat cs-tile${sel.has(key)?' active':''}" aria-pressed="${sel.has(key)}" onclick="toggleCompTier('${key}')" title="Click to filter by ${label.toLowerCase()} (select several to combine)">
+      <div class="cs-val" style="color:${color}">${val}</div><div class="cs-pct">${pct}</div><div class="cs-label">${label}</div>
+    </button>`;
 
   $('comp-detail-stats').innerHTML = `
-    <div class="comp-stat"><div class="cs-val">${total}</div><div class="cs-pct">&nbsp;</div><div class="cs-label">Matched SKUs</div></div>
-    <div class="comp-stat"><div class="cs-val" style="color:var(--red)">${crit}</div><div class="cs-pct">${pctOf(crit)}</div><div class="cs-label">Critical</div></div>
-    <div class="comp-stat"><div class="cs-val" style="color:var(--amb)">${warn}</div><div class="cs-pct">${pctOf(warn)}</div><div class="cs-label">Warning</div></div>
-    <div class="comp-stat"><div class="cs-val" style="color:var(--t2)">${par}</div><div class="cs-pct">${pctOf(par)}</div><div class="cs-label">Parity</div></div>
-    <div class="comp-stat"><div class="cs-val" style="color:var(--grn)">${good}</div><div class="cs-pct">${pctOf(good)}</div><div class="cs-label">We're cheaper</div></div>`;
+    <button type="button" class="comp-stat cs-tile cs-all${sel.size?'':' active'}" aria-pressed="${!sel.size}" onclick="toggleCompTier('all')" title="Show all matched SKUs">
+      <div class="cs-val">${sel.size ? skus.length : total}</div><div class="cs-pct">${sel.size ? `of ${total} · clear filter` : '&nbsp;'}</div><div class="cs-label">${sel.size ? 'Showing' : 'Matched SKUs'}</div>
+    </button>
+    ${tile('r', crit, 'var(--red)', pctOf(crit), 'Critical')}
+    ${tile('a', warn, 'var(--amb)', pctOf(warn), 'Warning')}
+    ${tile('p', par,  'var(--t2)',  pctOf(par),  'Parity')}
+    ${tile('g', good, 'var(--grn)', pctOf(good), "We're cheaper")}`;
 
   $('comp-sku-grid').innerHTML = skus.length ? skus.map(s => {
     const diff = s.diff_pct_normalised ?? s.diff_pct;
@@ -2292,40 +2338,7 @@ function renderSkusRows(rows) {
 function sortCompSkuTable(col) {
   toggleSort('compSku', col);
   updateSortHeaders('comp-sku-table', 'compSku', col);
-  const { dir } = sortState.compSku;
-  const sorted = [...compSkusFiltered].sort((a, b) => {
-    const getV = r => {
-      const diff = r.diff_pct_normalised ?? r.diff_pct;
-      const raw  = r.competitor_price ? parseFloat(r.competitor_price) : null;
-      const vat  = r.competitor_vat || r.competitor_vat_default || 'unknown';
-      const ex   = raw ? normalisePrice(raw, vat) : null;
-      if (col === 'sku_id')      return (r.sku_id||'').toLowerCase();
-      if (col === 'short_title') return (r.short_title||'').toLowerCase();
-      if (col === 'our_price')   return parseFloat(r.our_price||0);
-      if (col === 'their_price') return ex ?? 999999;
-      if (col === 'diff')        return parseFloat(diff??0);
-      if (col === 'availability')return (r.availability||'').toLowerCase();
-      if (col === 'scraped_at')  return r.scraped_at ? new Date(r.scraped_at).getTime() : 0;
-      return '';
-    };
-    return cmpVal(getV(a), getV(b), dir);
-  });
-  $('comp-sku-tbody').innerHTML = sorted.map(s => {
-    const diff = s.diff_pct_normalised ?? s.diff_pct;
-    const raw  = s.competitor_price ? parseFloat(s.competitor_price) : null;
-    const vat  = s.competitor_vat || s.competitor_vat_default || 'unknown';
-    const ex   = raw ? normalisePrice(raw, vat) : null;
-    return `<tr class="${rowClass(diff)} tr-link" onclick="openDrawer('${s.sku_id}','${(s.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(s.our_price)}','comp-detail')">
-      <td><span style="font-family:'SF Mono',monospace;font-size:11px;color:var(--blu)">${s.sku_id}</span></td>
-      <td style="font-size:11px;color:var(--t2);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.short_title||''}</td>
-      <td style="font-weight:500">${fmtPrice(s.our_price)}</td>
-      <td style="font-weight:500">${ex?fmtPrice(ex):'—'}</td>
-      <td><span class="${diffClass(diff)}">${diffLabel(diff)}</span></td>
-      <td>${stockBadge(s.availability)}</td>
-      <td style="font-size:10px;color:var(--t3)">${ts(s.scraped_at)}</td>
-      <td><button class="btn sm ghost" onclick="event.stopPropagation();openDrawer('${s.sku_id}','${(s.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(s.our_price)}','comp-detail')">→</button></td>
-    </tr>`;
-  }).join('');
+  renderCompDetail();   // applies the sort to both table and cards, honouring selected tiles
 }
 
 function sortSkuCompTable(col) {
