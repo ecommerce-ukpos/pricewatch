@@ -10,3 +10,4 @@ create unique index if not exists login_audit_session_uq on public.login_audit(s
 create index if not exists login_audit_user_time on public.login_audit(user_id, logged_in_at desc);
 alter table public.login_audit enable row level security;
 revoke all on public.login_audit from anon, authenticated;
+-- see Supabase migration 'login_audit_rpcs': record_login() and get_login_audit() SECURITY DEFINER functions
