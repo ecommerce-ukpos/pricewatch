@@ -208,8 +208,18 @@ function rowClass(diff) {
   return {r:'row-r', a:'row-a', m:'row-m', g:'row-g', p:'row-gray'}[getTier(diff)];
 }
 
+// Our own product link. The feed stores old "-doprw-…" URLs that redirect to the parent page and
+// land on its default variant, so point at the parent page and select this SKU's own variant.
+function ukposUrl(skuId, url, slug) {
+  let u = url || (slug ? `https://www.ukpos.com/${slug}?vat=0` : '');
+  if (!u) return '#';
+  u = u.split('#')[0].replace(/-doprw-[^/?#]*/i, '');
+  if (!/[?]/.test(u)) u += '?vat=0';
+  return skuId ? `${u}#sku:${String(skuId).toLowerCase()}` : u;
+}
+
 function skuLink(row) {
-  const url = row.our_url || row.product_url || (row.slug ? `https://www.ukpos.com/${row.slug}?vat=0` : '#');
+  const url = ukposUrl(row.sku_id, row.our_url || row.product_url, row.slug);
   return `<a class="prod-link" href="${url}" target="_blank" rel="noopener" onclick="event.stopPropagation()">
     <span style="font-family:'SF Mono',monospace;font-size:11px;color:var(--blu)">${row.sku_id}</span>
     <span style="font-size:10px;color:var(--t2);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block">${row.short_title||''}</span>
@@ -1027,7 +1037,7 @@ function renderReviewRows(rows) {
     const ourPriceEx = sku.price_ex_vat ? parseFloat(sku.price_ex_vat) : null;
     const unitQty    = sku.unit_qty && sku.unit_qty > 1 ? sku.unit_qty : null;
     const ourPerUnit = (unitQty && ourPriceEx) ? ourPriceEx / unitQty : null;
-    const ourUrl     = sku.product_url || (sku.slug ? `https://www.ukpos.com/${sku.slug}?vat=0` : '#');
+    const ourUrl     = ukposUrl(sku.sku_id, sku.product_url, sku.slug);
     const ourThumb   = thumbUrl(sku.image_url||'', 50, 50);
 
     const { indicative, theirRaw, theirVat, theirEx } = view;
@@ -1742,7 +1752,7 @@ async function loadSkuDetail(opts) {
     const ourPriceInc = ourPriceEx * 1.2;
     const unitQty     = sku.unit_qty && sku.unit_qty > 1 ? sku.unit_qty : null;
     const ourPerUnit  = unitQty ? ourPriceEx / unitQty : null;
-    const siteUrl = sku.product_url || (sku.slug ? `https://www.ukpos.com/${sku.slug}?vat=0` : '#');
+    const siteUrl = ukposUrl(sku.sku_id, sku.product_url, sku.slug);
     $('sku-site-link').href = siteUrl;
 
     $('sku-hero-content').innerHTML = `
