@@ -1396,13 +1396,23 @@ function renderCategoryLevel() {
   content.innerHTML = breadcrumb + subTiles + table;
 }
 
+// Keep the By-competitor numbers fresh while that page is open (new scrapes land every few minutes)
+setInterval(() => {
+  const p = document.getElementById('p-bycomp');
+  if (p && p.classList.contains('active') && !document.hidden) loadByCompetitor(true);
+}, 60000);
+document.addEventListener('visibilitychange', () => {
+  const p = document.getElementById('p-bycomp');
+  if (!document.hidden && p && p.classList.contains('active')) loadByCompetitor(true);
+});
+
 function selectCat4(name) { catL4 = name; catL5 = null; catPage = 1; renderCategoryLevel(); }
 function selectCat5(name) { catL5 = name; catPage = 1; renderCategoryLevel(); }
 
 /* ════════════════════════════════════════
    BY COMPETITOR (list)
 ════════════════════════════════════════ */
-async function loadByCompetitor() {
+async function loadByCompetitor(silent = false) {
   try {
     const [{ data: comps }, { data: snaps }, { data: druns }] = await Promise.all([
       sb.from('competitors').select('id,name,domain,vat_status,active').eq('active',true).order('name'),
@@ -1443,10 +1453,20 @@ async function loadByCompetitor() {
       _parity:     stats[c.id]?.parity   ?? 0,
     }));
 
-    sortState.bycomp = { col: null, dir: 1 };
-    renderByCompRows(bycompData);
-    updateSortHeaders('bycomp-table', 'bycomp', null);
+    const keepCol = silent ? sortState.bycomp.col : null;
+    if (keepCol) {
+      // refresh in place and keep the user's current sort (toggleSort flips direction, so pre-flip it)
+      sortState.bycomp.dir = -sortState.bycomp.dir;
+      sortByCompTable(keepCol);
+    } else {
+      sortState.bycomp = { col: null, dir: 1 };
+      renderByCompRows(bycompData);
+      updateSortHeaders('bycomp-table', 'bycomp', null);
+    }
+    const sub = document.querySelector('#p-bycomp .cmd-sub');
+    if (sub) sub.textContent = `Click a competitor to view their matched SKUs · numbers refresh automatically · updated ${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
   } catch (e) {
+    if (silent) return;
     $('bycomp-tbody').innerHTML = `<tr><td colspan="10" style="color:var(--red);padding:8px">${e.message}</td></tr>`;
   }
 }
