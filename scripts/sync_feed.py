@@ -23,6 +23,7 @@ Usage:
     python scripts/sync_feed.py [--dry-run] [--trigger scheduled|manual]
 """
 
+import re
 import argparse
 import os
 import sys
@@ -46,6 +47,15 @@ MIN_PRICED = 0.95
 class FeedError(Exception):
     pass
 
+
+
+def own_page_url(sku_id: str, url: str) -> str:
+    """Feed links are old '-doprw-...' URLs that redirect to the parent page's default variant.
+    Store the parent page plus this SKU's own #sku: fragment instead."""
+    base = re.sub(r"-doprw-[^/?#]*", "", (url or "").split("#")[0], flags=re.I)
+    if "?" not in base:
+        base += "?vat=0"
+    return f"{base}#sku:{sku_id.lower()}"
 
 def fetch_feed(url: str) -> bytes:
     last = None
@@ -123,6 +133,7 @@ def run(sb, url, dry_run, trigger):
             if not r["price_ex_vat"]:
                 unpriced += 1
                 continue
+            r["product_url"] = own_page_url(r["sku_id"], r["product_url"])
             r["availability"] = norm_avail(r["availability"])
             # Live selling price = g:sale_price when present and lower, else g:price.
             el = it.find("g:sale_price", NS)
@@ -150,7 +161,7 @@ def run(sb, url, dry_run, trigger):
             upd_rows.append({"sku_id": sku, "price_ex_vat": r["price_ex_vat"],
                              "regular_price_ex_vat": r["regular_price_ex_vat"], "on_sale": r["on_sale"],
                              "availability": r["availability"], "image_url": r["image_url"],
-                             "product_url": r["product_url"], "last_feed_sync": now})
+                             "product_url": own_page_url(sku, r["product_url"]), "last_feed_sync": now})
         missing = len(set(existing) - set(rows))
         big = sorted(f'{k} £{v["regular_price_ex_vat"]:.2f}->£{v["price_ex_vat"]:.2f}' for k, v in rows.items()
                      if v["on_sale"] and v["price_ex_vat"] < BIG_SALE * v["regular_price_ex_vat"])

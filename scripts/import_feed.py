@@ -21,6 +21,15 @@ from supabase import create_client
 
 NS = {"g": "http://base.google.com/ns/1.0"}
 
+
+def own_page_url(sku_id: str, url: str) -> str:
+    """Feed links are old '-doprw-...' URLs that redirect to the parent page's default variant.
+    Store the parent page plus this SKU's own #sku: fragment instead."""
+    base = re.sub(r"-doprw-[^/?#]*", "", (url or "").split("#")[0], flags=re.I)
+    if "?" not in base:
+        base += "?vat=0"
+    return f"{base}#sku:{sku_id.lower()}"
+
 def parse_price(price_str: str) -> float | None:
     if not price_str:
         return None
@@ -60,7 +69,7 @@ def item_to_row(item: ET.Element) -> dict:
         "color":          g("color") or None,
         "unit_qty":       extract_unit_qty(title),
         "image_url":      g("image_link") or None,
-        "product_url":    url,
+        "product_url":    own_page_url(g("id"), url),
         "last_feed_sync": datetime.now(timezone.utc).isoformat(),
     }
 
