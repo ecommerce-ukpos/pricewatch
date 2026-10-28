@@ -321,7 +321,11 @@ COMPETITOR_SITEMAPS = {
          "filter":  lambda u: True},
     24: {"sitemap": "https://visualdisplays.co.uk/sitemap.xml",
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
-    25: {"sitemap": "https://www.topregal.co.uk/sitemaps/shop_2_sitemap_products_en.xml",
+    25: {"sitemap": "topregal_products.xml",  # local seed file in scraper/seed_sitemaps/
+         # Live URL https://www.topregal.co.uk/sitemaps/shop_2_sitemap_products_en.xml
+         # sits behind a Cloudflare bot challenge (the Worker gets "Just a
+         # moment..." HTML), so the sitemap was saved manually on 2026-10-28
+         # (2,848 product URLs). Re-save the file to refresh the product list.
          # Direct product sitemap — confirmed by UKPOS 2026-10-05.
          # Previously pointed at /en/sitemap.xml (the sitemap index) which
          # yielded only category pages. This file is the dedicated product
@@ -517,9 +521,17 @@ NS = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
 def _ua() -> str:
     return random.choice(USER_AGENTS)
 
+SEED_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "seed_sitemaps")
+
 def _fetch_xml(client: httpx.Client, url: str) -> Optional[ET.Element]:
     try:
-        if _needs_proxy(url):
+        if not url.startswith("http"):
+            # Local seed file (sitemap saved manually because the live site
+            # blocks automated fetches). Path is relative to seed_sitemaps/.
+            with open(os.path.join(SEED_DIR, url), "rb") as fh:
+                content = fh.read()
+            log.info(f"  Using local seed sitemap {url} ({len(content)} bytes)")
+        elif _needs_proxy(url):
             if not CF_PROXY_URL:
                 log.warning(f"  CF_PROXY_URL not set, skipping {url}")
                 return None
@@ -529,6 +541,9 @@ def _fetch_xml(client: httpx.Client, url: str) -> Optional[ET.Element]:
             raw = data.get("html", "") or ""
             content = raw.encode() if isinstance(raw, str) else raw
             log.debug(f"  CF proxy content[:400]: {content[:400]}")
+            if b"Just a moment" in content[:2000]:
+                log.warning(f"  Blocked by bot challenge (Cloudflare) fetching {url}")
+                return None
         else:
             r = client.get(url, timeout=30, follow_redirects=True,
                            headers={"User-Agent": _ua(), "Accept-Encoding": "gzip, deflate"})
