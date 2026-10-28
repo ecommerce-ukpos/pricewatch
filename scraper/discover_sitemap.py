@@ -539,6 +539,12 @@ def _fetch_xml(client: httpx.Client, url: str) -> Optional[ET.Element]:
             data = r.json()
             log.debug(f"  CF proxy status={data.get('status')} for {url}")
             raw = data.get("html", "") or ""
+            if not raw:
+                log.warning(
+                    f"  Proxy gave no sitemap content for {url}: http={r.status_code} "
+                    f"keys={list(data.keys())} status={data.get('status')} "
+                    f"error={str(data.get('error'))[:200]}"
+                )
             content = raw.encode() if isinstance(raw, str) else raw
             log.debug(f"  CF proxy content[:400]: {content[:400]}")
             if b"Just a moment" in content[:2000]:
