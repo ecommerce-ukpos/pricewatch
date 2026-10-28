@@ -678,9 +678,11 @@ def harvest_category_urls(client: httpx.Client, category_urls: list[str],
 # ── Page fetching & extraction ─────────────────────────────────────────────────
 
 _challenge_pages = 0
+_proxy_diag = 0
 
 def _fetch_html(client: httpx.Client, url: str) -> str:
     """Fetch a page, routing via CF Worker if needed. Returns raw HTML or ''."""
+    global _proxy_diag, _challenge_pages
     if _needs_proxy(url):
         if not CF_PROXY_URL:
             log.warning(f"  CF_PROXY_URL not set, skipping {url}")
@@ -689,8 +691,14 @@ def _fetch_html(client: httpx.Client, url: str) -> str:
             r = client.post(CF_PROXY_URL, json={"url": url}, timeout=30)
             data = r.json()
             html = data.get("html", "") or ""
+            if not html and _proxy_diag < 5:
+                _proxy_diag += 1
+                log.warning(
+                    f"  Proxy gave no HTML for {url}: http={r.status_code} "
+                    f"keys={list(data.keys())} status={data.get('status')} "
+                    f"error={str(data.get('error'))[:200]}"
+                )
             if "<title>Just a moment" in html[:3000]:
-                global _challenge_pages
                 _challenge_pages += 1
                 if _challenge_pages <= 3 or _challenge_pages % 100 == 0:
                     log.warning(f"  Bot challenge page returned for {url} "
@@ -698,7 +706,9 @@ def _fetch_html(client: httpx.Client, url: str) -> str:
                 return ""
             return html
         except Exception as e:
-            log.debug(f"  CF proxy error for {url}: {e}")
+            if _proxy_diag < 5:
+                _proxy_diag += 1
+                log.warning(f"  Proxy request failed for {url}: {type(e).__name__}: {str(e)[:200]}")
             return ""
     try:
         r = client.get(url, timeout=PAGE_TIMEOUT, follow_redirects=True,
