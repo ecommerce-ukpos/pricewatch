@@ -205,17 +205,14 @@ COMPETITOR_SITEMAPS = {
     },
     11: {"sitemap": "https://indigodisplays.co.uk/sitemap.xml",
          "filter":  lambda u: _has_depth(u, 2) and _is_product_url(u)},
-    12: {"sitemap": "https://www.luminati.co.uk/sitemap.xml",
-         # Previously had NO config at all — discovery had never been
-         # attempted for this competitor. Site shows strong Shopify
-         # signals (faceted collection filtering UI, /all-products/
-         # listing page, standard Shopify delivery-threshold copy) — same
-         # platform as Display Pro (id 5), which is confirmed working with
-         # this exact filter. MEDIUM CONFIDENCE: no individual product URL
-         # was directly confirmed via search, only strong platform
-         # circumstantial evidence — verify via the diagnostic log
-         # (raw vs filtered URL counts) on first real run.
-         "filter":  lambda u: _in_path(u, "/products/") and _is_product_url(u)},
+    12: {"sitemap": "https://www.luminati.co.uk/product-sitemap.xml",
+         # Direct product sitemap — confirmed by UKPOS 2026-10-28.
+         # Previously pointed at /sitemap.xml with a Shopify-style
+         # "/products/" path filter, which was only a platform guess and
+         # does not match this site's URLs. Accept everything in the
+         # dedicated product file (a generic _is_product_url() filter would
+         # reject 2-segment product URLs via is_category_url()).
+         "filter":  lambda u: True},
     13: {
         "mode": "category_crawl",  # no working /sitemap.xml on this site — see notes below
         "category_urls": [
