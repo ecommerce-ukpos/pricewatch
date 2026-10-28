@@ -89,7 +89,7 @@ _competitor_ids = [int(i.strip()) for i in os.getenv("COMPETITOR_IDS", "").split
 CF_PROXY_DOMAINS = {
     "vkf-renzel.co.uk", "displaypro.co.uk", "shopfittingwarehouse.co.uk",
     "signwaves.co.uk", "sign-holders.co.uk", "signholdersdirect.co.uk",
-    "snapframeswarehouse.co.uk", "topregal.co.uk",
+    "snapframeswarehouse.co.uk", "topregal.co.uk", "luminati.co.uk",
 }
 
 def _needs_proxy(url: str) -> bool:
@@ -677,6 +677,8 @@ def harvest_category_urls(client: httpx.Client, category_urls: list[str],
 
 # ── Page fetching & extraction ─────────────────────────────────────────────────
 
+_challenge_pages = 0
+
 def _fetch_html(client: httpx.Client, url: str) -> str:
     """Fetch a page, routing via CF Worker if needed. Returns raw HTML or ''."""
     if _needs_proxy(url):
@@ -686,7 +688,15 @@ def _fetch_html(client: httpx.Client, url: str) -> str:
         try:
             r = client.post(CF_PROXY_URL, json={"url": url}, timeout=30)
             data = r.json()
-            return data.get("html", "") or ""
+            html = data.get("html", "") or ""
+            if "<title>Just a moment" in html[:3000]:
+                global _challenge_pages
+                _challenge_pages += 1
+                if _challenge_pages <= 3 or _challenge_pages % 100 == 0:
+                    log.warning(f"  Bot challenge page returned for {url} "
+                                f"(total so far: {_challenge_pages})")
+                return ""
+            return html
         except Exception as e:
             log.debug(f"  CF proxy error for {url}: {e}")
             return ""

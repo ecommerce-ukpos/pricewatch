@@ -137,6 +137,7 @@ CF_PROXY_DOMAINS = {
     "signholdersdirect.co.uk",
     "snapframeswarehouse.co.uk",
     "topregal.co.uk",
+    "luminati.co.uk",
 }
 
 
