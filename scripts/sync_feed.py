@@ -241,13 +241,21 @@ def run(sb, url, dry_run, trigger):
 
         if dry_run:
             return 0
-        for batch in (upd_rows, new_rows):
-            for i in range(0, len(batch), 100):
-                sb.table("skus").upsert(batch[i:i + 100], on_conflict="sku_id").execute()
+        # Existing SKUs: plain UPDATE via apply_feed_updates(). An upsert of these partial rows
+        # fails, because Postgres checks NOT NULL columns (short_title…) on the insert attempt
+        # before ON CONFLICT turns it into an update.
+        updated = 0
+        for i in range(0, len(upd_rows), 500):
+            updated += sb.rpc("apply_feed_updates", {"p_rows": upd_rows[i:i + 500]}).execute().data or 0
+        if updated != len(upd_rows):
+            raise FeedError(f"Only {updated}/{len(upd_rows)} existing SKUs were updated.")
+        # New SKUs carry every column from the feed, so a normal insert works.
+        for i in range(0, len(new_rows), 100):
+            sb.table("skus").upsert(new_rows[i:i + 100], on_conflict="sku_id").execute()
 
         # Our prices just changed, so every stored competitor gap is stale: re-derive them all
         regap = sb.rpc("recompute_gaps").execute().data
-        summary += f"; gaps recalculated on {regap} competitor prices"
+        summary += f"; {updated} SKUs updated, {len(new_rows)} added; gaps recalculated on {regap} competitor prices"
         print(summary)
         log_run(sb, run_id, "complete", len(items), len(rows), unusable, summary)
         return 0
