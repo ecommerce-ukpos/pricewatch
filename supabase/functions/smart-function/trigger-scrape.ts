@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 // trigger-scrape (slug: smart-function)
-// Dispatches GitHub Actions runs of .github/workflows/scraper.yml.
+// Dispatches and reports GitHub Actions runs of .github/workflows/scraper.yml.
 //
 //  POST with no body / {}            → one full price scrape of all confirmed matches
 //                                      (the Match Manager "Send all for rescrape" button).
@@ -12,9 +12,12 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 //                                                         its product pages against these SKUs only
 //                                                         (one per competitor keeps each run well
 //                                                         inside GitHub's 6-hour job limit).
+//  POST {mode:"status", since:ISO}   → manually started scraper.yml runs created since `since`
+//                                      (queued / in_progress / completed + conclusion), for the
+//                                      "Run progress" panel. Run names come from run-name in scraper.yml.
 //  Discovery never runs with force, so confirmed matches are never reset to review.
 //
-//  Secrets: GITHUB_PAT (actions:write on the repo), GITHUB_REPO ("owner/repo").
+//  Secrets: GITHUB_PAT (fine-grained: Actions read+write on the repo), GITHUB_REPO ("owner/repo").
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -32,22 +35,59 @@ function json(body: unknown, status = 200) {
   });
 }
 
+function ghHeaders(pat: string) {
+  return {
+    "Accept": "application/vnd.github+json",
+    "Authorization": `Bearer ${pat}`,
+    "X-GitHub-Api-Version": "2022-11-28",
+    "Content-Type": "application/json",
+  };
+}
+
+// Plain-English hint for the token problems we have actually hit.
+function tokenHint(status: number, text: string): string {
+  if (status === 401) return " — GitHub rejected the token (expired or wrong). Replace GITHUB_PAT in Supabase Edge Function secrets.";
+  if (status === 403 && /personal access token/i.test(text)) {
+    return " — the token is valid but lacks permission. It needs Repository permissions → Actions: Read and write on ecommerce-ukpos/pricewatch (and organisation approval if required).";
+  }
+  return "";
+}
+
 async function dispatch(pat: string, repo: string, inputs: Record<string, string>) {
   const res = await fetch(
     `https://api.github.com/repos/${repo}/actions/workflows/scraper.yml/dispatches`,
-    {
-      method: "POST",
-      headers: {
-        "Accept": "application/vnd.github+json",
-        "Authorization": `Bearer ${pat}`,
-        "X-GitHub-Api-Version": "2022-11-28",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ ref: "main", inputs }),
-    },
+    { method: "POST", headers: ghHeaders(pat), body: JSON.stringify({ ref: "main", inputs }) },
   );
   if (res.status === 204) return { ok: true };
-  return { ok: false, status: res.status, error: await res.text() };
+  const text = await res.text();
+  let msg = text;
+  try { msg = JSON.parse(text).message || text; } catch { /* keep raw */ }
+  return { ok: false, status: res.status, error: `${res.status} ${msg}${tokenHint(res.status, msg)}` };
+}
+
+async function listRuns(pat: string, repo: string, since: string) {
+  const sinceDate = since.slice(0, 19);
+  const url = `https://api.github.com/repos/${repo}/actions/workflows/scraper.yml/runs` +
+    `?event=workflow_dispatch&per_page=100&created=${encodeURIComponent(">=" + sinceDate)}`;
+  const res = await fetch(url, { headers: ghHeaders(pat) });
+  const text = await res.text();
+  if (!res.ok) {
+    let msg = text;
+    try { msg = JSON.parse(text).message || text; } catch { /* keep raw */ }
+    return { ok: false, error: `${res.status} ${msg}${tokenHint(res.status, msg)}` };
+  }
+  const data = JSON.parse(text);
+  const runs = (data.workflow_runs || []).map((r: any) => ({
+    id: r.id,
+    name: r.display_title || r.name,
+    status: r.status,          // queued | in_progress | completed | waiting | requested | pending
+    conclusion: r.conclusion,  // success | failure | cancelled | timed_out | null
+    created_at: r.created_at,
+    started_at: r.run_started_at,
+    updated_at: r.updated_at,
+    url: r.html_url,
+  }));
+  return { ok: true, runs };
 }
 
 Deno.serve(async (req: Request) => {
@@ -64,6 +104,15 @@ Deno.serve(async (req: Request) => {
     body = text ? JSON.parse(text) : {};
   } catch {
     return json({ ok: false, error: "Body must be JSON" }, 400);
+  }
+
+  // ── Run status for the progress panel ─────────────────────────────────────
+  if (body && body.mode === "status") {
+    const since = typeof body.since === "string" && !isNaN(Date.parse(body.since))
+      ? new Date(Date.parse(body.since) - 60_000).toISOString()   // 1 min slack for clock skew
+      : new Date(Date.now() - 24 * 3600_000).toISOString();
+    const r = await listRuns(PAT, REPO, since);
+    return r.ok ? json(r) : json(r, 502);
   }
 
   // ── Default: full rescrape (unchanged behaviour) ──────────────────────────
@@ -91,16 +140,20 @@ Deno.serve(async (req: Request) => {
   const skuCsv = skus.join(",");
   const results: { run: string; ok: boolean; error?: string }[] = [];
 
+  // Try the scrape first: if the token is bad, stop instead of failing 30 times.
   const scrape = await dispatch(PAT, REPO, {
     job: "scrape", scraper_skus: skuCsv, competitor_ids: comps.join(","),
   });
-  results.push({ run: "scrape", ok: scrape.ok, error: scrape.ok ? undefined : `${scrape.status} ${scrape.error}` });
+  results.push({ run: "scrape", ok: scrape.ok, error: scrape.ok ? undefined : scrape.error });
+  if (!scrape.ok && (scrape.status === 401 || scrape.status === 403)) {
+    return json({ ok: false, dispatched: 0, failed: results, error: scrape.error }, 500);
+  }
 
   for (const cid of comps) {
     const d = await dispatch(PAT, REPO, {
       job: "discover", scraper_skus: skuCsv, competitor_ids: String(cid), discover_force: "false",
     });
-    results.push({ run: `discover:${cid}`, ok: d.ok, error: d.ok ? undefined : `${d.status} ${d.error}` });
+    results.push({ run: `discover:${cid}`, ok: d.ok, error: d.ok ? undefined : d.error });
   }
 
   const failed = results.filter((r) => !r.ok);

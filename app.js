@@ -416,6 +416,7 @@ async function onSignedIn(session) {
       .then(({ data }) => { if (data) allSkus = data; });
   }
   setInterval(() => { if ($('p-alerts').classList.contains('active')) loadDashboard(); }, 5 * 60 * 1000);
+  slcProgressInit();
 }
 
 function openMyAccount() { go('settings'); goSett('account'); }
@@ -2718,6 +2719,7 @@ async function loadSkuListCheck() {
   }
   slcRenderComps();
   slcParse();
+  slcRefreshProgress();
 }
 
 function slcRenderComps() {
@@ -2794,9 +2796,11 @@ async function slcRun(btn) {
     });
     const data = await res.json();
     if (!data.ok && !data.dispatched) throw new Error(data.error || 'Dispatch failed');
+    try { localStorage.setItem(SLC_SINCE_KEY, new Date(Date.now() - 5000).toISOString()); } catch (e) {}
+    slcProgressInit(true);
     $('slc-status').innerHTML = `<i class="ti ti-check" style="color:var(--grn)"></i> ${data.dispatched} run${data.dispatched === 1 ? '' : 's'} started ${new Date().toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'})}` +
       (data.failed?.length ? ` · <span style="color:var(--red)">${data.failed.length} failed to start: ${data.error}</span>` : '') +
-      ` — progress shows under Sync schedule; review new matches in Match Manager, then press <strong>Show results</strong>.`;
+      ` — follow progress below; review new matches in Match Manager, then press <strong>Show results</strong>.`;
   } catch (e) {
     alert('Failed to start the price check: ' + e.message);
   } finally {
@@ -2901,4 +2905,141 @@ function slcExport() {
   a.download = `pricewatch-sku-list-check-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+/* ── SKU list check: run progress (GitHub run status + discovery results) ── */
+const SLC_SINCE_KEY = 'pw_slc_dispatched_at_v1';
+let slcPollTimer = null;
+let slcProgressBusy = false;
+
+function slcSince() {
+  try {
+    const s = localStorage.getItem(SLC_SINCE_KEY);
+    if (s && Date.now() - Date.parse(s) < 3 * 24 * 3600 * 1000) return s;  // show runs from the last 3 days
+  } catch (e) {}
+  return null;
+}
+
+function slcProgressInit(force) {
+  if (!slcSince()) { slcSetBadge(0); return; }
+  slcRefreshProgress(force);
+}
+
+function slcSetBadge(n) {
+  const nav = $('nav-skucheck');
+  if (!nav) return;
+  let b = $('nav-skucheck-badge');
+  if (!b) {
+    b = document.createElement('span');
+    b.id = 'nav-skucheck-badge';
+    b.className = 'nbadge nb-a';
+    b.title = 'Price check runs queued or running';
+    nav.insertBefore(b, nav.querySelector('.nav-tip'));
+  }
+  b.textContent = n;
+  b.style.display = n > 0 ? '' : 'none';
+}
+
+function slcRunInfo(name) {
+  // run-name from scraper.yml: "discover · competitors 24 · SKU list"
+  const m = /^(\w+)\s*·\s*competitors\s*([\d,]+|all)/i.exec(name || '');
+  if (!m) return { job: name || 'run', compIds: [] };
+  return { job: m[1].toLowerCase(), compIds: m[2] === 'all' ? [] : m[2].split(',').map(Number) };
+}
+
+function slcStatusBadge(r) {
+  if (r.status === 'completed') {
+    if (r.conclusion === 'success') return '<span class="badge b-g">Done</span>';
+    if (r.conclusion === 'cancelled') return '<span class="badge b-gray">Cancelled</span>';
+    return `<span class="badge b-r" style="background:var(--rb);color:var(--red)">${r.conclusion === 'timed_out' ? 'Timed out' : 'Failed'}</span>`;
+  }
+  if (r.status === 'in_progress') return '<span class="badge b-a"><i class="ti ti-loader" style="font-size:10px"></i> Running</span>';
+  return '<span class="badge b-gray">Queued</span>';
+}
+
+function slcDur(a, b) {
+  if (!a) return '—';
+  const ms = (b ? Date.parse(b) : Date.now()) - Date.parse(a);
+  const m = Math.max(0, Math.round(ms / 60000));
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+async function slcRefreshProgress(force) {
+  const since = slcSince();
+  const box = $('slc-progress');
+  if (!since) {
+    if (box) box.innerHTML = '<div style="font-size:12px;color:var(--t3)">No price check started in the last 3 days.</div>';
+    slcSetBadge(0);
+    return;
+  }
+  if (slcProgressBusy && !force) return;
+  slcProgressBusy = true;
+  try {
+    const token = await getToken();
+    const [gh, disc] = await Promise.all([
+      fetch(`${SUPABASE_URL}/functions/v1/smart-function`, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'status', since }),
+      }).then(r => r.json()),
+      sb.from('discovery_runs').select('competitor_id,status,started_at,completed_at,urls_found,matches_written')
+        .gte('started_at', since).order('started_at', { ascending: false }),
+    ]);
+    if (!gh.ok) throw new Error(gh.error || 'Could not read run status');
+    const runs = gh.runs || [];
+    const active = runs.filter(r => r.status !== 'completed').length;
+    slcSetBadge(active);
+
+    if (box) {
+      const compName = id => (slcComps.find(c => c.id === id) || {}).name || `#${id}`;
+      const discMap = {};
+      (disc.data || []).forEach(d => { if (!discMap[d.competitor_id]) discMap[d.competitor_id] = d; });
+      const n = s => runs.filter(s).length;
+      const done = n(r => r.status === 'completed' && r.conclusion === 'success');
+      const failed = n(r => r.status === 'completed' && r.conclusion !== 'success');
+      const running = n(r => r.status === 'in_progress');
+      const queued = runs.length - done - failed - running;
+      const matches = Object.values(discMap).reduce((t, d) => t + (d.matches_written || 0), 0);
+      const pct = runs.length ? Math.round(100 * (done + failed) / runs.length) : 0;
+      const rows = runs.slice().sort((a, b) => (a.status === 'completed') - (b.status === 'completed') || Date.parse(a.created_at) - Date.parse(b.created_at)).map(r => {
+        const info = slcRunInfo(r.name);
+        const who = info.compIds.length ? info.compIds.map(compName).join(', ') : 'All competitors';
+        const d = info.job === 'discover' && info.compIds.length === 1 ? discMap[info.compIds[0]] : null;
+        const outcome = d && d.status === 'complete'
+          ? `${d.matches_written || 0} new match${d.matches_written === 1 ? '' : 'es'} · ${d.urls_found || 0} pages`
+          : d && d.status === 'failed' ? '<span style="color:var(--red)">No sitemap pages</span>' : '';
+        return `<tr>
+          <td>${info.job === 'discover' ? '<i class="ti ti-search"></i> Discovery' : '<i class="ti ti-refresh"></i> Rescrape'}</td>
+          <td>${who}</td>
+          <td>${slcStatusBadge(r)}</td>
+          <td style="white-space:nowrap">${slcDur(r.started_at || r.created_at, r.status === 'completed' ? r.updated_at : null)}</td>
+          <td style="font-size:11px;color:var(--t2)">${outcome}</td>
+          <td><a href="${r.url}" target="_blank" rel="noopener" style="font-size:11px">Log <i class="ti ti-external-link" style="font-size:10px"></i></a></td>
+        </tr>`;
+      }).join('');
+      box.innerHTML = runs.length ? `
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:12px;margin-bottom:8px">
+          <span>Started ${ts(since)}</span>
+          <span><strong>${done}</strong> done</span>
+          <span><strong>${running}</strong> running</span>
+          <span><strong>${queued}</strong> queued</span>
+          ${failed ? `<span style="color:var(--red)"><strong>${failed}</strong> failed</span>` : ''}
+          <span><strong>${matches}</strong> new matches so far</span>
+          <button class="btn sm" style="margin-left:auto" onclick="slcRefreshProgress(true)"><i class="ti ti-refresh"></i> Refresh</button>
+        </div>
+        <div style="height:6px;background:var(--bg);border-radius:3px;overflow:hidden;margin-bottom:10px">
+          <div style="height:100%;width:${pct}%;background:var(--grn);transition:width .4s"></div>
+        </div>
+        <div class="tw" style="max-height:320px;overflow-y:auto"><table><thead><tr><th>Run</th><th>Competitor</th><th>Status</th><th>Time</th><th>Result</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+        ${active === 0 ? '<div style="font-size:12px;color:var(--t2);margin-top:8px"><i class="ti ti-check" style="color:var(--grn)"></i> All runs finished — confirm new matches in Match Manager, then press <strong>Show results</strong>.</div>' : '<div style="font-size:11px;color:var(--t3);margin-top:8px">Updates every 30 seconds. Discovery can take an hour or more per competitor; GitHub may queue some runs.</div>'}`
+        : '<div style="font-size:12px;color:var(--t2)">Waiting for GitHub to register the runs…</div>';
+    }
+
+    clearTimeout(slcPollTimer);
+    if (active > 0 || !runs.length) slcPollTimer = setTimeout(() => slcRefreshProgress(), 30000);
+  } catch (e) {
+    if (box) box.innerHTML = `<div style="font-size:12px;color:var(--red)">Could not read run progress: ${e.message}</div>`;
+  } finally {
+    slcProgressBusy = false;
+  }
 }
