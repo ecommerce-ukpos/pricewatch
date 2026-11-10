@@ -62,6 +62,7 @@ from xml.etree import ElementTree as ET
 import httpx
 from supabase import create_client
 
+from indigo_displays import INDIGO_DOMAIN, scrape_indigo_page
 from common import (
     is_category_url, USER_AGENTS,
     detect_vat, detect_oos, diff_pct, normalise_price, extract_pack_qty,
@@ -1323,9 +1324,14 @@ def run_discovery():
                     upsert_match(sb, sku_id, cid, url, comp_title,
                                  confidence, "claude_sitemap", reasoning)
 
-                    # Write provisional price snapshot using the price already on hand
+                    # Write provisional price snapshot using the price already on hand.
+                    # Indigo: if a dropdown option changes the price, the page price is only
+                    # the base — skip the provisional price until #option: is set on the URL.
                     sku_obj = next((s for s in all_skus if s["sku_id"] == sku_id), None)
-                    if sku_obj and comp_price:
+                    if INDIGO_DOMAIN in (comp.get("domain") or "") and not scrape_indigo_page(html, url).success:
+                        log.info(f"  Indigo page has priced options — no provisional price for {sku_id}; "
+                                 "set #option:<name> on the match URL in Match Manager")
+                    elif sku_obj and comp_price:
                         write_snapshot(sb, sku_obj, cid, url,
                                       comp_price, "", html,
                                       confidence, discovery_run_id)

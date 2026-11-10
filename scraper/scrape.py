@@ -102,6 +102,7 @@ from display_wizard import (
     scrape_dw_page,
     DISPLAY_WIZARD_DOMAIN,
 )
+from indigo_displays import INDIGO_DOMAIN, scrape_indigo_page
 from visual_displays import (
     VISUAL_DISPLAYS_DOMAIN,
     match_vd_variant,
@@ -584,6 +585,7 @@ async def scrape_product_page(
             except Exception:
                 pass
 
+        no_fallback = False   # set when a site-specific reader decides "no price" on purpose
         price = shopify_price
         if not price: price = await _extract_jsonld_price(page)
         if not price: price = await _extract_meta_price(page)
@@ -673,8 +675,28 @@ async def scrape_product_page(
                 else:
                     price = None
                     result["error"] = f"No Visual Displays variant with SKU {sku.get('sku_id')}"
+                    no_fallback = True
             else:
                 log.debug("  VD product .js unavailable — falling back to generic extraction")
+
+        # ── Indigo Displays: Magento custom-option dropdown (e.g. A4 / A3) ─────
+        # The site can't preselect an option from the URL, so the chosen option is
+        # stored on the match URL as "#option:a3" (or "#option:<value id>") and the
+        # price is base + that option's add-on, read from the page's optionConfig.
+        # No/unknown option where options change the price → no price (never guess).
+        elif INDIGO_DOMAIN in competitor_domain:
+            html = await page.content()
+            ind = scrape_indigo_page(html, url)
+            if ind.success:
+                price = ind.price
+                log.debug(
+                    f"  Indigo price: £{price} = base £{ind.base_price} + "
+                    f"{ind.option_name or 'no option'} £{ind.add_on:.2f}"
+                )
+            else:
+                price = None
+                result["error"] = ind.error
+                no_fallback = True
 
         # ── Snap Frames Warehouse: custom OpenCart theme ───────────────────────
         # No standard price class — prices in <h2> inside ul.list-unstyled.
@@ -686,7 +708,7 @@ async def scrape_product_page(
         elif "pavementsigns.com" in competitor_domain:
             if not price: price = await _extract_pavement_signs_price(page)
 
-        if not price:
+        if not price and not no_fallback:
             price = await _extract_main_price(page)
 
         result["price"] = price
@@ -849,7 +871,7 @@ async def scrape_match(
         else:
             log.info(
                 f"  ✗ {competitor['domain']:35s} "
-                f"no price — {result.get('error', '')[:60]}"
+                f"no price — {(result.get('error') or '')[:60]}"
                 f"{' [amended, no price found]' if was_amended else ''}"
             )
 

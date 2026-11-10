@@ -2868,7 +2868,10 @@ function slcRenderResults(comps) {
       }
       const tag = c.confirmed ? '' : ' <span title="Unconfirmed match — check in Match Manager" style="color:var(--amb);font-size:10px">(review)</span>';
       const link = c.url ? `<a href="${c.url}" target="_blank" rel="noopener" style="color:inherit">${fmtPrice(c.ex)}</a>` : fmtPrice(c.ex);
-      return `<td style="white-space:nowrap">${link}${tag}<div><span class="diff ${diffClass(c.diff)}">${diffLabel(c.diff)}</span> <span style="font-size:10px;color:var(--t3)">${ts(c.at)}</span></div></td>`;
+      // Option chosen via "#option:" (Indigo) — the site can't preselect it, so say which one we priced
+      const optM = /#option:([^#&]+)/i.exec(c.url || '');
+      const optTag = optM ? ` <span title="Price for this dropdown option (base + option add-on)" style="font-size:10px;color:var(--t2);background:var(--bg);border-radius:3px;padding:0 4px">${decodeURIComponent(optM[1]).toUpperCase().replace(/</g, '&lt;')}</span>` : '';
+      return `<td style="white-space:nowrap">${link}${optTag}${tag}<div><span class="diff ${diffClass(c.diff)}">${diffLabel(c.diff)}</span> <span style="font-size:10px;color:var(--t3)">${ts(c.at)}</span></div></td>`;
     }).join('');
     const w = r.worst;
     return `<tr class="${w ? rowClass(w.diff) : ''}">
