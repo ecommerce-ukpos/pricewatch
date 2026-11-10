@@ -2782,7 +2782,7 @@ async function slcRun(btn) {
   if (!slcSelComps.size) return alert('Choose at least one competitor.');
   const n = slcSelComps.size;
   if (!confirm(`Start a price check for ${slcList.length} SKUs against ${n} competitor${n > 1 ? 's' : ''}?\n\n` +
-               `This starts 1 rescrape of existing matches plus ${n} discovery run${n > 1 ? 's' : ''} on GitHub. ` +
+               `This starts ${n} run${n > 1 ? 's' : ''} on GitHub, one per competitor: discovery first, then a rescrape of that competitor's matches. ` +
                `New matches arrive in Match Manager for review; discovery can take an hour or more per competitor.`)) return;
   const orig = btn.innerHTML;
   btn.disabled = true;
@@ -2983,7 +2983,7 @@ async function slcRefreshProgress(force) {
         body: JSON.stringify({ mode: 'status', since }),
       }).then(r => r.json()),
       sb.from('discovery_runs').select('competitor_id,status,started_at,completed_at,urls_found,matches_written,notes')
-        .gte('started_at', since).order('started_at', { ascending: false }),
+        .gte('started_at', new Date(Date.parse(since) - 120000).toISOString()).order('started_at', { ascending: false }),
     ]);
     if (!gh.ok) throw new Error(gh.error || 'Could not read run status');
     const runs = gh.runs || [];
@@ -2992,24 +2992,34 @@ async function slcRefreshProgress(force) {
 
     if (box) {
       const compName = id => (slcComps.find(c => c.id === id) || {}).name || `#${id}`;
-      const discMap = {};
-      (disc.data || []).forEach(d => { if (!discMap[d.competitor_id]) discMap[d.competitor_id] = d; });
+      const discRows = (disc.data || []).slice().sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at));
+      const usedDisc = new Set();
+      const discFor = r => {
+        const info = slcRunInfo(r.name);
+        if (!['discover', 'check'].includes(info.job) || info.compIds.length !== 1) return null;
+        const from = Date.parse(r.created_at), to = r.status === 'completed' ? Date.parse(r.updated_at) + 60000 : Infinity;
+        const hit = discRows.find(d => d.competitor_id === info.compIds[0] && !usedDisc.has(d)
+          && Date.parse(d.started_at) >= from && Date.parse(d.started_at) <= to);
+        if (hit) usedDisc.add(hit);
+        return hit || null;
+      };
+      const runDisc = new Map(runs.slice().sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at)).map(r => [r.id, discFor(r)]));
       const n = s => runs.filter(s).length;
       const done = n(r => r.status === 'completed' && r.conclusion === 'success');
       const failed = n(r => r.status === 'completed' && r.conclusion !== 'success');
       const running = n(r => r.status === 'in_progress');
       const queued = runs.length - done - failed - running;
-      const matches = Object.values(discMap).reduce((t, d) => t + (d.matches_written || 0), 0);
+      const matches = [...runDisc.values()].reduce((t, d) => t + ((d && d.matches_written) || 0), 0);
       const pct = runs.length ? Math.round(100 * (done + failed) / runs.length) : 0;
       const rows = runs.slice().sort((a, b) => (a.status === 'completed') - (b.status === 'completed') || Date.parse(a.created_at) - Date.parse(b.created_at)).map(r => {
         const info = slcRunInfo(r.name);
         const who = info.compIds.length ? info.compIds.map(compName).join(', ') : 'All competitors';
-        const d = info.job === 'discover' && info.compIds.length === 1 ? discMap[info.compIds[0]] : null;
+        const d = runDisc.get(r.id) || null;
         const outcome = d && d.status === 'complete'
           ? `${d.matches_written || 0} new match${d.matches_written === 1 ? '' : 'es'} · ${d.urls_found || 0} pages`
           : d && d.status === 'failed' ? `<span style="color:var(--red)">${(d.notes || 'Failed').replace(/</g, '&lt;')}</span>` : '';
         return `<tr>
-          <td>${info.job === 'discover' ? '<i class="ti ti-search"></i> Discovery' : '<i class="ti ti-refresh"></i> Rescrape'}</td>
+          <td>${info.job === 'check' ? '<i class="ti ti-search"></i> Discover → rescrape' : info.job === 'discover' ? '<i class="ti ti-search"></i> Discovery' : '<i class="ti ti-refresh"></i> Rescrape'}</td>
           <td>${who}</td>
           <td>${d && d.status === 'failed' && r.status === 'completed' ? '<span class="badge b-r">Failed</span>' : slcStatusBadge(r)}</td>
           <td style="white-space:nowrap">${slcDur(r.started_at || r.created_at, r.status === 'completed' ? r.updated_at : null)}</td>

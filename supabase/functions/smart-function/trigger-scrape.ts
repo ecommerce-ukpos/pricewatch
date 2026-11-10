@@ -6,12 +6,10 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 //  POST with no body / {}            → one full price scrape of all confirmed matches
 //                                      (the Match Manager "Send all for rescrape" button).
 //  POST {mode:"check", skus:[...],   → SKU-list price check from the "SKU list check" screen:
-//        competitor_ids:[...]}          1 × scrape run   — rescrape existing confirmed matches for
-//                                                         these SKUs × chosen competitors
-//                                       N × discover run — one run per chosen competitor, matching
-//                                                         its product pages against these SKUs only
-//                                                         (one per competitor keeps each run well
-//                                                         inside GitHub's 6-hour job limit).
+//        competitor_ids:[...]}          one "check" run per chosen competitor. Each run does
+//                                       discovery for that competitor against these SKUs only,
+//                                       THEN rescrapes their confirmed matches at that competitor
+//                                       (one run per competitor keeps each inside GitHub's 6h limit).
 //  POST {mode:"status", since:ISO}   → manually started scraper.yml runs created since `since`
 //                                      (queued / in_progress / completed + conclusion), for the
 //                                      "Run progress" panel. Run names come from run-name in scraper.yml.
@@ -140,20 +138,14 @@ Deno.serve(async (req: Request) => {
   const skuCsv = skus.join(",");
   const results: { run: string; ok: boolean; error?: string }[] = [];
 
-  // Try the scrape first: if the token is bad, stop instead of failing 30 times.
-  const scrape = await dispatch(PAT, REPO, {
-    job: "scrape", scraper_skus: skuCsv, competitor_ids: comps.join(","),
-  });
-  results.push({ run: "scrape", ok: scrape.ok, error: scrape.ok ? undefined : scrape.error });
-  if (!scrape.ok && (scrape.status === 401 || scrape.status === 403)) {
-    return json({ ok: false, dispatched: 0, failed: results, error: scrape.error }, 500);
-  }
-
+  // One run per competitor: discovery, then rescrape. Stop at the first auth failure
+  // instead of failing every competitor.
   for (const cid of comps) {
     const d = await dispatch(PAT, REPO, {
-      job: "discover", scraper_skus: skuCsv, competitor_ids: String(cid), discover_force: "false",
+      job: "check", scraper_skus: skuCsv, competitor_ids: String(cid), discover_force: "false",
     });
-    results.push({ run: `discover:${cid}`, ok: d.ok, error: d.ok ? undefined : d.error });
+    results.push({ run: `check:${cid}`, ok: d.ok, error: d.ok ? undefined : d.error });
+    if (!d.ok && (d.status === 401 || d.status === 403)) break;
   }
 
   const failed = results.filter((r) => !r.ok);

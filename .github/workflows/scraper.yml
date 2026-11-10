@@ -15,6 +15,7 @@ on:
         options:
           - scrape      # price scrape of confirmed URLs (default, scheduled)
           - discover    # URL discovery — find new competitor product pages
+          - check       # SKU list check: discovery, THEN rescrape, for the listed SKUs (app "SKU list check")
       scraper_skus:
         description: 'Comma-separated SKU IDs (optional — targets specific SKUs only)'
         required: false
@@ -89,7 +90,7 @@ jobs:
           COMPETITOR_IDS:       ${{ github.event.inputs.competitor_ids || '' }}
         run: python scraper/scrape.py scheduled
       - name: Run URL discovery
-        if: steps.job.outputs.job == 'discover'
+        if: steps.job.outputs.job == 'discover' || steps.job.outputs.job == 'check'
         env:
           ANTHROPIC_API_KEY:     ${{ secrets.ANTHROPIC_API_KEY }}
           SUPABASE_URL:          ${{ secrets.SUPABASE_URL }}
@@ -103,3 +104,17 @@ jobs:
           COMPETITOR_IDS:        ${{ github.event.inputs.competitor_ids || '' }}
           MAX_PAGES:             ${{ github.event.inputs.max_pages || '2000' }}
         run: python scraper/discover_sitemap.py
+      - name: Rescrape listed SKUs after discovery
+        # SKU list check only: runs after discovery (even if discovery failed) so prices are
+        # refreshed for every confirmed match of these SKUs at this competitor.
+        if: ${{ !cancelled() && steps.job.outputs.job == 'check' }}
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          CF_PROXY_URL:         ${{ secrets.CF_PROXY_URL }}
+          SCRAPER_SKUS:         ${{ github.event.inputs.scraper_skus || '' }}
+          SCRAPER_WORKERS:      ${{ github.event.inputs.scraper_workers || '5' }}
+          SCRAPER_DELAY_MIN:    '3'
+          SCRAPER_DELAY_MAX:    '7'
+          COMPETITOR_IDS:       ${{ github.event.inputs.competitor_ids || '' }}
+        run: python scraper/scrape.py manual
