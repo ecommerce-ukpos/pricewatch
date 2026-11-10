@@ -2982,7 +2982,7 @@ async function slcRefreshProgress(force) {
         headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode: 'status', since }),
       }).then(r => r.json()),
-      sb.from('discovery_runs').select('competitor_id,status,started_at,completed_at,urls_found,matches_written')
+      sb.from('discovery_runs').select('competitor_id,status,started_at,completed_at,urls_found,matches_written,notes')
         .gte('started_at', since).order('started_at', { ascending: false }),
     ]);
     if (!gh.ok) throw new Error(gh.error || 'Could not read run status');
@@ -3007,11 +3007,11 @@ async function slcRefreshProgress(force) {
         const d = info.job === 'discover' && info.compIds.length === 1 ? discMap[info.compIds[0]] : null;
         const outcome = d && d.status === 'complete'
           ? `${d.matches_written || 0} new match${d.matches_written === 1 ? '' : 'es'} · ${d.urls_found || 0} pages`
-          : d && d.status === 'failed' ? '<span style="color:var(--red)">No sitemap pages</span>' : '';
+          : d && d.status === 'failed' ? `<span style="color:var(--red)">${(d.notes || 'Failed').replace(/</g, '&lt;')}</span>` : '';
         return `<tr>
           <td>${info.job === 'discover' ? '<i class="ti ti-search"></i> Discovery' : '<i class="ti ti-refresh"></i> Rescrape'}</td>
           <td>${who}</td>
-          <td>${slcStatusBadge(r)}</td>
+          <td>${d && d.status === 'failed' && r.status === 'completed' ? '<span class="badge b-r">Failed</span>' : slcStatusBadge(r)}</td>
           <td style="white-space:nowrap">${slcDur(r.started_at || r.created_at, r.status === 'completed' ? r.updated_at : null)}</td>
           <td style="font-size:11px;color:var(--t2)">${outcome}</td>
           <td><a href="${r.url}" target="_blank" rel="noopener" style="font-size:11px">Log <i class="ti ti-external-link" style="font-size:10px"></i></a></td>

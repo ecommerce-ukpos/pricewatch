@@ -44,6 +44,7 @@ ENVIRONMENT VARIABLES
   LOG_LEVEL             DEBUG / INFO (default INFO)
   PAGE_FETCH_TIMEOUT    seconds per page fetch (default 15)
   ANTHROPIC_BATCH_SIZE  SKU candidates sent to Claude per call (default 20)
+  ANTHROPIC_MODEL       Claude model id (default claude-sonnet-4-6)
 """
 
 import gzip
@@ -84,6 +85,12 @@ MAX_PAGES         = int(os.getenv("MAX_PAGES", "2000"))
 PAGE_TIMEOUT      = int(os.getenv("PAGE_FETCH_TIMEOUT", "15"))
 BATCH_SIZE        = int(os.getenv("ANTHROPIC_BATCH_SIZE", "20"))
 AMBIGUITY_MARGIN  = 10  # write top 2 if scores within this many points
+CLAUDE_MODEL      = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+MAX_API_FAILS     = 5   # consecutive Claude API failures before a competitor run is aborted
+
+
+class ClaudeAPIError(Exception):
+    """The Claude API returned an error (bad key, no credit, unknown model, overloaded…)."""
 
 _competitor_ids = [int(i.strip()) for i in os.getenv("COMPETITOR_IDS", "").split(",") if i.strip()]
 _discover_skus  = [s.strip() for s in re.split(r"[,\s;]+", os.getenv("DISCOVER_SKUS", "")) if s.strip()]
@@ -954,22 +961,46 @@ Format:
 
 Return up to 3 matches in descending confidence order. Return [] if no match."""
 
+    data = None
+    for attempt in range(1, 4):
+        try:
+            r = httpx.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key":         ANTHROPIC_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type":      "application/json",
+                },
+                json={
+                    "model":      CLAUDE_MODEL,
+                    "max_tokens": 500,
+                    "messages":   [{"role": "user", "content": prompt}],
+                },
+                timeout=60,
+            )
+        except httpx.HTTPError as e:
+            if attempt == 3:
+                raise ClaudeAPIError(f"network error: {e}") from e
+            time.sleep(5 * attempt)
+            continue
+        if r.status_code == 200:
+            data = r.json()
+            break
+        try:
+            err = r.json().get("error", {})
+            msg = f"{r.status_code} {err.get('type', '')}: {err.get('message', r.text[:200])}"
+        except Exception:  # noqa: BLE001
+            msg = f"{r.status_code} {r.text[:200]}"
+        # 429 rate limit, 529 overloaded, 5xx: wait and retry. Anything else (401 bad key,
+        # 400 low credit / unknown model, 403…) will not fix itself.
+        if r.status_code in (429, 500, 502, 503, 529) and attempt < 3:
+            wait = float(r.headers.get("retry-after") or 10 * attempt)
+            log.info(f"  Claude API {msg} — retrying in {wait:.0f}s")
+            time.sleep(min(wait, 60))
+            continue
+        raise ClaudeAPIError(msg)
+
     try:
-        r = httpx.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key":         ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type":      "application/json",
-            },
-            json={
-                "model":      "claude-sonnet-4-6",
-                "max_tokens": 500,
-                "messages":   [{"role": "user", "content": prompt}],
-            },
-            timeout=30,
-        )
-        data = r.json()
         text = data["content"][0]["text"].strip()
         # Strip markdown code fences if present
         text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.I)
@@ -978,8 +1009,8 @@ Return up to 3 matches in descending confidence order. Return [] if no match."""
         if isinstance(matches, list):
             return [m for m in matches if isinstance(m, dict) and "sku_id" in m]
         return []
-    except Exception as e:
-        log.warning(f"  Claude API error: {e}")
+    except Exception as e:  # noqa: BLE001  — a malformed answer is a no-match, not an API failure
+        log.warning(f"  Could not parse Claude answer: {e}")
         return []
 
 
@@ -1188,6 +1219,7 @@ def run_discovery():
 
             # Phase 2 + 3 + 4 — Fetch, profile, pre-filter, Claude match
             log.info(f"Phase 2-4: Fetching pages and matching...")
+            api_fails, aborted = 0, None
 
             for i, url in enumerate(urls):
                 if i > 0 and i % 100 == 0:
@@ -1246,7 +1278,17 @@ def run_discovery():
 
                 # Phase 4 — Claude matching
                 stats["claude_calls"] += 1
-                matches = claude_match(profile, candidates)
+                try:
+                    matches = claude_match(profile, candidates)
+                    api_fails = 0
+                except ClaudeAPIError as e:
+                    api_fails += 1
+                    log.warning(f"  Claude API error ({api_fails}/{MAX_API_FAILS}): {e}")
+                    if api_fails >= MAX_API_FAILS:
+                        aborted = f"Claude API failing ({CLAUDE_MODEL}): {e}"
+                        log.error(f"  Aborting {cname}: {aborted}")
+                        break
+                    continue
 
                 if not matches:
                     stats["no_match"] += 1
@@ -1315,7 +1357,8 @@ def run_discovery():
         if discovery_run_db_id:
             try:
                 sb.table("discovery_runs").update({
-                    "status":          "complete",
+                    "status":          "failed" if aborted else "complete",
+                    "notes":           aborted,
                     "completed_at":    datetime.now(timezone.utc).isoformat(),
                     "urls_found":      stats["urls_harvested"],
                     "matches_written": stats["matches_written"],
