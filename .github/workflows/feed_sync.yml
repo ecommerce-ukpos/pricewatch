@@ -23,10 +23,11 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install supabase httpx
-      - name: Sync UKPOS prices from Shoptimised feed
-        # Any failure (URL changed, bad/truncated feed) exits non-zero => GitHub emails the owner
+      - name: Sync UKPOS prices from ukpos.com Google product feed
+        # Feed: https://www.ukpos.com/feeds/google-product-feed-v3.xml (set in scripts/sync_feed.py)
+        # Any failure (URL changed, bad/truncated feed, VAT basis changed) exits non-zero
+        # and logs a 'failed' feed_sync row in sync_runs.
         env:
-          UKPOS_FEED_URL:       ${{ secrets.UKPOS_FEED_URL }}
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           TRIGGER:              ${{ github.event_name == 'schedule' && 'scheduled' || 'manual' }}
