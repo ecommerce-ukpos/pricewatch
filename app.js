@@ -272,9 +272,9 @@ function copyUrl() {
 ════════════════════════════════════════ */
 const PANEL_MAP = {
   alerts: 'alerts', review: 'review', skus: 'skus',
-  bycat: 'bycat', bycomp: 'bycomp', schedule: 'schedule', settings: 'settings'
+  bycat: 'bycat', bycomp: 'bycomp', skucheck: 'skucheck', schedule: 'schedule', settings: 'settings'
 };
-const NAV_ITEMS = ['alerts','review','skus','bycat','bycomp','schedule','settings'];
+const NAV_ITEMS = ['alerts','review','skus','bycat','bycomp','skucheck','schedule','settings'];
 
 function go(name, opts = {}) {
   document.querySelectorAll('.panel').forEach(p => {
@@ -298,7 +298,7 @@ function go(name, opts = {}) {
 
   const navKey = {
     'alerts':'alerts','review':'review','skus':'skus','bycat':'bycat',
-    'bycomp':'bycomp','comp-detail':'bycomp','sku-detail':'skus',
+    'bycomp':'bycomp','comp-detail':'bycomp','sku-detail':'skus','skucheck':'skucheck',
     'schedule':'schedule','settings':'settings'
   }[name];
   if (navKey && $('nav-' + navKey)) $('nav-' + navKey).classList.add('active');
@@ -318,6 +318,7 @@ if (name === 'skus') {
   if (name === 'review')      { if (!reviewLoaded) loadReview(); else filterReview(); }
   if (name === 'bycat')       loadByCategory();
   if (name === 'bycomp')      loadByCompetitor();
+  if (name === 'skucheck')    loadSkuListCheck();
   if (name === 'schedule')    loadRuns();
   if (name === 'settings')    { goSett('configurables'); loadCompetitorSettings(); loadUsers(); }
   if (name === 'comp-detail') { loadCompDetail(opts); }
@@ -2661,3 +2662,243 @@ let skusLoaded = false;
 ════════════════════════════════════════ */
 updateThreshPreview();
 bootstrap();
+
+/* ════════════════════════════════════════
+   SKU LIST CHECK — paste / CSV a list of SKUs, pick competitors, run a targeted
+   price check (rescrape existing matches + discovery per competitor) and view results.
+════════════════════════════════════════ */
+let slcSkuIndex = null;          // UPPER(sku_id) -> { sku_id, short_title }
+let slcComps = [];               // active competitors
+let slcList = [];                // canonical sku_ids in the current list
+let slcSelComps = new Set();     // chosen competitor ids
+let slcRows = [];                // last rendered result rows (for export)
+const debouncedSlcParse = debounce(() => slcParse(), 250);
+const SLC_KEY = 'pw_sku_list_check_v1';
+const SLC_MAX = 300;
+
+function slcSave() {
+  try { localStorage.setItem(SLC_KEY, JSON.stringify({ text: $('slc-text').value, comps: [...slcSelComps] })); } catch (e) {}
+}
+function slcLoadSaved() {
+  try { return JSON.parse(localStorage.getItem(SLC_KEY) || 'null'); } catch (e) { return null; }
+}
+
+async function slcFetchAll(table, cols, filterFn) {
+  const out = [];
+  for (let from = 0; ; from += 1000) {
+    let q = sb.from(table).select(cols).range(from, from + 999);
+    if (filterFn) q = filterFn(q);
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+    out.push(...(data || []));
+    if (!data || data.length < 1000) return out;
+  }
+}
+
+async function loadSkuListCheck() {
+  if (!slcSkuIndex) {
+    $('slc-comps').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+    try {
+      const [skus, comps] = await Promise.all([
+        slcFetchAll('skus', 'sku_id,short_title,active'),
+        sb.from('competitors').select('id,name,domain').eq('active', true).order('name').then(r => r.data || []),
+      ]);
+      slcSkuIndex = {};
+      skus.forEach(s => { slcSkuIndex[s.sku_id.toUpperCase()] = s; });
+      slcComps = comps;
+    } catch (e) {
+      $('slc-comps').innerHTML = `<div style="color:var(--red)">Could not load SKUs/competitors: ${e.message}</div>`;
+      return;
+    }
+    const saved = slcLoadSaved();
+    if (saved) {
+      if (saved.text && !$('slc-text').value) $('slc-text').value = saved.text;
+      (saved.comps || []).forEach(id => { if (slcComps.some(c => c.id === id)) slcSelComps.add(id); });
+    }
+  }
+  slcRenderComps();
+  slcParse();
+}
+
+function slcRenderComps() {
+  $('slc-comps').innerHTML = slcComps.map(c => `
+    <label style="display:flex;align-items:center;gap:6px;font-size:12px;padding:3px 0;cursor:pointer">
+      <input type="checkbox" ${slcSelComps.has(c.id) ? 'checked' : ''} onchange="slcToggleComp(${c.id}, this.checked)">
+      <span>${c.name}</span><span style="color:var(--t3);font-size:11px">#${c.id}</span>
+    </label>`).join('');
+  $('slc-comp-count').textContent = `${slcSelComps.size} of ${slcComps.length} selected`;
+}
+function slcToggleComp(id, on) { on ? slcSelComps.add(id) : slcSelComps.delete(id); slcRenderComps(); slcSave(); }
+function slcAllComps(on) { slcSelComps = new Set(on ? slcComps.map(c => c.id) : []); slcRenderComps(); slcSave(); }
+
+// Accepts SKUs separated by commas, new lines, tabs, semicolons or spaces.
+// For CSV text, uses the column headed "sku"/"sku_id"/"child_sku" if present, else the first column.
+function slcTokens(text) {
+  const lines = (text || '').split(/\r?\n/).filter(l => l.trim());
+  if (lines.length > 1 && /[,\t;]/.test(lines[0])) {
+    const sep = lines[0].includes('\t') ? '\t' : lines[0].includes(';') ? ';' : ',';
+    const head = lines[0].split(sep).map(h => h.trim().replace(/^"|"$/g, '').toLowerCase());
+    const idx = head.findIndex(h => ['sku', 'sku_id', 'child_sku', 'sku id', 'child sku'].includes(h));
+    if (idx >= 0) {
+      return lines.slice(1).map(l => (l.split(sep)[idx] || '').trim().replace(/^"|"$/g, '')).filter(Boolean);
+    }
+  }
+  return (text || '').split(/[\s,;]+/).map(s => s.trim().replace(/^"|"$/g, '')).filter(Boolean);
+}
+
+function slcParse() {
+  if (!slcSkuIndex) return;
+  const toks = slcTokens($('slc-text').value);
+  const seen = new Set(), unknown = [];
+  slcList = [];
+  toks.forEach(t => {
+    const hit = slcSkuIndex[t.toUpperCase()];
+    if (!hit) { if (!/^(sku|sku_id|child_sku)$/i.test(t)) unknown.push(t); return; }
+    if (seen.has(hit.sku_id)) return;
+    seen.add(hit.sku_id); slcList.push(hit.sku_id);
+  });
+  const over = slcList.length > SLC_MAX;
+  $('slc-parse').innerHTML = `
+    <strong>${slcList.length}</strong> SKUs recognised${over ? ` <span style="color:var(--red)">(max ${SLC_MAX} per check)</span>` : ''}
+    ${unknown.length ? `· <span style="color:var(--amb)">${unknown.length} not in PriceWatch:</span>
+      <span style="font-family:'SF Mono',monospace;font-size:11px;color:var(--t2)">${[...new Set(unknown)].slice(0, 40).join(', ')}${unknown.length > 40 ? '…' : ''}</span>` : ''}`;
+  slcSave();
+}
+
+function slcFile(input) {
+  const f = input.files?.[0];
+  if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => { $('slc-text').value = String(rd.result || ''); slcParse(); input.value = ''; };
+  rd.readAsText(f);
+}
+
+async function slcRun(btn) {
+  slcParse();
+  if (!slcList.length) return alert('Add some SKUs first.');
+  if (slcList.length > SLC_MAX) return alert(`Max ${SLC_MAX} SKUs per check — split the list.`);
+  if (!slcSelComps.size) return alert('Choose at least one competitor.');
+  const n = slcSelComps.size;
+  if (!confirm(`Start a price check for ${slcList.length} SKUs against ${n} competitor${n > 1 ? 's' : ''}?\n\n` +
+               `This starts 1 rescrape of existing matches plus ${n} discovery run${n > 1 ? 's' : ''} on GitHub. ` +
+               `New matches arrive in Match Manager for review; discovery can take an hour or more per competitor.`)) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Dispatching…';
+  try {
+    const token = await getToken();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/smart-function`, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'check', skus: slcList, competitor_ids: [...slcSelComps] }),
+    });
+    const data = await res.json();
+    if (!data.ok && !data.dispatched) throw new Error(data.error || 'Dispatch failed');
+    $('slc-status').innerHTML = `<i class="ti ti-check" style="color:var(--grn)"></i> ${data.dispatched} run${data.dispatched === 1 ? '' : 's'} started ${new Date().toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'})}` +
+      (data.failed?.length ? ` · <span style="color:var(--red)">${data.failed.length} failed to start: ${data.error}</span>` : '') +
+      ` — progress shows under Sync schedule; review new matches in Match Manager, then press <strong>Show results</strong>.`;
+  } catch (e) {
+    alert('Failed to start the price check: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
+
+async function slcResults() {
+  slcParse();
+  if (!slcList.length) return alert('Add some SKUs first.');
+  const comps = slcComps.filter(c => slcSelComps.size ? slcSelComps.has(c.id) : true);
+  const compIds = comps.map(c => c.id);
+  $('slc-results').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+  try {
+    const skus = [], snaps = [], matches = [];
+    for (let i = 0; i < slcList.length; i += 100) {
+      const chunk = slcList.slice(i, i + 100);
+      const [a, b, c] = await Promise.all([
+        sb.from('skus').select('sku_id,short_title,price_ex_vat,regular_price_ex_vat,on_sale,availability,product_url,slug').in('sku_id', chunk),
+        sb.from('latest_snapshots').select('sku_id,competitor_id,competitor_price,competitor_vat,competitor_vat_default,diff_pct_normalised,scraped_at,competitor_url,availability').in('sku_id', chunk).in('competitor_id', compIds),
+        sb.from('competitor_matches').select('sku_id,competitor_id,match_status').in('sku_id', chunk).in('competitor_id', compIds),
+      ]);
+      [a, b, c].forEach(r => { if (r.error) throw new Error(r.error.message); });
+      skus.push(...a.data); snaps.push(...b.data); matches.push(...c.data);
+    }
+    const skuMap = Object.fromEntries(skus.map(s => [s.sku_id, s]));
+    const snapMap = {}, msMap = {};
+    snaps.forEach(s => { snapMap[`${s.sku_id}__${s.competitor_id}`] = s; });
+    matches.forEach(m => { msMap[`${m.sku_id}__${m.competitor_id}`] = m.match_status; });
+
+    slcRows = slcList.map(id => {
+      const s = skuMap[id] || { sku_id: id };
+      const cells = comps.map(c => {
+        const k = `${id}__${c.id}`, snap = snapMap[k], ms = msMap[k] || null;
+        const usable = snap && snap.competitor_price && (ms === 'matched' || ms === 'amended' || ms === 'review');
+        const raw = usable ? parseFloat(snap.competitor_price) : null;
+        const vat = snap ? (snap.competitor_vat || snap.competitor_vat_default || 'unknown') : 'unknown';
+        return {
+          comp: c, status: ms, confirmed: ms === 'matched' || ms === 'amended',
+          ex: raw ? normalisePrice(raw, vat) : null,
+          diff: usable && snap.diff_pct_normalised !== null ? parseFloat(snap.diff_pct_normalised) : null,
+          at: snap?.scraped_at, url: snap?.competitor_url,
+        };
+      });
+      const conf = cells.filter(c => c.confirmed && c.diff !== null);
+      const worst = conf.length ? conf.reduce((a, b) => (b.diff < a.diff ? b : a)) : null;
+      return { sku: s, cells, nConfirmed: conf.length, nReview: cells.filter(c => c.status === 'review').length, worst };
+    });
+    slcRenderResults(comps);
+  } catch (e) {
+    $('slc-results').innerHTML = `<div style="color:var(--red)">Could not load results: ${e.message}</div>`;
+  }
+}
+
+function slcRenderResults(comps) {
+  const priced = slcRows.filter(r => r.nConfirmed).length;
+  const dearer = slcRows.filter(r => r.worst && r.worst.diff < -T.par).length;
+  const head = comps.map(c => `<th title="${c.domain || ''}">${c.name}</th>`).join('');
+  const body = slcRows.map(r => {
+    const s = r.sku;
+    const cells = r.cells.map(c => {
+      if (c.ex === null) {
+        return `<td style="color:var(--t3);font-size:11px">${c.status === 'review' ? '<span title="Match waiting in Match Manager" style="color:var(--amb)"><i class="ti ti-eye"></i> review</span>' : '—'}</td>`;
+      }
+      const tag = c.confirmed ? '' : ' <span title="Unconfirmed match — check in Match Manager" style="color:var(--amb);font-size:10px">(review)</span>';
+      const link = c.url ? `<a href="${c.url}" target="_blank" rel="noopener" style="color:inherit">${fmtPrice(c.ex)}</a>` : fmtPrice(c.ex);
+      return `<td style="white-space:nowrap">${link}${tag}<div><span class="diff ${diffClass(c.diff)}">${diffLabel(c.diff)}</span> <span style="font-size:10px;color:var(--t3)">${ts(c.at)}</span></div></td>`;
+    }).join('');
+    const w = r.worst;
+    return `<tr class="${w ? rowClass(w.diff) : ''}">
+      <td>${skuLink({ sku_id: s.sku_id, short_title: s.short_title, product_url: s.product_url, slug: s.slug })}</td>
+      <td style="white-space:nowrap">${fmtPrice(s.price_ex_vat)}${s.on_sale ? ' <span class="badge b-a" title="On sale — list ' + fmtPrice(s.regular_price_ex_vat) + '">sale</span>' : ''} ${stockBadge((s.availability || '').trim().replace(/ /g, '_'))}</td>
+      <td>${r.nConfirmed}${r.nReview ? ` <span style="color:var(--amb);font-size:11px">+${r.nReview} review</span>` : ''}</td>
+      <td style="white-space:nowrap">${w ? `<span class="diff ${diffClass(w.diff)}">${diffLabel(w.diff)}</span> <span style="font-size:11px;color:var(--t2)">${w.comp.name}</span>` : '—'}</td>
+      ${cells}</tr>`;
+  }).join('');
+  $('slc-results').innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
+      <div style="font-size:13px"><strong>${slcRows.length}</strong> SKUs · <strong>${priced}</strong> with a confirmed competitor price · <strong>${dearer}</strong> where a competitor is cheaper</div>
+      <div id="slc-legend" class="legend" style="margin-left:auto"></div>
+      <button class="btn sm" onclick="slcExport()"><i class="ti ti-download"></i> Export CSV</button>
+    </div>
+    <div class="tw"><table><thead><tr><th>SKU</th><th>Our price (ex VAT)</th><th>Competitors priced</th><th>Biggest gap</th>${head}</tr></thead>
+    <tbody>${body}</tbody></table></div>
+    <div style="font-size:11px;color:var(--t3);margin-top:8px">Gap = competitor price vs ours, VAT- and pack-normalised. Negative = competitor cheaper. "(review)" prices come from matches not yet confirmed in Match Manager and are not counted in the summary.</div>`;
+  buildLegend('slc-legend');
+}
+
+function slcExport() {
+  if (!slcRows.length) return;
+  const comps = slcRows[0].cells.map(c => c.comp);
+  const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const hdr = ['sku', 'title', 'our_price_ex_vat', 'on_sale', 'availability', 'competitors_priced', 'biggest_gap_pct', 'biggest_gap_competitor',
+    ...comps.flatMap(c => [`${c.name} price_ex_vat`, `${c.name} gap_pct`, `${c.name} status`])];
+  const lines = slcRows.map(r => [r.sku.sku_id, r.sku.short_title, r.sku.price_ex_vat, r.sku.on_sale ? 'yes' : '', r.sku.availability,
+    r.nConfirmed, r.worst ? r.worst.diff : '', r.worst ? r.worst.comp.name : '',
+    ...r.cells.flatMap(c => [c.ex !== null ? c.ex.toFixed(2) : '', c.diff ?? '', c.status || 'no match'])].map(esc).join(','));
+  const blob = new Blob([[hdr.map(esc).join(','), ...lines].join('\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `pricewatch-sku-list-check-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}

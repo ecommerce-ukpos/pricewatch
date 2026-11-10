@@ -36,6 +36,8 @@ ENVIRONMENT VARIABLES
   ANTHROPIC_API_KEY     required (for Claude matching step)
   CF_PROXY_URL          required for blocked domains (vkf-renzel etc.)
   COMPETITOR_IDS        comma-separated IDs to run (required — run one at a time)
+  DISCOVER_SKUS         optional comma-separated SKU IDs — only match competitor pages
+                        against these SKUs (SKU-list check from the app)
   DISCOVER_FORCE        'true' to re-run already-matched pairs (default false)
   MIN_CONFIDENCE        minimum confidence to write a match (default 40)
   MAX_PAGES             max product pages to fetch per competitor (default 2000)
@@ -84,6 +86,7 @@ BATCH_SIZE        = int(os.getenv("ANTHROPIC_BATCH_SIZE", "20"))
 AMBIGUITY_MARGIN  = 10  # write top 2 if scores within this many points
 
 _competitor_ids = [int(i.strip()) for i in os.getenv("COMPETITOR_IDS", "").split(",") if i.strip()]
+_discover_skus  = [s.strip() for s in re.split(r"[,\s;]+", os.getenv("DISCOVER_SKUS", "")) if s.strip()]
 
 # ── Domains routed via Cloudflare Worker ───────────────────────────────────────
 CF_PROXY_DOMAINS = {
@@ -1079,6 +1082,22 @@ def run_discovery():
             s["_price"] = 0.0
 
     log.info(f"Loaded {len(all_skus)} SKUs")
+
+    # ── Optional SKU-list mode (DISCOVER_SKUS) ────────────────────────────────
+    # Restricts matching to the listed SKUs only (e.g. a slow-sellers price check sent from
+    # the app's "SKU list check" screen). Competitor pages are still harvested as normal;
+    # they are simply only scored against these SKUs. Matches still land as 'review'.
+    if _discover_skus:
+        wanted = {s.upper() for s in _discover_skus}
+        all_skus = [s for s in all_skus if s["sku_id"].upper() in wanted]
+        found = {s["sku_id"].upper() for s in all_skus}
+        missing = sorted(wanted - found)
+        log.info(f"SKU-list mode: matching against {len(all_skus)} of {len(wanted)} requested SKUs")
+        if missing:
+            log.warning(f"  {len(missing)} requested SKUs not active in skus table: {', '.join(missing[:50])}")
+        if not all_skus:
+            log.error("SKU-list mode: none of the requested SKUs are active — nothing to do")
+            return
 
     # ── Load existing confirmed matches to never overwrite ─────────────────────
     confirmed = sb.table("competitor_matches").select(

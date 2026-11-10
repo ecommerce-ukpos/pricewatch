@@ -49,6 +49,7 @@
       <div class="nav-item" id="nav-skus" onclick="go('skus')" title="All SKUs"><i class="ti ti-tag"></i> <span class="nav-label">All SKUs</span><span class="nav-tip">All SKUs</span></div>
       <div class="nav-item" id="nav-bycat" onclick="go('bycat')" title="By category"><i class="ti ti-package"></i> <span class="nav-label">By category</span><span class="nav-tip">By category</span></div>
       <div class="nav-item" id="nav-bycomp" onclick="go('bycomp')" title="By competitor"><i class="ti ti-building-store"></i> <span class="nav-label">By competitor</span><span class="nav-tip">By competitor</span></div>
+      <div class="nav-item" id="nav-skucheck" onclick="go('skucheck')" title="SKU list check"><i class="ti ti-list-search"></i> <span class="nav-label">SKU list check</span><span class="nav-tip">SKU list check</span></div>
       <div class="nav-sect">System</div>
       <div class="nav-item" id="nav-schedule" onclick="go('schedule')" title="Sync schedule"><i class="ti ti-clock"></i> <span class="nav-label">Sync schedule</span><span class="nav-tip">Sync schedule</span></div>
       <div class="nav-item" id="nav-settings" onclick="go('settings')" title="Settings"><i class="ti ti-settings-2"></i> <span class="nav-label">Settings</span><span class="nav-tip">Settings</span></div>
@@ -252,6 +253,45 @@
       </div>
     </div>
 
+    <!-- ── SKU LIST CHECK ── -->
+    <div id="p-skucheck" class="panel">
+      <div class="cmdbar">
+        <div>
+          <div class="cmd-title">SKU list check</div>
+          <div class="cmd-sub">Paste or upload a list of SKUs, choose competitors, and run a targeted price check</div>
+        </div>
+      </div>
+      <div class="content" style="overflow-y:auto">
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px;align-items:start">
+          <div class="card">
+            <div class="card-hd"><div class="card-title">SKUs</div>
+              <label class="btn sm" style="cursor:pointer"><i class="ti ti-upload"></i> Upload CSV
+                <input type="file" accept=".csv,.txt,text/csv,text/plain" style="display:none" onchange="slcFile(this)"></label>
+            </div>
+            <textarea id="slc-text" rows="9" placeholder="One SKU per line, or comma separated. CSV files: a column headed &quot;sku&quot; is used, otherwise the first column." style="width:100%;box-sizing:border-box;font-family:'SF Mono',monospace;font-size:12px;padding:8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);color:var(--text);resize:vertical" oninput="debouncedSlcParse()"></textarea>
+            <div id="slc-parse" style="font-size:12px;color:var(--t2);margin-top:6px"></div>
+            <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+              <button class="btn sm prim" onclick="slcRun(this)"><i class="ti ti-player-play"></i> Run price check</button>
+              <button class="btn sm" onclick="slcResults()"><i class="ti ti-table"></i> Show results</button>
+            </div>
+            <div id="slc-status" style="font-size:12px;color:var(--t2);margin-top:8px"></div>
+          </div>
+          <div class="card">
+            <div class="card-hd"><div class="card-title">Competitors</div><span id="slc-comp-count" style="font-size:11px;color:var(--t2)"></span></div>
+            <div style="display:flex;gap:6px;margin-bottom:6px">
+              <button class="btn sm" onclick="slcAllComps(true)">All</button>
+              <button class="btn sm" onclick="slcAllComps(false)">None</button>
+            </div>
+            <div id="slc-comps" style="max-height:340px;overflow-y:auto"></div>
+          </div>
+        </div>
+        <div class="card" style="margin-top:14px">
+          <div class="card-hd"><div class="card-title">Results</div></div>
+          <div id="slc-results" style="font-size:12px;color:var(--t2)">Press <strong>Show results</strong> to see the latest competitor prices for this list.</div>
+        </div>
+      </div>
+    </div>
+
     <!-- ── COMPETITOR DETAIL PAGE ── -->
     <div id="p-comp-detail" class="panel">
       <div class="url-bar">
@@ -353,6 +393,7 @@
             <div class="card-hd"><div class="card-title">Nightly configuration</div></div>
             <div class="sched-row"><div class="sched-ico"><i class="ti ti-clock" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">Matched run</div><div style="color:var(--t2)">Re-scrapes all confirmed URLs in one go — every 3 days</div></div><strong>Mon/Thu/Sun 1am</strong></div>
             <div class="sched-row"><div class="sched-ico"><i class="ti ti-search" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">Batch search run</div><div style="color:var(--t2)">Finds new matches — Mon–Fri, 570 SKUs/day</div></div><strong>03:00 am</strong></div>
+            <div class="sched-row"><div class="sched-ico"><i class="ti ti-file-import" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">UKPOS price feed</div><div style="color:var(--t2)">Our prices &amp; stock from ukpos.com/feeds/google-product-feed-v3.xml</div></div><strong>Mon 00:00</strong></div>
             <div class="sched-row"><div class="sched-ico"><i class="ti ti-cpu" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">Parallel workers</div><div style="color:var(--t2)">Concurrent browser contexts</div></div><strong>5</strong></div>
             <div class="sched-row"><div class="sched-ico"><i class="ti ti-trending-up" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">Throughput</div><div style="color:var(--t2)">~20k pairs/week · full pass in ~5 days</div></div><span class="badge b-g">Weekly</span></div>
             <div class="sched-row"><div class="sched-ico"><i class="ti ti-device-mobile" style="font-size:14px"></i></div><div style="flex:1"><div style="font-weight:500">User-agent rotation</div><div style="color:var(--t2)">Chrome, Safari, Firefox</div></div><span class="badge b-g">On</span></div>
