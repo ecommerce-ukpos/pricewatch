@@ -129,6 +129,9 @@
         <div class="cmd-actions">
           <input type="search" class="search" id="review-search" placeholder="Filter by SKU or competitor…" oninput="filterReview()" style="min-width:180px" autocomplete="new-password" spellcheck="false">
           <select id="review-comp-filter" onchange="filterReview()"><option value="">All competitors</option></select>
+          <label id="review-list-wrap" title="Only show matches for the SKUs on the SKU list check screen" style="display:flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap;cursor:pointer;padding:4px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface)">
+            <input type="checkbox" id="review-list-filter" onchange="filterReview()"> SKU list only <span id="review-list-n" style="color:var(--t3)"></span>
+          </label>
         </div>
       </div>
       <!-- Status tabs -->
@@ -273,6 +276,7 @@
             <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
               <button class="btn sm prim" onclick="slcRun(this)"><i class="ti ti-player-play"></i> Run price check</button>
               <button class="btn sm" onclick="slcResults()"><i class="ti ti-table"></i> Show results</button>
+              <button class="btn sm" onclick="slcOpenReview()"><i class="ti ti-checklist"></i> Review these in Match Manager</button>
             </div>
             <div id="slc-status" style="font-size:12px;color:var(--t2);margin-top:8px"></div>
           </div>

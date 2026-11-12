@@ -897,10 +897,17 @@ function filterReview() {
     (r.competitor_title||'').toLowerCase().includes(q)
   );
   if (comp) rows = rows.filter(r => r.competitors?.name === comp);
+  const listSkus = slcSavedList();
+  $('review-list-n').textContent = listSkus.length ? `(${listSkus.length})` : '(empty)';
+  const listOn = !!$('review-list-filter')?.checked && listSkus.length > 0;
+  if (listOn) {
+    const set = new Set(listSkus.map(s => s.toUpperCase()));
+    rows = rows.filter(r => set.has((r.sku_id || '').toUpperCase()));
+  }
 
   const showing = rows.length;
   const tabLabel = {review:'needs review',auto:'AI matched',human:'confirmed',amended:'needs rescrape',rejected:'rejected'}[matchTab];
-  $('review-sub').textContent = (q||comp) ? `${showing} matches (filtered)` : `${showing} ${tabLabel}`;
+  $('review-sub').textContent = (q||comp||listOn) ? `${showing} ${tabLabel}${listOn ? ' for your SKU list' : ''} (filtered)` : `${showing} ${tabLabel}`;
 const sendAllBtn = $('send-all-rescrape');
   if (matchTab === 'amended') {
     if (!sendAllBtn) {
@@ -2675,6 +2682,10 @@ let slcSelComps = new Set();     // chosen competitor ids
 let slcRows = [];                // last rendered result rows (for export)
 const debouncedSlcParse = debounce(() => slcParse(), 250);
 const SLC_KEY = 'pw_sku_list_check_v1';
+const SLC_LIST_KEY = 'pw_sku_list_skus_v1';   // canonical sku_ids of the current list, for Match Manager
+function slcSavedList() {
+  try { return JSON.parse(localStorage.getItem(SLC_LIST_KEY) || '[]'); } catch (e) { return []; }
+}
 const SLC_MAX = 300;
 
 function slcSave() {
@@ -2759,6 +2770,7 @@ function slcParse() {
     if (seen.has(hit.sku_id)) return;
     seen.add(hit.sku_id); slcList.push(hit.sku_id);
   });
+  try { localStorage.setItem(SLC_LIST_KEY, JSON.stringify(slcList)); } catch (e) {}
   const over = slcList.length > SLC_MAX;
   $('slc-parse').innerHTML = `
     <strong>${slcList.length}</strong> SKUs recognised${over ? ` <span style="color:var(--red)">(max ${SLC_MAX} per check)</span>` : ''}
@@ -3055,4 +3067,15 @@ async function slcRefreshProgress(force) {
   } finally {
     slcProgressBusy = false;
   }
+}
+
+// SKU list check → open Match Manager filtered to the list (Needs review tab)
+function slcOpenReview() {
+  slcParse();
+  if (!slcList.length) return alert('Add some SKUs first.');
+  const cb = $('review-list-filter');
+  if (cb) cb.checked = true;
+  go('review');
+  if (typeof setMatchTab === 'function') setMatchTab('review');
+  if (typeof filterReview === 'function' && typeof reviewAllRows !== 'undefined' && reviewAllRows.length) filterReview();
 }
