@@ -3260,7 +3260,7 @@ const csOosSince = r => r.oos_since
 const csLevel = v => (v === null || v === undefined) ? '—' : Number(v).toLocaleString('en-GB');
 
 const CS_HEAD = {
-  in:  ['Their code', 'Our SKU', 'Name', 'Price (ex VAT)', 'UKPOS price (if matched)', 'Their price is', 'Stock level now', 'Previous stock level', 'Previous check', 'Est daily sales'],
+  in:  ['Their code', 'Our SKU', 'Name', 'Price (ex VAT)', 'UKPOS price (if matched)', 'Their price is', 'Stock level now', 'Previous stock level', 'Previous check date', 'Est daily sales'],
   oos: ['Their code', 'Our SKU', 'Name', 'Price (ex VAT)', 'OOS since'],
 };
 
@@ -3350,7 +3350,7 @@ function csExport() {
   const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const head = csView === 'oos'
     ? ['Their code','Our SKU','Name','Price ex VAT','OOS since','OOS since first check','URL']
-    : ['Their code','Our SKU','Name','Price ex VAT','UKPOS price','Their price is (%; minus = cheaper than us)','Their price is','Stock level now','Previous stock level','Previous check','Est daily sales','URL'];
+    : ['Their code','Our SKU','Name','Price ex VAT','UKPOS price','Their price is (%; minus = cheaper than us)','Their price is','Stock level now','Previous stock level','Previous check date','Est daily sales','URL'];
   const body = rows.map(r => {
     if (csView === 'oos') return [r.harrison_sku, (r.ukpos_skus || []).join(' '), r.product_name, r.price_ex_vat, r.oos_since, r.seen_in_stock_before ? '' : 'yes', r.competitor_url];
     const c = csCompare(r), d = csDaily(r).replace(/<[^>]+>/g, '');
