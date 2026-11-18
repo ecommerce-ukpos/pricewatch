@@ -65,6 +65,7 @@ on:
           - levels
           - oos_catalogue
           - levels_catalogue
+          - probe       # diagnostic: log option/variant structure of Harrison products, writes nothing
 jobs:
   run:
     runs-on: ubuntu-22.04
@@ -138,4 +139,4 @@ jobs:
           SCRAPER_WORKERS:      ${{ github.event.inputs.scraper_workers || '3' }}
           SCRAPER_DELAY_MIN:    '2'
           SCRAPER_DELAY_MAX:    '5'
-        run: python scraper/harrison_stock.py
+        run: python scraper/${{ github.event.inputs.harrison_mode == 'probe' && 'harrison_probe.py' || 'harrison_stock.py' }}
