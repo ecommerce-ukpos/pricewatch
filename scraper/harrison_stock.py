@@ -129,7 +129,16 @@ def _price(pa: dict, key: str) -> Optional[float]:
 
 def wanted_sku(url: str) -> Optional[str]:
     vals = parse_qs(urlparse(url).query).get("sku")
-    return vals[0].strip() if vals and vals[0].strip() else None
+    v = vals[0].strip().strip("{}").strip() if vals else ""
+    return v or None
+
+
+def clean_url(url: str) -> str:
+    """Drop tracking params (srsltid etc.) and trailing-slash differences; keep only ?sku=."""
+    u = urlparse(url.strip())
+    path = u.path if u.path.endswith("/") else u.path + "/"
+    sku = wanted_sku(url)
+    return f"{u.scheme or 'https'}://{u.netloc}{path}" + (f"?sku={sku}" if sku else "")
 
 
 def same_sku(a: Optional[str], b: Optional[str]) -> bool:
@@ -144,7 +153,7 @@ def urls_from_matches(sb: Client) -> list[str]:
         rows = (sb.table("competitor_matches").select("competitor_url")
                   .eq("competitor_id", HARRISON_ID)
                   .range(start, start + 999).execute().data or [])
-        urls.update(r["competitor_url"] for r in rows if r.get("competitor_url"))
+        urls.update(clean_url(r["competitor_url"]) for r in rows if r.get("competitor_url"))
         if len(rows) < 1000:
             break
         start += 1000
@@ -168,7 +177,7 @@ async def urls_from_sitemap(context: BrowserContext) -> list[str]:
             log.warning(f"  sitemap {sm} → HTTP {r.status}")
             continue
         for loc in re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", await r.text()):
-            urls.add(loc.replace("&amp;", "&"))
+            urls.add(clean_url(loc.replace("&amp;", "&")))
     return sorted(urls)
 
 
