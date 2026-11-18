@@ -26,31 +26,32 @@ log = logging.getLogger("harrison_probe")
 BASE = "https://www.harrisonproducts.com"
 URLS = [
     "/adhesive-narrow-base-sign-grippers/",
-    "/products/adhesive-hook-and-loop-coins-for-card/",
-    "/pre-cut-steel-ball-chain-connector-2-4mm-nickel/",
     "/adhesive-hook-and-loop-tape-for-card-25m-roll/",
     "/84-x-184mm-hinged-front-loading-shelf-barkers-pack-of-100/",
-    "/30mm-data-strips-with-9mm-red-liner-tape-cut-to-order/",
 ]
 
 STATE_JS = r"""
 () => {
   const q = s => document.querySelector(s);
   const t = s => ((q(s) || {}).textContent || '').replace(/\s+/g, ' ').trim();
-  const prices = [...document.querySelectorAll('.productView [data-product-price-without-tax], .productView [data-product-price-with-tax], .productView .price--withoutTax, .productView .price--withTax')]
-                  .map(e => e.className + ' = ' + e.textContent.replace(/\s+/g, ' ').trim()).slice(0, 6);
-  // Stock & Lead Times block
-  let block = null;
-  for (const el of document.querySelectorAll('.productView *')) {
-    if (el.children.length < 60 && /Stock\s*&\s*Lead\s*Times/i.test(el.textContent) && el.textContent.length < 3000) block = el;
-  }
+  const prices = [...document.querySelectorAll('.productView [data-product-price-without-tax], .productView .price--withoutTax')]
+                  .map(e => e.textContent.replace(/\s+/g, ' ').trim()).slice(0, 4);
+  // Stock & Lead Times: climb from the heading until the container holds more than the heading
+  let lead = null;
+  const h = [...document.querySelectorAll('h1,h2,h3,h4,h5,strong,span,div')].find(e => e.children.length <= 2 && /Stock\s*&\s*Lead\s*Times/i.test(e.textContent));
+  if (h) { let el = h; for (let i = 0; i < 5 && el.parentElement; i++) { el = el.parentElement; if (el.innerText.length > h.innerText.length + 20) break; } lead = el; }
+  const sel = q('form[data-cart-item-add] [data-product-attribute] select, form[data-cart-item-add] [data-product-attribute] input[type=radio]');
+  const scripts = [...document.scripts].map(sc => sc.textContent).filter(x => /variant|stock_level|inventory/i.test(x) && x.length < 200000)
+                   .map(x => x.slice(0, 400));
+  const tables = [...document.querySelectorAll('.productView table, [class*="variant"] table, table[class*="variant"], table')]
+                   .map(tb => tb.innerText.slice(0, 700)).slice(0, 3);
   return {
     sku: t('[data-product-sku]'), stock: t('[data-product-stock]'), prices,
-    lead_text: block ? block.innerText.slice(0, 1200) : null,
-    lead_html: block ? block.outerHTML.replace(/\s+/g, ' ').slice(0, 2500) : null,
+    lead_text: lead ? lead.innerText.slice(0, 1500) : null,
+    lead_html: lead ? lead.outerHTML.replace(/\s+/g, ' ').slice(0, 3000) : null,
     bc: (window.BCData || {}).product_attributes || null,
-    has_form: !!q('form[data-cart-item-add]'),
-    body_head: q('form[data-cart-item-add]') ? null : (document.body.innerText || '').slice(0, 600),
+    option_visible: sel ? { display: getComputedStyle(sel).display, vis: getComputedStyle(sel).visibility, w: sel.offsetWidth, h: sel.offsetHeight } : null,
+    scripts, tables,
   };
 }
 """
@@ -108,16 +109,23 @@ async def main():
                 for o in [x for x in opts if x["how"] in ("select", "radio")][:8]:
                     responses.clear()
                     try:
-                        if o["how"] == "select":
-                            await page.select_option(f'select[name="{o["name"]}"]', o["value"])
-                        else:
-                            await page.click(f'label[for="{o["id"]}"]', timeout=5000)
+                        await page.evaluate("""(o) => {
+                          const form = document.querySelector('form[data-cart-item-add]');
+                          if (o.how === 'select') {
+                            const el = form.querySelector(`select[name="${o.name}"]`);
+                            el.value = o.value; el.dispatchEvent(new Event('change', { bubbles: true }));
+                          } else {
+                            const el = form.querySelector(`#${CSS.escape(o.id)}`);
+                            el.checked = true; el.dispatchEvent(new Event('change', { bubbles: true }));
+                            el.dispatchEvent(new Event('input', { bubbles: true }));
+                          }
+                        }""", o)
                     except Exception as e:
                         log.info("PROBE_JSON " + json.dumps({"url": url, "stage": "pick-fail", "opt": o, "err": str(e)[:200]}))
                         continue
                     await page.wait_for_timeout(2500)
                     st = await page.evaluate(STATE_JS)
-                    st.pop("lead_html", None); st.pop("body_head", None)
+                    st.pop("lead_html", None); st.pop("scripts", None); st.pop("tables", None)
                     log.info("PROBE_JSON " + json.dumps({"url": url, "stage": "pick", "opt": {k: o[k] for k in ("label", "text", "how")},
                                                           "state": st, "responses": responses[:]}, ensure_ascii=False))
             except Exception as e:
