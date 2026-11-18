@@ -3257,11 +3257,16 @@ const csName = r => `<a href="${csEsc(r.competitor_url)}" target="_blank" rel="n
 const csOosSince = r => r.oos_since
   ? (r.seen_in_stock_before ? csDay(r.oos_since) : `${csDay(r.oos_since)} <span style="font-size:11px;color:var(--t3)">(first check)</span>`)
   : '—';
+// Next stock due: earliest Harrison delivery dated today or later, with quantity.
+// '(range)' = product has sizes/colours and Harrison doesn't say which size the delivery is for.
+const csDue = r => !r.next_due_date ? '—'
+  : `${csDay(r.next_due_date)}${r.next_due_qty ? ` <span style="color:var(--t3)">· ${Number(r.next_due_qty).toLocaleString('en-GB')}</span>` : ''}` +
+    (r.due_scope === 'range' ? ` <span style="font-size:11px;color:var(--t3)" title="Harrison lists deliveries for the whole product range, not per size or colour">(range)</span>` : '');
 const csLevel = v => (v === null || v === undefined) ? '—' : Number(v).toLocaleString('en-GB');
 
 const CS_HEAD = {
-  in:  ['Their code', 'Our SKU', 'Name', 'Price (ex VAT)', 'UKPOS price (if matched)', 'Their price is', 'Stock level now', 'Previous stock level', 'Previous check date', 'Est daily sales'],
-  oos: ['Their code', 'Our SKU', 'Name', 'Price (ex VAT)', 'OOS since'],
+  in:  ['Their code', 'Our SKU', 'Name', 'Price (ex VAT)', 'UKPOS price (if matched)', 'Their price is', 'Stock level now', 'Previous stock level', 'Previous check date', 'Est daily sales', 'Next stock due'],
+  oos: ['Their code', 'Our SKU', 'Name', 'Price (ex VAT)', 'OOS since', 'Next stock due'],
 };
 
 function csRender() {
@@ -3286,7 +3291,7 @@ function csRender() {
       body = emptyRow(!csRows.length ? 'No stock data yet — press <strong>Check OOS items</strong>.'
         : csView === 'oos' ? 'No out-of-stock items.' : 'No in-stock items.');
     } else if (csView === 'oos') {
-      body = rows.map(r => `<tr><td>${csTheirCode(r)}</td><td>${csOurSku(r)}</td><td>${csName(r)}</td><td>${csMoney(r.price_ex_vat)}</td><td>${csOosSince(r)}</td></tr>`).join('');
+      body = rows.map(r => `<tr><td>${csTheirCode(r)}</td><td>${csOurSku(r)}</td><td>${csName(r)}</td><td>${csMoney(r.price_ex_vat)}</td><td>${csOosSince(r)}</td><td>${csDue(r)}</td></tr>`).join('');
     } else {
       body = rows.map(r => {
         const c = csCompare(r);
@@ -3294,7 +3299,7 @@ function csRender() {
           <td>${c.ours === null ? '—' : csMoney(c.ours)}</td>
           <td>${csDiffCell(c)}</td>
           <td>${csLevel(r.stock_level)}</td><td>${csLevel(r.prev_stock_level)}</td>
-          <td>${r.prev_scraped_at ? csWhen(r.prev_scraped_at) : '—'}</td><td>${csDaily(r)}</td></tr>`;
+          <td>${r.prev_scraped_at ? csWhen(r.prev_scraped_at) : '—'}</td><td>${csDaily(r)}</td><td>${csDue(r)}</td></tr>`;
       }).join('');
     }
   }
@@ -3349,14 +3354,14 @@ function csExport() {
   if (!rows.length) return alert('Nothing to export.');
   const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const head = csView === 'oos'
-    ? ['Their code','Our SKU','Name','Price ex VAT','OOS since','OOS since first check','URL']
-    : ['Their code','Our SKU','Name','Price ex VAT','UKPOS price','Their price is (%; minus = cheaper than us)','Their price is','Stock level now','Previous stock level','Previous check date','Est daily sales','URL'];
+    ? ['Their code','Our SKU','Name','Price ex VAT','OOS since','OOS since first check','Next stock due','Next due qty','Due for','URL']
+    : ['Their code','Our SKU','Name','Price ex VAT','UKPOS price','Their price is (%; minus = cheaper than us)','Their price is','Stock level now','Previous stock level','Previous check date','Est daily sales','Next stock due','Next due qty','Due for','URL'];
   const body = rows.map(r => {
-    if (csView === 'oos') return [r.harrison_sku, (r.ukpos_skus || []).join(' '), r.product_name, r.price_ex_vat, r.oos_since, r.seen_in_stock_before ? '' : 'yes', r.competitor_url];
+    if (csView === 'oos') return [r.harrison_sku, (r.ukpos_skus || []).join(' '), r.product_name, r.price_ex_vat, r.oos_since, r.seen_in_stock_before ? '' : 'yes', r.next_due_date, r.next_due_qty, r.next_due_date ? (r.due_scope === 'range' ? 'product range' : 'this item') : '', r.competitor_url];
     const c = csCompare(r), d = csDaily(r).replace(/<[^>]+>/g, '');
     return [r.harrison_sku, (r.ukpos_skus || []).join(' '), r.product_name, r.price_ex_vat, c.ours,
       c.diff === null ? '' : c.diff.toFixed(1), c.diff === null ? '' : csDiffWords(c.diff), r.stock_level, r.prev_stock_level, r.prev_scraped_at,
-      d === '—' ? '' : d, r.competitor_url];
+      d === '—' ? '' : d, r.next_due_date, r.next_due_qty, r.next_due_date ? (r.due_scope === 'range' ? 'product range' : 'this item') : '', r.competitor_url];
   }).map(row => row.map(q).join(','));
   const blob = new Blob([[head.map(q).join(','), ...body].join('\n')], { type: 'text/csv' });
   const a = document.createElement('a');

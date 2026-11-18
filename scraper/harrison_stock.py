@@ -32,6 +32,26 @@ Where the data comes from (BigCommerce Stencil):
 Accuracy rule: for ?sku=<code> variant URLs, figures are only kept when the
 returned SKU matches <code>. Otherwise the row is written with stock_status='error'
 and no price/stock, rather than storing the default variant's figures.
+
+Products with sizes/colours (kind):
+  Harrison's option pickers are driven by a page builder (Zeno), so options can't be
+  clicked. Instead the variant codes are read from the page (spec table "Product Code"
+  row + ProductGroup JSON-LD) and each variant is opened as <parent>/?sku=<code>, which
+  Harrison renders with that variant's own price and stock (verified by probe).
+    single         one product, one code                 → its own row
+    variant        a size/colour opened via ?sku=<code>   → its own row
+    variant_parent the parent page of a product with options → written with
+                   stock_status 'unknown' (its "from" price is not a real price) and
+                   expanded into variant rows
+    options_unsplit options found but no variant codes   → 'unknown', not listed
+    cut_to_order   no basket (e.g. "Cut to order" strips) → 'unknown', not listed
+
+Next stock due (from the "Stock & Lead Times" block, lines like "2,000  Due in 19/11/2026"):
+  due_in        all listed deliveries [{qty, date}]
+  next_due_date / next_due_qty  earliest delivery dated today or later
+  due_scope     'item'  = the lines belong to this product
+                'range' = product has sizes/colours; Harrison shows the same delivery list on
+                          every size, so the size each delivery is for is not stated
 """
 
 import asyncio
@@ -88,7 +108,28 @@ PAGE_JS = r"""
       }
     } catch (e) {}
   });
+  // Add-to-basket form and variant option fields
+  const form = q('form[data-cart-item-add]');
+  const variantFields = form ? form.querySelectorAll('[data-product-attribute^="set-"], [data-product-attribute="swatch"]').length : 0;
+  // Variant codes: spec table "Product Code" row, and every "sku" in the ProductGroup JSON-LD
+  const codes = [];
+  document.querySelectorAll('table tr').forEach(tr => {
+    const cells = [...tr.children].map(c => c.textContent.trim());
+    if (/^product code$/i.test(cells[0] || '')) codes.push(...cells.slice(1).filter(Boolean));
+  });
+  document.querySelectorAll('script[type="application/ld+json"]').forEach(sc => {
+    const t = sc.textContent || '';
+    if (/"ProductGroup"/.test(t)) for (const m of t.matchAll(/"sku"\s*:\s*"([^"]+)"/g)) codes.push(m[1]);
+  });
+  // Stock & Lead Times lines
+  const viewTxt = (q('.productView') || document.body).innerText || '';
+  const li = viewTxt.search(/Stock\s*&\s*Lead\s*Times/i);
+  const lead = li >= 0 ? viewTxt.slice(li, li + 1500).split('\n').map(x => x.trim()).filter(Boolean) : [];
   return {
+    has_form: !!form,
+    variant_fields: variantFields,
+    variant_codes: [...new Set(codes)],
+    lead,
     title: txt('h1.productView-title') || txt('h1') ||
            ((q('meta[property="og:title"]') || {}).content || '') || document.title,
     pa: bc.product_attributes || null,
@@ -149,6 +190,32 @@ def clean_url(url: str) -> str:
 
 def same_sku(a: Optional[str], b: Optional[str]) -> bool:
     return bool(a and b and a.strip().lower() == b.strip().lower())
+
+
+def parse_due(lines: list[str]) -> list[dict]:
+    """'2,000\tDue in 19/11/2026' → [{'qty': 2000, 'date': '2026-11-19'}] (stops at 'Need it now?')."""
+    out = []
+    for ln in lines or []:
+        if re.match(r"^need it now", ln, re.I):
+            break
+        m = re.match(r"^([\d,]+)\s+Due in\s+(\d{1,2})/(\d{1,2})/(\d{4})", ln, re.I)
+        if m:
+            qty = int(m.group(1).replace(",", ""))
+            d, mth, y = int(m.group(2)), int(m.group(3)), int(m.group(4))
+            out.append({"qty": qty, "date": f"{y:04d}-{mth:02d}-{d:02d}"})
+    return out
+
+
+def next_due(due: list[dict]) -> tuple[Optional[str], Optional[int]]:
+    today = datetime.now(timezone.utc).date().isoformat()
+    future = sorted([x for x in due if x["date"] >= today], key=lambda x: x["date"])
+    if not future:
+        return None, None
+    first = future[0]["date"]
+    return first, sum(x["qty"] for x in future if x["date"] == first)
+
+
+CUT_RE = re.compile(r"cut[\s-]*to[\s-]*(order|size|length)", re.I)
 
 
 # ── URL sources ────────────────────────────────────────────────────────────────
@@ -215,6 +282,7 @@ async def read_product(context: BrowserContext, url: str) -> dict:
         "competitor_url": url, "product_name": None, "harrison_sku": None,
         "price_ex_vat": None, "price_inc_vat": None, "stock_level": None,
         "stock_status": "unknown", "error_message": None,
+        "kind": None, "due_in": None, "next_due_date": None, "next_due_qty": None, "due_scope": None,
     }
     attr_payloads: list[dict] = []
 
@@ -248,6 +316,37 @@ async def read_product(context: BrowserContext, url: str) -> dict:
     row["product_name"] = (info.get("title") or "").strip()[:300] or None
     pa   = info.get("pa") or {}
     want = wanted_sku(url)
+
+    # Next stock due
+    due = parse_due(info.get("lead") or [])
+    row["due_in"] = due or None
+    row["next_due_date"], row["next_due_qty"] = next_due(due)
+    has_options = (info.get("variant_fields") or 0) > 0
+    row["due_scope"] = "range" if has_options else "item"
+
+    # No basket → cut to order / enquiry-only: not a stocked product
+    if not info.get("has_form"):
+        row["kind"] = "cut_to_order" if CUT_RE.search(f"{url} {row['product_name'] or ''}") else "no_basket"
+        row["harrison_sku"] = pa.get("sku") or info.get("sku_dom") or None
+        row["error_message"] = "Cut to order — no stock or fixed price" if row["kind"] == "cut_to_order" \
+                               else "No add-to-basket on page — no stock or fixed price"
+        return row
+
+    # Parent page of a product with sizes/colours: never use its "from" price; expand to variants
+    if has_options and not want:
+        parent_sku = (pa.get("sku") or "").strip()
+        codes = [c for c in (info.get("variant_codes") or []) if c and c.strip() != parent_sku]
+        row["harrison_sku"] = parent_sku or None
+        if codes:
+            row["kind"] = "variant_parent"
+            row["error_message"] = f"Has options — split into {len(codes)} variants"
+            row["_expand"] = codes
+        else:
+            row["kind"] = "options_unsplit"
+            row["error_message"] = "Has options but no variant codes found on page"
+        return row
+
+    row["kind"] = "variant" if want and has_options else "single"
 
     # Pick the attribute set that belongs to this URL
     data = None
@@ -320,8 +419,10 @@ async def main():
 
             match_urls, matched = load_matches(sb)
             urls = match_urls if SCOPE == "matches" else await urls_from_sitemap(contexts[0])
+            skip: set[str] = set()
             if CHECK == "levels":
                 oos = last_out_of_stock(sb)
+                skip = oos
                 before = len(urls)
                 urls = [u for u in urls if u not in oos]
                 log.info(f"Stock levels: skipping {before - len(urls)} URLs last seen out of stock")
@@ -329,38 +430,62 @@ async def main():
             sb.table("harrison_stock_runs").update({"url_count": len(urls)}).eq("id", run_id).execute()
 
             queue: asyncio.Queue = asyncio.Queue()
+            seen: set[str] = set()
             for u in urls:
-                queue.put_nowait(u)
+                if u not in seen:
+                    seen.add(u)
+                    queue.put_nowait(u)
             pending: list[dict] = []
-            done = {"n": 0, "ok": 0}
+            done = {"n": 0, "ok": 0, "total": len(seen)}
+
+            async def handle(ctx: BrowserContext, u: str):
+                row = await read_product(ctx, u)
+                expand = row.pop("_expand", None) or []
+                row["run_id"] = run_id
+                row["ukpos_skus"] = matched.get(u) or None
+                row["scraped_at"] = datetime.now(timezone.utc).isoformat()
+                pending.append(row)
+                done["n"] += 1
+                if row["stock_status"] != "error":
+                    done["ok"] += 1
+                base = u.split("?")[0]
+                added = 0
+                for code in expand:
+                    vu = clean_url(f"{base}?sku={code}")
+                    if vu not in seen and vu not in skip:
+                        seen.add(vu)
+                        queue.put_nowait(vu)
+                        added += 1
+                done["total"] += added
+                lvl = row["stock_level"] if row["stock_level"] is not None else "—"
+                due = f" due={row['next_due_date']}x{row['next_due_qty']}" if row.get("next_due_date") else ""
+                log.info(f"  [{done['n']}/{done['total']}] {row['stock_status']:<12} {str(row.get('kind')):<15} lvl={lvl:<6} "
+                         f"£{row['price_ex_vat']}{due} {u}" +
+                         (f"  ({row['error_message']})" if row["error_message"] else ""))
+                if len(pending) >= BATCH:
+                    chunk = pending[:BATCH]
+                    del pending[:BATCH]
+                    write_rows(sb, chunk)
 
             async def worker(ctx: BrowserContext):
                 while True:
+                    u = await queue.get()
                     try:
-                        u = queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        return
-                    row = await read_product(ctx, u)
-                    row["run_id"] = run_id
-                    row["ukpos_skus"] = matched.get(u) or None
-                    row["scraped_at"] = datetime.now(timezone.utc).isoformat()
-                    pending.append(row)
-                    done["n"] += 1
-                    if row["stock_status"] != "error":
-                        done["ok"] += 1
-                    lvl = row["stock_level"] if row["stock_level"] is not None else "—"
-                    log.info(f"  [{done['n']}/{len(urls)}] {row['stock_status']:<12} lvl={lvl:<6} "
-                             f"£{row['price_ex_vat']} {u}" +
-                             (f"  ({row['error_message']})" if row["error_message"] else ""))
-                    if len(pending) >= BATCH:
-                        chunk = pending[:BATCH]
-                        del pending[:BATCH]
-                        write_rows(sb, chunk)
+                        await handle(ctx, u)
+                    except Exception as e:
+                        log.warning(f"  worker error on {u}: {e}")
+                    finally:
+                        queue.task_done()
                     await asyncio.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
 
-            await asyncio.gather(*(worker(c) for c in contexts))
+            tasks = [asyncio.create_task(worker(c)) for c in contexts]
+            await queue.join()
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
             if pending:
                 write_rows(sb, pending)
+            sb.table("harrison_stock_runs").update({"url_count": done["n"]}).eq("id", run_id).execute()
             await browser.close()
 
         sb.table("harrison_stock_runs").update({
