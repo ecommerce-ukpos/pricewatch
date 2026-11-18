@@ -3084,25 +3084,57 @@ function slcOpenReview() {
 
 
 /* ════════════════════════════════════════
-   CHECK COMPETITOR STOCK  (Harrison Products only for now)
+   CHECK COMPETITOR STOCK
+   Competitor dropdown (stock checking is built for Harrison Products, id 10, only so far —
+   other competitors show the same tables with a "not set up yet" message).
+   One table, In stock / Out of stock toggle:
+     In stock     → SKU, name, price, UKPOS price (if matched), Price +/-, stock level now,
+                    previous stock level, previous check, est daily sales
+     Out of stock → code, name, price, OOS since
    "Check OOS items"  → harrison_stock job, check=oos    (reads every Harrison URL)
    "Run stock levels" → harrison_stock job, check=levels (reads URLs last seen in stock)
-   Both are dispatched via smart-function; scraper/harrison_stock.py writes
-   harrison_stock_runs + harrison_stock. Tables read the harrison_stock_latest view
-   (latest reading per URL + previous stock level + OOS since).
+   Both dispatched via smart-function; scraper/harrison_stock.py writes harrison_stock_runs +
+   harrison_stock; the table reads the harrison_stock_latest view.
 ════════════════════════════════════════ */
-let csRows = [], csRuns = { oos: null, levels: null }, csPollTimer = null, csOurs = {};
-const csDispatched = { oos: null, levels: null };
+const CS_SUPPORTED = { 10: true };        // competitor ids with a stock scraper
+let csRows = [], csLastRun = null, csRunning = null, csPollTimer = null, csOurs = {};
+let csView = 'in', csDispatchedAt = null, csCompsLoaded = false;
 const csEsc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const csMoney = v => (v === null || v === undefined || v === '') ? '—' : '£' + Number(v).toFixed(2);
 const csWhen = t => t ? new Date(t).toLocaleString('en-GB', {day:'2-digit', month:'short', year:'2-digit', hour:'2-digit', minute:'2-digit'}) : '—';
-const csRunDate = t => t ? new Date(t).toLocaleDateString('en-GB', {day:'numeric', month:'short'}) + ', ' + new Date(t).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'}) : '';
 const csDay  = t => t ? new Date(t).toLocaleDateString('en-GB', {day:'2-digit', month:'short', year:'2-digit'}) : '—';
+const csCompId = () => parseInt(($('cs-comp') || {}).value || '10', 10);
+const csCompName = () => { const o = $('cs-comp'); return o && o.selectedOptions[0] ? o.selectedOptions[0].textContent.replace(/ \(not set up\)$/, '') : 'Harrison Products'; };
+
+async function csLoadComps() {
+  if (csCompsLoaded) return;
+  const { data } = await sb.from('competitors').select('id,name').eq('active', true).order('name');
+  if (!data || !data.length) return;
+  const sel = $('cs-comp'), cur = sel.value || '10';
+  sel.innerHTML = data.map(c => `<option value="${c.id}">${csEsc(c.name)}${CS_SUPPORTED[c.id] ? '' : ' (not set up)'}</option>`).join('');
+  sel.value = data.some(c => String(c.id) === cur) ? cur : '10';
+  csCompsLoaded = true;
+}
+
+function csSwitchComp() {
+  csRows = []; csLastRun = null; csRunning = null; csOurs = {};
+  loadCompStock();
+}
+
+function csSetView(v) {
+  csView = v;
+  csRender();
+}
 
 async function loadCompStock() {
-  if (!csRows.length) {
-    $('cs-oos').innerHTML = $('cs-levels').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
-  }
+  try { await csLoadComps(); } catch (e) { /* keep the default option */ }
+  const cid = csCompId();
+  const supported = !!CS_SUPPORTED[cid];
+  document.querySelectorAll('#p-compstock .cs-run').forEach(b => { b.disabled = !supported; });
+  $('cs-scope').disabled = !supported;
+  if (!supported) { csRows = []; csLastRun = null; csRunning = null; csRender(); csStopPoll(); return; }
+
+  if (!csRows.length) $('cs-table').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
   try {
     const [runsRes, rows] = await Promise.all([
       sb.from('harrison_stock_runs').select('*').order('started_at', { ascending: false }).limit(20),
@@ -3120,16 +3152,16 @@ async function loadCompStock() {
     ]);
     if (runsRes.error) throw runsRes.error;
     const runs = runsRes.data || [];
-    csRuns.oos    = runs.find(r => r.check_type === 'oos') || null;
-    csRuns.levels = runs.find(r => r.check_type === 'levels') || null;
+    csLastRun = runs.find(r => r.status !== 'running') || null;
+    csRunning = runs.find(r => r.status === 'running') || null;
+    if (csDispatchedAt && runs.some(r => Date.parse(r.started_at) >= csDispatchedAt - 60000)) csDispatchedAt = null;
+    if (csDispatchedAt && Date.now() - csDispatchedAt > 6 * 3600 * 1000) csDispatchedAt = null;
     csRows = rows;
     await csLoadOurs(rows);
     csRender();
-    const busy = ['oos', 'levels'].some(k => csWaiting(k) || (csRuns[k] && csRuns[k].status === 'running'));
-    if (busy) csStartPoll(); else csStopPoll();
+    if (csRunning || csDispatchedAt) csStartPoll(); else csStopPoll();
   } catch (e) {
-    $('cs-oos').innerHTML = `<div style="color:var(--red)">Could not load stock data: ${csEsc(e.message)}</div>`;
-    $('cs-levels').innerHTML = '';
+    $('cs-table').innerHTML = `<div style="color:var(--red)">Could not load stock data: ${csEsc(e.message)}</div>`;
   }
 }
 
@@ -3152,7 +3184,7 @@ function csPackQty(title) {
   return n > 0 ? n : 1;
 }
 
-// First matched UKPOS SKU's price, and Harrison vs UKPOS % (+ = Harrison dearer, − = Harrison cheaper).
+// First matched UKPOS SKU's price, and competitor vs UKPOS % (+ = competitor dearer, − = cheaper).
 // When pack sizes differ the comparison is per unit.
 function csCompare(r) {
   const sku = (r.ukpos_skus || [])[0];
@@ -3163,7 +3195,7 @@ function csCompare(r) {
   const theirs = Number(r.price_ex_vat);
   const oq = csPackQty(o.title), cq = csPackQty(r.product_name);
   const diff = ((theirs / cq) - (ours / oq)) / (ours / oq) * 100;
-  return { ours, diff, note: oq !== cq ? `Per unit: UKPOS pack of ${oq} vs Harrison pack of ${cq}` : '' };
+  return { ours, diff, note: oq !== cq ? `Per unit: UKPOS pack of ${oq} vs competitor pack of ${cq}` : '' };
 }
 
 // Est daily sales = (previous level − level now) ÷ days between the two checks
@@ -3176,39 +3208,41 @@ function csDaily(r) {
   return (sold / days).toLocaleString('en-GB', { maximumFractionDigits: 1 });
 }
 
-// Dispatched from this browser but the run row hasn't appeared yet
-function csWaiting(k) {
-  const t = csDispatched[k];
-  if (!t) return false;
-  if (Date.now() - t > 6 * 3600 * 1000) { csDispatched[k] = null; return false; }
-  return !csRuns[k] || Date.parse(csRuns[k].started_at) < t - 60000;
-}
-
-function csRunInfo(k) {
-  if (csWaiting(k)) return '<i class="ti ti-loader"></i> Queued on GitHub — this updates automatically once it starts.';
-  const r = csRuns[k];
-  if (!r) return k === 'oos' ? 'No OOS check has run yet.' : 'No stock level run yet.';
+function csLastRunText() {
+  if (!CS_SUPPORTED[csCompId()]) return '';
+  const r = csLastRun;
+  if (!r) return 'No check has run yet';
   const scope = r.scope === 'catalogue' ? 'whole catalogue' : 'discovered URLs';
-  if (r.status === 'running') return `<i class="ti ti-loader"></i> Running (${scope}) since ${csWhen(r.started_at)}${r.url_count ? ` — ${r.url_count} products to read` : ''}.`;
-  if (r.status === 'failed')  return `<span style="color:var(--red)">Last run failed ${csWhen(r.finished_at)}: ${csEsc(r.error_message || 'unknown error')}</span>`;
+  const what = r.check_type === 'levels' ? 'Run stock levels' : 'Check OOS items';
+  if (r.status === 'failed') return `<span style="color:var(--red)">Last run ${csWhen(r.finished_at || r.started_at)} (${what}) failed: ${csEsc(r.error_message || 'unknown error')}</span>`;
   const errs = (r.url_count || 0) - (r.ok_count || 0);
-  return `Last run ${csWhen(r.finished_at || r.started_at)} (${scope}) — ${r.ok_count ?? 0} products read` +
-         (errs > 0 ? `, ${errs} could not be read` : '') + '.';
+  return `Last run ${csWhen(r.finished_at || r.started_at)} · ${what} (${scope}) — ${r.ok_count ?? 0} products read` +
+         (errs > 0 ? `, ${errs} could not be read` : '');
 }
 
-function csFiltered(k) {
+function csRunStateText() {
+  if (csDispatchedAt && !csRunning) return '<i class="ti ti-loader"></i> Queued on GitHub — this updates automatically once it starts.';
+  if (csRunning) {
+    const what = csRunning.check_type === 'levels' ? 'Run stock levels' : 'Check OOS items';
+    return `<i class="ti ti-loader"></i> ${what} running since ${csWhen(csRunning.started_at)}` +
+           (csRunning.url_count ? ` — ${csRunning.url_count} products to read` : '') + '. The table updates when it finishes.';
+  }
+  return '';
+}
+
+function csFiltered() {
   const q = ($('cs-q').value || '').trim().toLowerCase();
-  return csRows.filter(r =>
-    (k === 'oos' ? r.stock_status === 'out_of_stock' : true) &&
+  const want = csView === 'oos' ? 'out_of_stock' : 'in_stock';
+  return csRows.filter(r => r.stock_status === want &&
     (!q || (r.product_name || '').toLowerCase().includes(q) ||
            (r.harrison_sku || '').toLowerCase().includes(q) ||
            (r.ukpos_skus || []).some(x => x.toLowerCase().includes(q))));
 }
 
-// UKPOS SKU(s) if matched, Harrison's code underneath; Harrison's code alone if not matched
+// UKPOS SKU(s) if matched, competitor's code underneath; competitor's code alone if not matched
 function csCode(r) {
   const ours = (r.ukpos_skus || []).join(', ');
-  if (ours) return `<strong>${csEsc(ours)}</strong>${r.harrison_sku ? `<div style="font-size:11px;color:var(--t3)">Harrison ${csEsc(r.harrison_sku)}</div>` : ''}`;
+  if (ours) return `<strong>${csEsc(ours)}</strong>${r.harrison_sku ? `<div style="font-size:11px;color:var(--t3)">${csEsc(r.harrison_sku)}</div>` : ''}`;
   return csEsc(r.harrison_sku || '—');
 }
 const csName = r => `<a href="${csEsc(r.competitor_url)}" target="_blank" rel="noopener" style="color:var(--text)">${csEsc(r.product_name || r.competitor_url)}</a>`;
@@ -3216,46 +3250,56 @@ const csOosSince = r => r.oos_since
   ? (r.seen_in_stock_before ? csDay(r.oos_since) : `${csDay(r.oos_since)} <span style="font-size:11px;color:var(--t3)">(first check)</span>`)
   : '—';
 const csLevel = v => (v === null || v === undefined) ? '—' : Number(v).toLocaleString('en-GB');
-const csPrev = r => r.prev_stock_level === null || r.prev_stock_level === undefined ? '—'
-  : `${csLevel(r.prev_stock_level)} <span style="font-size:11px;color:var(--t3)">(${csWhen(r.prev_scraped_at)})</span>`;
+
+const CS_HEAD = {
+  in:  ['SKU', 'Name', 'Price (ex VAT)', 'UKPOS price (if matched)', 'Price +/-', 'Stock level now', 'Previous stock level', 'Previous check', 'Est daily sales'],
+  oos: ['Code', 'Name', 'Price (ex VAT)', 'OOS since'],
+};
 
 function csRender() {
-  $('cs-oos-info').innerHTML    = csRunInfo('oos');
-  $('cs-levels-info').innerHTML = csRunInfo('levels');
-  ['oos', 'levels'].forEach(k => {
-    const r = csRuns[k];
-    $(`cs-${k}-date`).textContent = r && r.status === 'done' ? `Last run ${csRunDate(r.finished_at || r.started_at)}` : '';
-  });
+  $('cs-tog-in').classList.toggle('active', csView === 'in');
+  $('cs-tog-oos').classList.toggle('active', csView === 'oos');
+  const nIn = csRows.filter(r => r.stock_status === 'in_stock').length;
+  const nOos = csRows.filter(r => r.stock_status === 'out_of_stock').length;
+  $('cs-tog-in').textContent  = `In stock${csRows.length ? ` (${nIn})` : ''}`;
+  $('cs-tog-oos').textContent = `Out of stock${csRows.length ? ` (${nOos})` : ''}`;
+  $('cs-lastrun').innerHTML  = csLastRunText();
+  $('cs-runstate').innerHTML = csRunStateText();
 
-  const oos = csFiltered('oos');
-  $('cs-oos').innerHTML = !csRows.length ? '' : !oos.length
-    ? '<div style="color:var(--t3)">No out-of-stock items.</div>'
-    : `<div class="tw"><table><thead><tr><th>Code</th><th>Name</th><th>Price (ex VAT)</th><th>OOS since</th></tr></thead><tbody>${
-        oos.map(r => `<tr><td>${csCode(r)}</td><td>${csName(r)}</td><td>${csMoney(r.price_ex_vat)}</td><td>${csOosSince(r)}</td></tr>`).join('')
-      }</tbody></table></div>`;
-
-  const all = csFiltered('levels');
-  $('cs-levels').innerHTML = !csRows.length ? '' : !all.length
-    ? '<div style="color:var(--t3)">No items.</div>'
-    : `<div class="tw"><table><thead><tr><th>SKU</th><th>Name</th><th>Price (ex VAT)</th><th>UKPOS price (if matched)</th><th>Price +/-</th>
-        <th>Stock level now</th><th>Previous stock level</th><th>Previous check</th><th>Est daily sales</th></tr></thead><tbody>${
-        all.map(r => {
-          const c = csCompare(r);
-          return `<tr><td>${csCode(r)}</td><td>${csName(r)}${r.stock_status === 'out_of_stock' ? ' <span class="badge b-r" style="font-size:10px">OOS</span>' : ''}</td>
-          <td>${csMoney(r.price_ex_vat)}</td><td>${c.ours === null ? '—' : csMoney(c.ours)}</td>
+  const head = CS_HEAD[csView];
+  const cols = head.length;
+  const emptyRow = msg => `<tr><td colspan="${cols}" style="color:var(--t3);text-align:center;padding:18px">${msg}</td></tr>`;
+  let body;
+  if (!CS_SUPPORTED[csCompId()]) {
+    body = emptyRow(`Stock checking isn't set up for ${csEsc(csCompName())} yet — only Harrison Products so far.`);
+  } else {
+    const rows = csFiltered();
+    if (!rows.length) {
+      body = emptyRow(!csRows.length ? 'No stock data yet — press <strong>Check OOS items</strong>.'
+        : csView === 'oos' ? 'No out-of-stock items.' : 'No in-stock items.');
+    } else if (csView === 'oos') {
+      body = rows.map(r => `<tr><td>${csCode(r)}</td><td>${csName(r)}</td><td>${csMoney(r.price_ex_vat)}</td><td>${csOosSince(r)}</td></tr>`).join('');
+    } else {
+      body = rows.map(r => {
+        const c = csCompare(r);
+        return `<tr><td>${csCode(r)}</td><td>${csName(r)}</td><td>${csMoney(r.price_ex_vat)}</td>
+          <td>${c.ours === null ? '—' : csMoney(c.ours)}</td>
           <td>${c.diff === null ? '—' : `<span class="${diffClass(c.diff)}"${c.note ? ` title="${csEsc(c.note)}"` : ''}>${diffLabel(c.diff)}${c.note ? ' *' : ''}</span>`}</td>
           <td>${csLevel(r.stock_level)}</td><td>${csLevel(r.prev_stock_level)}</td>
           <td>${r.prev_scraped_at ? csWhen(r.prev_scraped_at) : '—'}</td><td>${csDaily(r)}</td></tr>`;
-        }).join('')
-      }</tbody></table></div>`;
+      }).join('');
+    }
+  }
+  $('cs-table').innerHTML = `<div class="tw"><table><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 async function csRun(btn, check) {
+  if (!CS_SUPPORTED[csCompId()]) return;
   const scope = $('cs-scope').value;
   const what = check === 'oos'
-    ? 'Check OOS items: reads every Harrison product and lists the out-of-stock ones.'
-    : 'Run stock levels: re-reads the Harrison items last seen in stock.';
-  if (!confirm(`${what}\n\nScope: ${scope === 'catalogue' ? 'whole Harrison catalogue' : 'discovered Harrison URLs'}. Runs on GitHub and usually takes a few minutes. Start now?`)) return;
+    ? 'Check OOS items: reads every product and finds the out-of-stock ones.'
+    : 'Run stock levels: re-reads the items last seen in stock.';
+  if (!confirm(`${csCompName()}\n\n${what}\n\nScope: ${scope === 'catalogue' ? 'whole catalogue' : 'discovered URLs'}. Runs on GitHub and usually takes a few minutes. Start now?`)) return;
   const orig = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = '<i class="ti ti-loader"></i> Starting…';
@@ -3268,7 +3312,8 @@ async function csRun(btn, check) {
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || 'Dispatch failed');
-    csDispatched[check] = Date.now();
+    csDispatchedAt = Date.now();
+    if (check === 'oos') csView = 'oos'; else csView = 'in';
     csRender();
     csStartPoll();
   } catch (e) {
@@ -3291,24 +3336,25 @@ function csStopPoll() {
   if (csPollTimer) { clearInterval(csPollTimer); csPollTimer = null; }
 }
 
-function csExport(k) {
-  const rows = csFiltered(k);
+function csExport() {
+  const rows = CS_SUPPORTED[csCompId()] ? csFiltered() : [];
   if (!rows.length) return alert('Nothing to export.');
   const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const head = k === 'oos'
-    ? ['UKPOS SKU','Harrison code','Name','Price ex VAT','OOS since','OOS since first check','URL']
-    : ['UKPOS SKU','Harrison code','Name','Price ex VAT','UKPOS price','Price +/- %','Stock level now','Stock status','Previous stock level','Previous check','Est daily sales','URL'];
-  const body = rows.map(r => (k === 'oos'
-    ? [(r.ukpos_skus || []).join(' '), r.harrison_sku, r.product_name, r.price_ex_vat, r.oos_since, r.seen_in_stock_before ? '' : 'yes', r.competitor_url]
-    : (() => { const c = csCompare(r); const d = csDaily(r).replace(/<[^>]+>/g, '');
-        return [(r.ukpos_skus || []).join(' '), r.harrison_sku, r.product_name, r.price_ex_vat, c.ours,
-          c.diff === null ? '' : c.diff.toFixed(1), r.stock_level, r.stock_status, r.prev_stock_level, r.prev_scraped_at,
-          d === '—' ? '' : d, r.competitor_url]; })()
-  ).map(q).join(','));
+  const head = csView === 'oos'
+    ? ['UKPOS SKU','Competitor code','Name','Price ex VAT','OOS since','OOS since first check','URL']
+    : ['UKPOS SKU','Competitor code','Name','Price ex VAT','UKPOS price','Price +/- %','Stock level now','Previous stock level','Previous check','Est daily sales','URL'];
+  const body = rows.map(r => {
+    if (csView === 'oos') return [(r.ukpos_skus || []).join(' '), r.harrison_sku, r.product_name, r.price_ex_vat, r.oos_since, r.seen_in_stock_before ? '' : 'yes', r.competitor_url];
+    const c = csCompare(r), d = csDaily(r).replace(/<[^>]+>/g, '');
+    return [(r.ukpos_skus || []).join(' '), r.harrison_sku, r.product_name, r.price_ex_vat, c.ours,
+      c.diff === null ? '' : c.diff.toFixed(1), r.stock_level, r.prev_stock_level, r.prev_scraped_at,
+      d === '—' ? '' : d, r.competitor_url];
+  }).map(row => row.map(q).join(','));
   const blob = new Blob([[head.map(q).join(','), ...body].join('\n')], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `harrison-${k === 'oos' ? 'oos' : 'stock-levels'}-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `${csCompName().toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${csView === 'oos' ? 'out-of-stock' : 'in-stock'}-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(a.href);
 }
+
