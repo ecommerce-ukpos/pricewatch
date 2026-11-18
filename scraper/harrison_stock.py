@@ -4,18 +4,22 @@ scraper/harrison_stock.py
 Harrison Products (competitor id 10, harrisonproducts.com — BigCommerce) stock scrape.
 
 Run by the "harrison_stock" job in .github/workflows/scraper.yml, started from the
-"Harrison stock" page in the app (via the smart-function Edge Function).
+"Check Competitor Stock" page in the app (via the smart-function Edge Function).
 
 For every Harrison product URL it records: product name, Harrison SKU, price (ex and
 inc VAT), stock level and stock status. Results go to public.harrison_stock (one row
 per product per run); each run gets a row in public.harrison_stock_runs.
 
-Scope (env HARRISON_SCOPE):
-  matches   (default) every distinct Harrison URL in competitor_matches
-            (matched + review + rejected).
-  catalogue every product URL in Harrison's BigCommerce product sitemap
-            (/xmlsitemap.php → type=products pages). Parent product pages only:
-            products with size/colour options report the page's default variant.
+Mode (env HARRISON_MODE) = <check>[_catalogue]:
+  check  oos    "Check OOS items"   — reads every URL in scope (to find what is out of stock).
+         levels "Run stock levels"  — reads only URLs whose latest reading is in stock,
+                                      plus URLs never checked before.
+  scope  (none)     every distinct Harrison URL in competitor_matches
+                    (matched + review + rejected).
+         _catalogue every product URL in Harrison's BigCommerce product sitemap
+                    (/xmlsitemap.php → type=products pages). Parent product pages only:
+                    products with size/colour options report the page's default variant.
+Each row also stores ukpos_skus: the UKPOS SKUs confirmed-matched to that URL.
 
 Where the data comes from (BigCommerce Stencil):
   window.BCData.product_attributes → sku, stock, instock, purchasable,
@@ -54,7 +58,9 @@ TIMEOUT_MS    = 45_000
 WORKERS       = int(os.environ.get("SCRAPER_WORKERS") or "3")
 DELAY_MIN     = float(os.environ.get("SCRAPER_DELAY_MIN") or "2")
 DELAY_MAX     = float(os.environ.get("SCRAPER_DELAY_MAX") or "5")
-SCOPE         = (os.environ.get("HARRISON_SCOPE") or "matches").strip().lower()
+MODE          = (os.environ.get("HARRISON_MODE") or "oos").strip().lower()
+CHECK         = MODE.split("_")[0]
+SCOPE         = "catalogue" if MODE.endswith("_catalogue") else "matches"
 BATCH         = 100
 
 PAGE_JS = r"""
@@ -147,17 +153,38 @@ def same_sku(a: Optional[str], b: Optional[str]) -> bool:
 
 # ── URL sources ────────────────────────────────────────────────────────────────
 
-def urls_from_matches(sb: Client) -> list[str]:
-    urls, start = set(), 0
+def load_matches(sb: Client) -> tuple[list[str], dict[str, list[str]]]:
+    """All distinct Harrison URLs in competitor_matches, and clean URL → matched UKPOS SKUs."""
+    urls, matched, start = set(), {}, 0
     while True:
-        rows = (sb.table("competitor_matches").select("competitor_url")
+        rows = (sb.table("competitor_matches").select("competitor_url,sku_id,match_status")
                   .eq("competitor_id", HARRISON_ID)
                   .range(start, start + 999).execute().data or [])
-        urls.update(clean_url(r["competitor_url"]) for r in rows if r.get("competitor_url"))
+        for r in rows:
+            if not r.get("competitor_url"):
+                continue
+            u = clean_url(r["competitor_url"])
+            urls.add(u)
+            if r.get("match_status") == "matched" and r.get("sku_id"):
+                matched.setdefault(u, set()).add(r["sku_id"])
         if len(rows) < 1000:
             break
         start += 1000
-    return sorted(urls)
+    return sorted(urls), {u: sorted(s) for u, s in matched.items()}
+
+
+def last_out_of_stock(sb: Client) -> set[str]:
+    """URLs whose latest (non-error) reading is out of stock."""
+    out, start = set(), 0
+    while True:
+        rows = (sb.table("harrison_stock_latest").select("competitor_url")
+                  .eq("stock_status", "out_of_stock")
+                  .range(start, start + 999).execute().data or [])
+        out.update(r["competitor_url"] for r in rows)
+        if len(rows) < 1000:
+            break
+        start += 1000
+    return out
 
 
 async def urls_from_sitemap(context: BrowserContext) -> list[str]:
@@ -276,22 +303,28 @@ def write_rows(sb: Client, rows: list[dict]):
 
 
 async def main():
-    if SCOPE not in ("matches", "catalogue"):
-        log.error(f"Unknown HARRISON_SCOPE '{SCOPE}' — use matches or catalogue")
+    if CHECK not in ("oos", "levels"):
+        log.error(f"Unknown HARRISON_MODE '{MODE}' — use oos, levels, oos_catalogue or levels_catalogue")
         sys.exit(1)
 
     sb  = sb_client()
-    run = sb.table("harrison_stock_runs").insert({"scope": SCOPE, "status": "running"}).execute().data[0]
+    run = sb.table("harrison_stock_runs").insert(
+        {"scope": SCOPE, "check_type": CHECK, "status": "running"}).execute().data[0]
     run_id = run["id"]
-    log.info(f"Harrison stock run {run_id} — scope={SCOPE}")
+    log.info(f"Harrison stock run {run_id} — check={CHECK} scope={SCOPE}")
 
     try:
         async with async_playwright() as pw:
             browser = await launch_browser(pw)
             contexts = [await new_stealth_context(browser) for _ in range(max(1, WORKERS))]
 
-            urls = (urls_from_matches(sb) if SCOPE == "matches"
-                    else await urls_from_sitemap(contexts[0]))
+            match_urls, matched = load_matches(sb)
+            urls = match_urls if SCOPE == "matches" else await urls_from_sitemap(contexts[0])
+            if CHECK == "levels":
+                oos = last_out_of_stock(sb)
+                before = len(urls)
+                urls = [u for u in urls if u not in oos]
+                log.info(f"Stock levels: skipping {before - len(urls)} URLs last seen out of stock")
             log.info(f"{len(urls)} Harrison URLs to read")
             sb.table("harrison_stock_runs").update({"url_count": len(urls)}).eq("id", run_id).execute()
 
@@ -309,6 +342,7 @@ async def main():
                         return
                     row = await read_product(ctx, u)
                     row["run_id"] = run_id
+                    row["ukpos_skus"] = matched.get(u) or None
                     row["scraped_at"] = datetime.now(timezone.utc).isoformat()
                     pending.append(row)
                     done["n"] += 1
