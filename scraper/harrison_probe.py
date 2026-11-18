@@ -29,13 +29,13 @@ from common import launch_browser, new_stealth_context
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("harrison_probe")
 
-SAMPLE = int(os.environ.get("PROBE_SAMPLE") or "25")
+SAMPLE = int(os.environ.get("PROBE_SAMPLE") or "35")
 
 FORM_JS = r"""
 () => {
   const form = document.querySelector('form[data-cart-item-add]') ||
                document.querySelector('form[action*="cart.php"]');
-  if (!form) return { form: false };
+  if (!form) return { form: false, body: (document.body.innerText || '').slice(0, 400) };
   const pid = (form.querySelector('input[name="product_id"]') || {}).value || null;
   const fields = [...form.querySelectorAll('[data-product-attribute]')].map(f => {
     const lab = f.querySelector('.form-label, label');
@@ -53,7 +53,16 @@ FORM_JS = r"""
     return { kind: f.getAttribute('data-product-attribute'),
              label: lab ? lab.textContent.replace(/\s+/g, ' ').trim() : '', inputs };
   });
-  return { form: true, product_id: pid, fields, pa: (window.BCData || {}).product_attributes || null };
+  // Anything that looks like a restock / due-in date, and the availability block
+  const view = document.querySelector('.productView') || document.body;
+  const txt = (view.innerText || '').split('\n').map(s => s.trim()).filter(Boolean);
+  const due = txt.filter(s => /due|expected|back in stock|eta\b|arriv|restock|lead time|dispatch|delivery|available from|pre-?order/i.test(s)).slice(0, 12);
+  const dl = [...view.querySelectorAll('dt')].map(dt => [dt.textContent.trim(), ((dt.nextElementSibling || {}).textContent || '').trim()]);
+  const avail = [...view.querySelectorAll('[data-product-availability], [data-product-stock], .productView-info-value, .form-field--stock, .alertBox, [class*="stock"], [class*="avail"], [class*="due"]')]
+                  .map(e => (e.className || '') + ' :: ' + e.textContent.replace(/\s+/g, ' ').trim()).filter(s => s.length < 200).slice(0, 15);
+  const pa = (window.BCData || {}).product_attributes || null;
+  return { form: true, product_id: pid, fields, pa, due_text: due, dl, avail,
+           stock_message: pa ? pa.stock_message : null, availability: pa ? pa.availability : null };
 }
 """
 
@@ -91,7 +100,14 @@ def pick_urls(sb) -> list[str]:
     no_level = [r["competitor_url"] for r in parents if r["stock_level"] is None and r["competitor_url"] not in cut]
     random.seed(7)
     random.shuffle(no_level)
-    return (cut[:10] + no_level)[:SAMPLE]
+    oos = [r["competitor_url"] for r in
+           (sb.table("harrison_stock_latest").select("competitor_url").eq("stock_status", "out_of_stock")
+              .range(0, 999).execute().data or [])]
+    picked = []
+    for u in oos[:12] + cut[:8] + no_level:
+        if u not in picked:
+            picked.append(u)
+    return picked[:SAMPLE]
 
 
 async def main():
@@ -108,7 +124,8 @@ async def main():
                 await page.wait_for_timeout(2500)
                 info = await page.evaluate(FORM_JS)
                 out = {"n": n, "url": url, "product_id": info.get("product_id"),
-                       "default": {k: (info.get("pa") or {}).get(k) for k in ("sku", "stock", "instock", "purchasable")},
+                       "default": {k: (info.get("pa") or {}).get(k) for k in ("sku", "stock", "instock", "purchasable", "stock_message", "availability")},
+                       "due_text": info.get("due_text"), "dl": info.get("dl"), "avail": info.get("avail"),
                        "fields": []}
                 pid = info.get("product_id")
                 for f in info.get("fields", []):
