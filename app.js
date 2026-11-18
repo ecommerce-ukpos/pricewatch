@@ -3198,11 +3198,10 @@ function csCompare(r) {
   return { ours, diff, note: oq !== cq ? `Per unit: UKPOS pack of ${oq} vs competitor pack of ${cq}` : '' };
 }
 
-// Price +/- in words: "Harrison 48.6% cheaper" (red — they undercut us), "Harrison 12.0% dearer" (green), parity = within ±1%
+// "Their price is": "48.6% cheaper" (red — they undercut us), "12.0% dearer" (green), parity = within ±1%
 function csDiffWords(d) {
-  const who = csCompName().split(' ')[0];
-  if (Math.abs(d) <= 1) return 'Same price (±1%)';
-  return `${who} ${Math.abs(d).toFixed(1)}% ${d < 0 ? 'cheaper' : 'dearer'}`;
+  if (Math.abs(d) <= 1) return 'Same (±1%)';
+  return `${Math.abs(d).toFixed(1)}% ${d < 0 ? 'cheaper' : 'dearer'}`;
 }
 function csDiffCell(c) {
   if (c.diff === null) return '—';
@@ -3251,12 +3250,9 @@ function csFiltered() {
            (r.ukpos_skus || []).some(x => x.toLowerCase().includes(q))));
 }
 
-// UKPOS SKU(s) if matched, competitor's code underneath; competitor's code alone if not matched
-function csCode(r) {
-  const ours = (r.ukpos_skus || []).join(', ');
-  if (ours) return `<strong>${csEsc(ours)}</strong>${r.harrison_sku ? `<div style="font-size:11px;color:var(--t3)">${csEsc(r.harrison_sku)}</div>` : ''}`;
-  return csEsc(r.harrison_sku || '—');
-}
+// Their code, and our SKU(s) when matched
+const csTheirCode = r => csEsc(r.harrison_sku || '—');
+const csOurSku = r => (r.ukpos_skus || []).length ? `<strong>${csEsc(r.ukpos_skus.join(', '))}</strong>` : '';
 const csName = r => `<a href="${csEsc(r.competitor_url)}" target="_blank" rel="noopener" style="color:var(--text)">${csEsc(r.product_name || r.competitor_url)}</a>`;
 const csOosSince = r => r.oos_since
   ? (r.seen_in_stock_before ? csDay(r.oos_since) : `${csDay(r.oos_since)} <span style="font-size:11px;color:var(--t3)">(first check)</span>`)
@@ -3264,8 +3260,8 @@ const csOosSince = r => r.oos_since
 const csLevel = v => (v === null || v === undefined) ? '—' : Number(v).toLocaleString('en-GB');
 
 const CS_HEAD = {
-  in:  ['SKU', 'Name', 'Price (ex VAT)', 'UKPOS price (if matched)', 'Price +/- (them vs us)', 'Stock level now', 'Previous stock level', 'Previous check', 'Est daily sales'],
-  oos: ['Code', 'Name', 'Price (ex VAT)', 'OOS since'],
+  in:  ['Their code', 'Our SKU', 'Name', 'Price (ex VAT)', 'UKPOS price (if matched)', 'Their price is', 'Stock level now', 'Previous stock level', 'Previous check', 'Est daily sales'],
+  oos: ['Their code', 'Our SKU', 'Name', 'Price (ex VAT)', 'OOS since'],
 };
 
 function csRender() {
@@ -3290,11 +3286,11 @@ function csRender() {
       body = emptyRow(!csRows.length ? 'No stock data yet — press <strong>Check OOS items</strong>.'
         : csView === 'oos' ? 'No out-of-stock items.' : 'No in-stock items.');
     } else if (csView === 'oos') {
-      body = rows.map(r => `<tr><td>${csCode(r)}</td><td>${csName(r)}</td><td>${csMoney(r.price_ex_vat)}</td><td>${csOosSince(r)}</td></tr>`).join('');
+      body = rows.map(r => `<tr><td>${csTheirCode(r)}</td><td>${csOurSku(r)}</td><td>${csName(r)}</td><td>${csMoney(r.price_ex_vat)}</td><td>${csOosSince(r)}</td></tr>`).join('');
     } else {
       body = rows.map(r => {
         const c = csCompare(r);
-        return `<tr><td>${csCode(r)}</td><td>${csName(r)}</td><td>${csMoney(r.price_ex_vat)}</td>
+        return `<tr><td>${csTheirCode(r)}</td><td>${csOurSku(r)}</td><td>${csName(r)}</td><td>${csMoney(r.price_ex_vat)}</td>
           <td>${c.ours === null ? '—' : csMoney(c.ours)}</td>
           <td>${csDiffCell(c)}</td>
           <td>${csLevel(r.stock_level)}</td><td>${csLevel(r.prev_stock_level)}</td>
@@ -3353,12 +3349,12 @@ function csExport() {
   if (!rows.length) return alert('Nothing to export.');
   const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const head = csView === 'oos'
-    ? ['UKPOS SKU','Competitor code','Name','Price ex VAT','OOS since','OOS since first check','URL']
-    : ['UKPOS SKU','Competitor code','Name','Price ex VAT','UKPOS price','Price +/- % (competitor vs UKPOS; minus = competitor cheaper)','Price +/-','Stock level now','Previous stock level','Previous check','Est daily sales','URL'];
+    ? ['Their code','Our SKU','Name','Price ex VAT','OOS since','OOS since first check','URL']
+    : ['Their code','Our SKU','Name','Price ex VAT','UKPOS price','Their price is (%; minus = cheaper than us)','Their price is','Stock level now','Previous stock level','Previous check','Est daily sales','URL'];
   const body = rows.map(r => {
-    if (csView === 'oos') return [(r.ukpos_skus || []).join(' '), r.harrison_sku, r.product_name, r.price_ex_vat, r.oos_since, r.seen_in_stock_before ? '' : 'yes', r.competitor_url];
+    if (csView === 'oos') return [r.harrison_sku, (r.ukpos_skus || []).join(' '), r.product_name, r.price_ex_vat, r.oos_since, r.seen_in_stock_before ? '' : 'yes', r.competitor_url];
     const c = csCompare(r), d = csDaily(r).replace(/<[^>]+>/g, '');
-    return [(r.ukpos_skus || []).join(' '), r.harrison_sku, r.product_name, r.price_ex_vat, c.ours,
+    return [r.harrison_sku, (r.ukpos_skus || []).join(' '), r.product_name, r.price_ex_vat, c.ours,
       c.diff === null ? '' : c.diff.toFixed(1), c.diff === null ? '' : csDiffWords(c.diff), r.stock_level, r.prev_stock_level, r.prev_scraped_at,
       d === '—' ? '' : d, r.competitor_url];
   }).map(row => row.map(q).join(','));
