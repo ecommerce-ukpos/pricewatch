@@ -13,6 +13,8 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 //  POST {mode:"status", since:ISO}   → manually started scraper.yml runs created since `since`
 //                                      (queued / in_progress / completed + conclusion), for the
 //                                      "Run progress" panel. Run names come from run-name in scraper.yml.
+//  POST {mode:"harrison_stock",       → Harrison Products price + stock scrape (the "Harrison stock" page).
+//        scope:"matches"|"catalogue"}     matches = discovered Harrison URLs, catalogue = whole product sitemap.
 //  Discovery never runs with force, so confirmed matches are never reset to review.
 //
 //  Secrets: GITHUB_PAT (fine-grained: Actions read+write on the repo), GITHUB_REPO ("owner/repo").
@@ -111,6 +113,13 @@ Deno.serve(async (req: Request) => {
       : new Date(Date.now() - 24 * 3600_000).toISOString();
     const r = await listRuns(PAT, REPO, since);
     return r.ok ? json(r) : json(r, 502);
+  }
+
+  // ── Harrison stock scrape ─────────────────────────────────────────────────
+  if (body && body.mode === "harrison_stock") {
+    const scope = body.scope === "catalogue" ? "catalogue" : "matches";
+    const r = await dispatch(PAT, REPO, { job: "harrison_stock", harrison_scope: scope, competitor_ids: "10" });
+    return r.ok ? json({ ok: true, dispatched: 1, scope }) : json(r, 500);
   }
 
   // ── Default: full rescrape (unchanged behaviour) ──────────────────────────

@@ -16,6 +16,7 @@ on:
           - scrape      # price scrape of confirmed URLs (default, scheduled)
           - discover    # URL discovery — find new competitor product pages
           - check       # SKU list check: discovery, THEN rescrape, for the listed SKUs (app "SKU list check")
+          - harrison_stock  # Harrison Products price + stock level/status (app "Harrison stock" page)
       scraper_skus:
         description: 'Comma-separated SKU IDs (optional — targets specific SKUs only)'
         required: false
@@ -54,6 +55,14 @@ on:
         required: false
         default: '2000'
         type: string
+      harrison_scope:
+        description: 'harrison_stock only: matches = discovered Harrison URLs, catalogue = whole Harrison product sitemap'
+        required: false
+        default: 'matches'
+        type: choice
+        options:
+          - matches
+          - catalogue
 jobs:
   run:
     runs-on: ubuntu-22.04
@@ -118,3 +127,13 @@ jobs:
           SCRAPER_DELAY_MAX:    '7'
           COMPETITOR_IDS:       ${{ github.event.inputs.competitor_ids || '' }}
         run: python scraper/scrape.py manual
+      - name: Run Harrison stock scrape
+        if: steps.job.outputs.job == 'harrison_stock'
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          HARRISON_SCOPE:       ${{ github.event.inputs.harrison_scope || 'matches' }}
+          SCRAPER_WORKERS:      ${{ github.event.inputs.scraper_workers || '3' }}
+          SCRAPER_DELAY_MIN:    '2'
+          SCRAPER_DELAY_MAX:    '5'
+        run: python scraper/harrison_stock.py

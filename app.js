@@ -272,9 +272,9 @@ function copyUrl() {
 ════════════════════════════════════════ */
 const PANEL_MAP = {
   alerts: 'alerts', review: 'review', skus: 'skus',
-  bycat: 'bycat', bycomp: 'bycomp', skucheck: 'skucheck', schedule: 'schedule', settings: 'settings'
+  bycat: 'bycat', bycomp: 'bycomp', skucheck: 'skucheck', harrison: 'harrison', schedule: 'schedule', settings: 'settings'
 };
-const NAV_ITEMS = ['alerts','review','skus','bycat','bycomp','skucheck','schedule','settings'];
+const NAV_ITEMS = ['alerts','review','skus','bycat','bycomp','skucheck','harrison','schedule','settings'];
 
 function go(name, opts = {}) {
   document.querySelectorAll('.panel').forEach(p => {
@@ -298,7 +298,7 @@ function go(name, opts = {}) {
 
   const navKey = {
     'alerts':'alerts','review':'review','skus':'skus','bycat':'bycat',
-    'bycomp':'bycomp','comp-detail':'bycomp','sku-detail':'skus','skucheck':'skucheck',
+    'bycomp':'bycomp','comp-detail':'bycomp','sku-detail':'skus','skucheck':'skucheck','harrison':'harrison',
     'schedule':'schedule','settings':'settings'
   }[name];
   if (navKey && $('nav-' + navKey)) $('nav-' + navKey).classList.add('active');
@@ -319,6 +319,8 @@ if (name === 'skus') {
   if (name === 'bycat')       loadByCategory();
   if (name === 'bycomp')      loadByCompetitor();
   if (name === 'skucheck')    loadSkuListCheck();
+  if (name === 'harrison')    loadHarrisonStock();
+  else hsStopPoll();
   if (name === 'schedule')    loadRuns();
   if (name === 'settings')    { goSett('configurables'); loadCompetitorSettings(); loadUsers(); }
   if (name === 'comp-detail') { loadCompDetail(opts); }
@@ -3079,3 +3081,153 @@ function slcOpenReview() {
   if (typeof setMatchTab === 'function') setMatchTab('review');
   if (typeof filterReview === 'function' && typeof reviewAllRows !== 'undefined' && reviewAllRows.length) filterReview();
 }
+
+
+/* ════════════════════════════════════════
+   HARRISON STOCK
+   Button dispatches the "harrison_stock" GitHub Actions job via smart-function.
+   scraper/harrison_stock.py writes harrison_stock_runs + harrison_stock;
+   this page lists the latest run.
+════════════════════════════════════════ */
+let hsRows = [], hsRunRow = null, hsPollTimer = null, hsDispatchedAt = null;
+const HS_STATUS = {
+  in_stock:     '<span class="badge b-g">In stock</span>',
+  out_of_stock: '<span class="badge b-r">Out of stock</span>',
+  unknown:      '<span class="badge b-gray">Unknown</span>',
+  error:        '<span class="badge b-r">Error</span>',
+};
+const hsEsc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const hsMoney = v => (v === null || v === undefined || v === '') ? '—' : '£' + Number(v).toFixed(2);
+const hsWhen = t => t ? new Date(t).toLocaleString('en-GB', {day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit'}) : '—';
+
+async function loadHarrisonStock() {
+  const list = $('hs-list');
+  if (!hsRows.length) list.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+  try {
+    const { data: runs, error: re } = await sb.from('harrison_stock_runs')
+      .select('*').order('started_at', { ascending: false }).limit(1);
+    if (re) throw re;
+    hsRunRow = (runs || [])[0] || null;
+    hsRows = [];
+    if (hsRunRow) {
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await sb.from('harrison_stock')
+          .select('competitor_url,product_name,harrison_sku,price_ex_vat,price_inc_vat,stock_level,stock_status,error_message,scraped_at')
+          .eq('run_id', hsRunRow.id).order('product_name', { ascending: true }).range(from, from + 999);
+        if (error) throw error;
+        hsRows.push(...(data || []));
+        if (!data || data.length < 1000) break;
+      }
+    }
+    hsRenderRunInfo();
+    hsRender();
+    const waiting = hsDispatchedAt && (!hsRunRow || Date.parse(hsRunRow.started_at) < hsDispatchedAt - 60000);
+    if (waiting || (hsRunRow && hsRunRow.status === 'running')) hsStartPoll(); else hsStopPoll();
+  } catch (e) {
+    list.innerHTML = `<div style="color:var(--red)">Could not load Harrison stock: ${hsEsc(e.message)}</div>`;
+  }
+}
+
+function hsRenderRunInfo() {
+  const box = $('hs-run-info');
+  const waiting = hsDispatchedAt && (!hsRunRow || Date.parse(hsRunRow.started_at) < hsDispatchedAt - 60000);
+  if (waiting) {
+    box.innerHTML = '<i class="ti ti-loader"></i> Scrape queued on GitHub — this page updates automatically once it starts.';
+    return;
+  }
+  if (!hsRunRow) { box.innerHTML = 'No Harrison scrape has run yet. Press <strong>Run Harrison scrape</strong>.'; return; }
+  const r = hsRunRow;
+  const scope = r.scope === 'catalogue' ? 'whole catalogue' : 'discovered URLs';
+  const counts = { in_stock: 0, out_of_stock: 0, unknown: 0, error: 0 };
+  hsRows.forEach(x => { counts[x.stock_status] = (counts[x.stock_status] || 0) + 1; });
+  const summary = `${counts.in_stock} in stock · ${counts.out_of_stock} out of stock` +
+    (counts.unknown ? ` · ${counts.unknown} unknown` : '') + (counts.error ? ` · ${counts.error} errors` : '');
+  if (r.status === 'running') {
+    box.innerHTML = `<i class="ti ti-loader"></i> Running (${scope}) since ${hsWhen(r.started_at)} — ${hsRows.length}${r.url_count ? ' of ' + r.url_count : ''} products read so far.`;
+  } else if (r.status === 'failed') {
+    box.innerHTML = `<span style="color:var(--red)">Last run failed ${hsWhen(r.finished_at)}: ${hsEsc(r.error_message || 'unknown error')}</span>`;
+  } else {
+    box.innerHTML = `Last run ${hsWhen(r.finished_at || r.started_at)} (${scope}) — ${hsRows.length} products: ${summary}.`;
+  }
+}
+
+function hsFiltered() {
+  const q = ($('hs-q').value || '').trim().toLowerCase();
+  const st = $('hs-status').value;
+  return hsRows.filter(r =>
+    (!st || r.stock_status === st) &&
+    (!q || (r.product_name || '').toLowerCase().includes(q) || (r.harrison_sku || '').toLowerCase().includes(q)));
+}
+
+function hsRender() {
+  const list = $('hs-list');
+  if (!hsRunRow) { list.innerHTML = ''; return; }
+  const rows = hsFiltered();
+  if (!rows.length) { list.innerHTML = '<div style="color:var(--t3)">No products to show.</div>'; return; }
+  list.innerHTML = `<div class="tw"><table><thead><tr>
+      <th>Product name</th><th>Price (ex VAT)</th><th>Stock level</th><th>Stock status</th>
+    </tr></thead><tbody>${rows.map(r => `<tr>
+      <td><a href="${hsEsc(r.competitor_url)}" target="_blank" rel="noopener" style="color:var(--text)">${hsEsc(r.product_name || r.competitor_url)}</a>
+        ${r.harrison_sku ? `<div style="font-size:11px;color:var(--t3)">${hsEsc(r.harrison_sku)}</div>` : ''}
+        ${r.error_message ? `<div style="font-size:11px;color:var(--red)">${hsEsc(r.error_message)}</div>` : ''}</td>
+      <td>${hsMoney(r.price_ex_vat)}</td>
+      <td>${r.stock_level === null || r.stock_level === undefined ? '—' : r.stock_level}</td>
+      <td>${HS_STATUS[r.stock_status] || hsEsc(r.stock_status)}</td>
+    </tr>`).join('')}</tbody></table></div>`;
+}
+
+async function hsRun(btn) {
+  const scope = $('hs-scope').value;
+  const label = scope === 'catalogue' ? 'the whole Harrison catalogue' : 'all discovered Harrison URLs';
+  if (!confirm(`Start a Harrison stock scrape of ${label}?\n\nThis runs on GitHub and usually takes a few minutes${scope === 'catalogue' ? ' (longer for the whole catalogue)' : ''}.`)) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Starting…';
+  try {
+    const token = await getToken();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/smart-function`, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'harrison_stock', scope }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Dispatch failed');
+    hsDispatchedAt = Date.now();
+    hsRenderRunInfo();
+    hsStartPoll();
+  } catch (e) {
+    alert('Failed to start the Harrison scrape: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
+
+function hsStartPoll() {
+  if (hsPollTimer) return;
+  hsPollTimer = setInterval(() => {
+    if (!$('p-harrison').classList.contains('active')) { hsStopPoll(); return; }
+    if (hsDispatchedAt && Date.now() - hsDispatchedAt > 6 * 3600 * 1000) hsDispatchedAt = null;
+    loadHarrisonStock();
+  }, 15000);
+}
+
+function hsStopPoll() {
+  if (hsPollTimer) { clearInterval(hsPollTimer); hsPollTimer = null; }
+}
+
+function hsExport() {
+  const rows = hsFiltered();
+  if (!rows.length) return alert('Nothing to export.');
+  const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const lines = [['Product name','Harrison SKU','Price ex VAT','Price inc VAT','Stock level','Stock status','URL','Scraped at'].map(q).join(',')]
+    .concat(rows.map(r => [r.product_name, r.harrison_sku, r.price_ex_vat, r.price_inc_vat, r.stock_level,
+      r.stock_status, r.competitor_url, r.scraped_at].map(q).join(',')));
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `harrison-stock-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
