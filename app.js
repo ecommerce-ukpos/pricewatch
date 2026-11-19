@@ -3685,7 +3685,7 @@ function csdPeriodFor(checks, start, end) {
 
 // rise > 0 = likely restock since the previous reading → green (test data keeps its dotted underline)
 const csdCell = (r, rise) => !r ? '—'
-  : rise > 0 ? `<span style="color:var(--grn);font-weight:600${r.is_test ? ';text-decoration:underline dotted' : ''}" title="Likely restock: up ${rise.toLocaleString('en-GB')} since the previous check${r.is_test ? ' · test data' : ''}">${csLevel(r.stock_level)}</span>`
+  : rise > 0 ? `<span style="${r.is_test ? 'color:var(--red);' : ''}background:lightgreen;font-weight:600;${r.is_test ? 'text-decoration:underline dotted;' : ''}padding:3px;" title="Likely restock: up ${rise.toLocaleString('en-GB')} since the previous check${r.is_test ? ' · test data' : ''}">${csLevel(r.stock_level)}</span>`
   : r.is_test ? `<span style="color:var(--red);text-decoration:underline dotted" title="Test data — will be deleted">${r.stock_status === 'out_of_stock' ? 0 : csLevel(r.stock_level)}</span>`
   : r.stock_status === 'out_of_stock' ? '<span style="color:var(--red)" title="Out of stock">0</span>' : csLevel(r.stock_level);
 
@@ -3704,7 +3704,7 @@ function csdRenderPeriod(preset) {
   const tail = [
     ['Change', change === null ? '—' : `<span style="color:${change < 0 ? 'var(--red)' : change > 0 ? 'var(--grn)' : 'var(--t3)'}">${change > 0 ? '+' : ''}${change.toLocaleString('en-GB')}</span>`],
     ['Units sold (min)', p.readings >= 2 ? p.sold.toLocaleString('en-GB') : '—'],
-    ['Inferred restock (min)', p.readings >= 2 ? (p.restock ? '<span style="color:var(--grn);font-weight:600">+' + p.restock.toLocaleString('en-GB') + '</span>' : '0') : '—'],
+    ['Inferred restock (min)', p.readings >= 2 ? (p.restock ? '<span style="background:lightgreen;font-weight:600;padding:3px;">+' + p.restock.toLocaleString('en-GB') + '</span>' : '0') : '—'],
     ['Est daily sales', p.daily === null ? '—' : p.daily.toFixed(1)],
     ['Est daily sales value', p.daily === null || price === null ? '—' : csMoney(p.daily * price)],
     ['Published due in period', p.dues.length ? p.dues.map(x => csEsc(x)).join('<br>') : '—'],
@@ -3720,7 +3720,7 @@ function csdRenderPeriod(preset) {
   $('csd-period').innerHTML = `<table><thead>${head}</thead>
     <tbody><tr><td>${csEsc(csdData.hsku)}</td><td>${csMoney(price)}</td>${lvlCols.map(c => `<td${two ? ' style="text-align:center"' : ''}>${c.cell}</td>`).join('')}${tail.map(t => `<td>${t[1]}</td>`).join('')}</tr></tbody></table>`;
   $('csd-period-note').innerHTML = `${csdNice(p.start)} → ${csdNice(p.end)} (${p.days.length} days, Day 1 = ${csdNice(p.start)}). ` +
-    `Each day shows that day's last check; — = not checked that day; 0 in red = out of stock; <span style="color:var(--grn);font-weight:600">green</span> = likely restock (higher than the check before). ` +
+    `Each day shows that day's last check; — = not checked that day; 0 in red = out of stock; <span style="background:lightgreen;font-weight:600;padding:3px;">green background</span> = likely restock (higher than the check before). ` +
     `Units sold and inferred restock are minimums: a rise like 40 → 70 counts as a restock of at least 30, because stock may have kept falling before the delivery arrived.` +
     (p.readings < 2 ? ' <strong>Needs at least 2 checks inside these dates for sales figures.</strong>' : '') +
     (p.tests ? ` <strong style="color:var(--red)">${p.tests} of the ${p.readings} readings in these dates are test data (red).</strong>` : '');
@@ -3940,7 +3940,7 @@ function csmRenderTable() {
       ${cells.map((r, i) => `<td${two ? ' style="text-align:center"' : ''}>${csdCell(r, two ? p.rises[i] : 0)}</td>`).join('')}
       <td>${change === null ? '—' : `<span style="color:${change < 0 ? 'var(--red)' : change > 0 ? 'var(--grn)' : 'var(--t3)'}">${change > 0 ? '+' : ''}${change.toLocaleString('en-GB')}</span>`}</td>
       <td>${p.readings >= 2 ? p.sold.toLocaleString('en-GB') : '—'}</td>
-      <td>${p.readings >= 2 ? (p.restock ? '<span style="color:var(--grn);font-weight:600">+' + p.restock.toLocaleString('en-GB') + '</span>' : '0') : '—'}</td>
+      <td>${p.readings >= 2 ? (p.restock ? '<span style="background:lightgreen;font-weight:600;padding:3px;">+' + p.restock.toLocaleString('en-GB') + '</span>' : '0') : '—'}</td>
       <td>${p.daily === null ? '—' : p.daily.toFixed(1)}</td>
       <td>${p.daily === null || d.price === null ? '—' : csMoney(p.daily * d.price)}</td>
       <td>${p.dues.length ? p.dues.map(x => csEsc(x)).join('<br>') : '—'}</td></tr>`;
@@ -3948,12 +3948,12 @@ function csmRenderTable() {
   const totRow = list.length > 1 ? `<tr style="font-weight:600;border-top:2px solid var(--border)"><td colspan="4">Total (${list.length} codes)</td>
       ${tot.lv.map((v, i) => `<td${two ? ' style="text-align:center"' : ''}>${tot.lvAny[i] ? v.toLocaleString('en-GB') : '—'}</td>`).join('')}
       <td>${tot.change > 0 ? '+' : ''}${tot.change.toLocaleString('en-GB')}</td><td>${tot.sold.toLocaleString('en-GB')}</td>
-      <td>${tot.restock ? '<span style="color:var(--grn)">+' + tot.restock.toLocaleString('en-GB') + '</span>' : '0'}</td><td>${tot.any ? tot.daily.toFixed(1) : '—'}</td>
+      <td>${tot.restock ? '<span style="background:lightgreen;padding:3px;">+' + tot.restock.toLocaleString('en-GB') + '</span>' : '0'}</td><td>${tot.any ? tot.daily.toFixed(1) : '—'}</td>
       <td>${tot.any ? csMoney(tot.value) : '—'}</td><td></td></tr>` : '';
   $('csm-period').innerHTML = `<table><thead>${head}</thead><tbody>${body}${totRow}</tbody></table>`;
   const tests = list.reduce((a, x) => a + x.p.tests, 0), readings = list.reduce((a, x) => a + x.p.readings, 0);
   $('csm-period-note').innerHTML = `${csdNice(csmApplied.start)} → ${csdNice(csmApplied.end)} (${days.length} days, Day 1 = ${csdNice(csmApplied.start)}). ` +
-    `Each day shows that day's last check; — = not checked that day; 0 in red = out of stock; <span style="color:var(--grn);font-weight:600">green</span> = likely restock (higher than the check before). Totals add up the codes that have a figure. ` +
+    `Each day shows that day's last check; — = not checked that day; 0 in red = out of stock; <span style="background:lightgreen;font-weight:600;padding:3px;">green background</span> = likely restock (higher than the check before). Totals add up the codes that have a figure. ` +
     `Units sold and inferred restock are minimums (a rise like 40 → 70 is a restock of at least 30).` +
     (tests ? ` <strong style="color:var(--red)">${tests} of the ${readings} readings in these dates are test data (red).</strong>` : '');
 }
