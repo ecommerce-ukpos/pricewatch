@@ -3105,8 +3105,20 @@ let csRows = [], csLastRun = null, csRunning = null, csPollTimer = null, csOurs 
 let csView = 'in', csDispatchedAt = null, csCompsLoaded = false;
 const csEsc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const csMoney = v => (v === null || v === undefined || v === '') ? '—' : '£' + Number(v).toFixed(2);
-const csWhen = t => t ? new Date(t).toLocaleString('en-GB', {day:'2-digit', month:'short', year:'2-digit', hour:'2-digit', minute:'2-digit'}) : '—';
-const csDay  = t => t ? new Date(t).toLocaleDateString('en-GB', {day:'2-digit', month:'short', year:'2-digit'}) : '—';
+// Dates on screen are short: "18th Nov" (year added only if not this year). csWhen adds the
+// time on hover; csDayTxt is plain text (chart labels, CSV-free places).
+const csOrd = n => n + ((n % 100 >= 11 && n % 100 <= 13) ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th'));
+function csDayTxt(t) {
+  if (!t) return '—';
+  const d = new Date(t);
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', day: 'numeric', month: 'short', year: 'numeric' })
+    .formatToParts(d).map(x => [x.type, x.value]));
+  const thisYear = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year: 'numeric' }).format(new Date());
+  return `${csOrd(Number(parts.day))} ${parts.month}${parts.year !== thisYear ? ' ' + parts.year : ''}`;
+}
+const csFull = t => new Date(t).toLocaleString('en-GB', { timeZone: 'Europe/London', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+const csWhen = t => t ? `<span title="${csFull(t)}">${csDayTxt(t)}</span>` : '—';
+const csDay  = t => csDayTxt(t);
 const csCompId = () => parseInt(($('cs-comp') || {}).value || '10', 10);
 const csCompName = () => { const o = $('cs-comp'); return o && o.selectedOptions[0] ? o.selectedOptions[0].textContent.replace(/ \(not set up\)$/, '') : 'Harrison Products'; };
 
@@ -3156,9 +3168,9 @@ async function loadCompStock() {
     ]);
     if (runsRes.error) throw runsRes.error;
     const runs = runsRes.data || [];
-    csLastRun = runs.find(r => r.status !== 'running') || null;
+    csLastRun = runs.find(r => r.status !== 'running' && !r.is_test) || null;
     csRunning = runs.find(r => r.status === 'running') || null;
-    if (csDispatchedAt && runs.some(r => Date.parse(r.started_at) >= csDispatchedAt - 60000)) csDispatchedAt = null;
+    if (csDispatchedAt && runs.some(r => Date.parse(r.started_at) >= csDispatchedAt - 120000)) csDispatchedAt = null;
     if (csDispatchedAt && Date.now() - csDispatchedAt > 6 * 3600 * 1000) csDispatchedAt = null;
     csRows = rows;
     await csLoadOurs(rows);
@@ -3237,7 +3249,7 @@ function csLastRunText() {
   const r = csLastRun;
   if (!r) return 'No check has run yet';
   const scope = r.scope === 'catalogue' ? 'whole catalogue' : 'discovered URLs';
-  const what = r.check_type === 'levels' ? 'Run stock levels' : 'Check OOS items';
+  const what = (r.check_type === 'levels' ? 'Run stock levels' : 'Check OOS items') + (r.triggered_by === 'daily' ? ', daily schedule' : '');
   if (r.status === 'failed') return `<span style="color:var(--red)">Last run ${csWhen(r.finished_at || r.started_at)} (${what}) failed: ${csEsc(r.error_message || 'unknown error')}</span>`;
   const errs = (r.url_count || 0) - (r.ok_count || 0);
   return `Last run ${csWhen(r.finished_at || r.started_at)} · ${what} (${scope}) — ${r.ok_count ?? 0} products read` +
@@ -3424,7 +3436,7 @@ async function loadCsDetail(opts) {
   if (!hsku) return;
   try {
     const { data, error } = await sb.from('harrison_stock')
-      .select('run_id,scraped_at,competitor_url,product_name,harrison_sku,price_ex_vat,stock_level,stock_status,next_due_date,next_due_qty,due_scope,error_message,ukpos_skus')
+      .select('run_id,scraped_at,competitor_url,product_name,harrison_sku,price_ex_vat,stock_level,stock_status,next_due_date,next_due_qty,due_scope,error_message,ukpos_skus,is_test')
       .eq('harrison_sku', hsku).order('scraped_at', { ascending: true }).limit(5000);
     if (error) throw error;
     if (!data || !data.length) {
@@ -3439,6 +3451,12 @@ async function loadCsDetail(opts) {
     const ours = [...new Set(checks.flatMap(r => r.ukpos_skus || []))];
     $('csd-sub').innerHTML = `Harrison Products${name ? ' · ' + csEsc(name) : ''}${ours.length ? ` · our SKU ${ours.map(s => `<a href="#sku/${encodeURIComponent(s)}" onclick="event.preventDefault();go('sku-detail',{skuId:'${csEsc(s)}'})">${csEsc(s)}</a>`).join(', ')}` : ''}`;
     $('csd-site-link').href = url || '#';
+    // Test data (is_test) is shown in red everywhere on this page, until it is deleted.
+    const tests = checks.filter(r => r.is_test);
+    $('csd-test-note').style.display = tests.length ? '' : 'none';
+    $('csd-test-note').innerHTML = tests.length
+      ? `<i class="ti ti-flask"></i> <strong>Includes test data:</strong> ${tests.length} made-up check${tests.length === 1 ? '' : 's'}, ${csDay(tests[0].scraped_at)} – ${csDay(tests[tests.length - 1].scraped_at)}, shown in red. The figures above include them. They will be deleted later.`
+      : '';
 
     // Headline figures. A check that found it out of stock counts as a level of 0.
     const lvl = r => r.stock_status === 'out_of_stock' ? 0 : r.stock_level;
@@ -3474,7 +3492,7 @@ async function loadCsDetail(opts) {
     ].join('');
 
     // Chart: stock level per check; out-of-stock checks plotted at 0
-    const pts = checks.map(r => ({ x: r.scraped_at, y: r.stock_status === 'out_of_stock' ? 0 : r.stock_level, oos: r.stock_status === 'out_of_stock' }));
+    const pts = checks.map(r => ({ x: r.scraped_at, y: r.stock_status === 'out_of_stock' ? 0 : r.stock_level, oos: r.stock_status === 'out_of_stock', test: !!r.is_test }));
     const plotted = pts.filter(p => p.y !== null && p.y !== undefined);
     $('csd-chart-note').textContent = plotted.length
       ? `${checks.length} check${checks.length === 1 ? '' : 's'} since ${csDay(checks[0].scraped_at)} · out of stock shown as 0`
@@ -3482,16 +3500,21 @@ async function loadCsDetail(opts) {
     csdChart = new Chart($('csd-chart'), {
       type: 'line',
       data: {
-        labels: plotted.map(p => csWhen(p.x)),
+        labels: plotted.map(p => csDayTxt(p.x)),
         datasets: [{
           data: plotted.map(p => p.y), borderColor: '#378ADD', backgroundColor: 'rgba(55,138,221,.08)', fill: true,
           tension: 0, stepped: false, pointRadius: 4,
-          pointBackgroundColor: plotted.map(p => p.oos ? '#A32D2D' : '#378ADD'), pointBorderColor: plotted.map(p => p.oos ? '#A32D2D' : '#378ADD'),
+          // Red = out of stock (filled at 0) or test data (hollow red ring)
+          pointBackgroundColor: plotted.map(p => p.oos ? '#A32D2D' : p.test ? '#fff' : '#378ADD'),
+          pointBorderColor: plotted.map(p => (p.oos || p.test) ? '#A32D2D' : '#378ADD'),
+          pointBorderWidth: plotted.map(p => p.test ? 2 : 1),
+          segment: { borderColor: c => (plotted[c.p0DataIndex].test || plotted[c.p1DataIndex].test) ? '#A32D2D' : '#378ADD',
+                     borderDash: c => (plotted[c.p0DataIndex].test || plotted[c.p1DataIndex].test) ? [4, 3] : undefined },
         }],
       },
       options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => plotted[c.dataIndex].oos ? 'Out of stock' : `${Number(c.parsed.y).toLocaleString('en-GB')} in stock` } } },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { title: it => it.length ? csFull(plotted[it[0].dataIndex].x) : '', label: c => (plotted[c.dataIndex].test ? 'TEST DATA · ' : '') + (plotted[c.dataIndex].oos ? 'Out of stock' : `${Number(c.parsed.y).toLocaleString('en-GB')} in stock`) } } },
         scales: {
           x: { grid: { display: false }, ticks: { color: '#6b6a64', font: { size: 9 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
           y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,.05)' }, ticks: { color: '#6b6a64', font: { size: 9 }, precision: 0 } },
@@ -3513,7 +3536,8 @@ async function loadCsDetail(opts) {
         }
       }
       const due = r.next_due_date ? `${csDay(r.next_due_date)}${r.next_due_qty ? ` · ${Number(r.next_due_qty).toLocaleString('en-GB')}` : ''}${r.due_scope === 'range' ? ' <span style="font-size:11px;color:var(--t3)">(range)</span>' : ''}` : '—';
-      return `<tr><td style="white-space:nowrap">${csWhen(r.scraped_at)}</td><td>${csdStatus(r.stock_status)}</td><td>${csLevel(r.stock_level)}</td><td>${change}</td><td>${csMoney(r.price_ex_vat)}</td><td>${due}</td><td style="font-size:11px;color:var(--red)">${csEsc(r.error_message || '')}</td></tr>`;
+      const tst = r.is_test ? ' style="color:var(--red);background:var(--rb)" title="Test data — will be deleted"' : '';
+      return `<tr${tst}><td style="white-space:nowrap">${csWhen(r.scraped_at)}${r.is_test ? ' <span class="badge b-r" style="font-size:10px">TEST</span>' : ''}</td><td>${csdStatus(r.stock_status)}</td><td>${csLevel(r.stock_level)}</td><td>${change}</td><td>${csMoney(r.price_ex_vat)}</td><td>${due}</td><td style="font-size:11px;color:var(--red)">${csEsc(r.error_message || '')}</td></tr>`;
     }).reverse().join('');
     csdData = { hsku, name, url, price, checks };
     csdInitPeriod();
@@ -3580,10 +3604,13 @@ function csdPeriod() {
   const startRow = cells[0], endRow = cells[cells.length - 1];
   const dues = [...new Set(csdData.checks.filter(r => r.next_due_date && r.next_due_date >= start && r.next_due_date <= end)
     .map(r => `${r.next_due_date}${r.next_due_qty ? ' (' + r.next_due_qty + ')' : ''}`))];
-  return { start, end, days, cells, startRow, endRow, sold, restock, daily, readings: inP.length, dues };
+  const tests = inP.filter(r => r.is_test).length;
+  return { start, end, days, cells, startRow, endRow, sold, restock, daily, readings: inP.length, tests, dues };
 }
 
-const csdCell = r => !r ? '—' : r.stock_status === 'out_of_stock' ? '<span style="color:var(--red)" title="Out of stock">0</span>' : csLevel(r.stock_level);
+const csdCell = r => !r ? '—'
+  : r.is_test ? `<span style="color:var(--red);text-decoration:underline dotted" title="Test data — will be deleted">${r.stock_status === 'out_of_stock' ? 0 : csLevel(r.stock_level)}</span>`
+  : r.stock_status === 'out_of_stock' ? '<span style="color:var(--red)" title="Out of stock">0</span>' : csLevel(r.stock_level);
 
 function csdRenderPeriod(preset) {
   const p = csdPeriod();
@@ -3610,7 +3637,8 @@ function csdRenderPeriod(preset) {
   $('csd-period-note').innerHTML = `${csdNice(p.start)} → ${csdNice(p.end)} (${p.days.length} days, Day 1 = ${csdNice(p.start)}). ` +
     `Each day shows that day's last check; — = not checked that day; 0 in red = out of stock. ` +
     `Units sold and inferred restock are minimums: a rise like 40 → 70 counts as a restock of at least 30, because stock may have kept falling before the delivery arrived.` +
-    (p.readings < 2 ? ' <strong>Needs at least 2 checks inside these dates for sales figures.</strong>' : '');
+    (p.readings < 2 ? ' <strong>Needs at least 2 checks inside these dates for sales figures.</strong>' : '') +
+    (p.tests ? ` <strong style="color:var(--red)">${p.tests} of the ${p.readings} readings in these dates are test data (red).</strong>` : '');
 }
 
 function csdExport() {
@@ -3620,9 +3648,9 @@ function csdExport() {
   const lvlHead = csdMode === 'all' ? p.days.map((d, i) => `Day ${i + 1} (${d})`) : [`Start (${p.start})`, `End (${p.end})`];
   const lvlVals = csdMode === 'all' ? p.cells.map(val) : [val(p.startRow), val(p.endRow)];
   const change = p.startRow && p.endRow ? csdLvl(p.endRow) - csdLvl(p.startRow) : '';
-  const head = ['Their code', 'Name', 'Price ex VAT', ...lvlHead, 'Change', 'Units sold (min)', 'Inferred restock (min)', 'Est daily sales (units)', 'Est daily sales value (ex VAT)', 'Published due in period', 'URL'];
+  const head = ['Their code', 'Name', 'Price ex VAT', ...lvlHead, 'Change', 'Units sold (min)', 'Inferred restock (min)', 'Est daily sales (units)', 'Est daily sales value (ex VAT)', 'Published due in period', 'Test readings in period', 'URL'];
   const row = [csdData.hsku, csdData.name, csdData.price ?? '', ...lvlVals, change, p.readings >= 2 ? p.sold : '', p.readings >= 2 ? p.restock : '',
-    p.daily === null ? '' : p.daily.toFixed(1), p.daily === null || csdData.price === null ? '' : (p.daily * csdData.price).toFixed(2), p.dues.join('; '), csdData.url];
+    p.daily === null ? '' : p.daily.toFixed(1), p.daily === null || csdData.price === null ? '' : (p.daily * csdData.price).toFixed(2), p.dues.join('; '), p.tests ? `${p.tests} of ${p.readings} (test data)` : 0, csdData.url];
   const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const blob = new Blob(['\ufeff' + [head.map(q).join(','), row.map(q).join(',')].join('\r\n')], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');

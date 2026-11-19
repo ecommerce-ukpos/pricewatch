@@ -46,6 +46,16 @@ Products with sizes/colours (kind):
     options_unsplit options found but no variant codes   → 'unknown', not listed
     cut_to_order   no basket (e.g. "Cut to order" strips) → 'unknown', not listed
 
+Daily schedule (.github/workflows/harrison_daily.yml) — "careful" settings, all env:
+  HARRISON_TRIGGER  'daily' labels the run (harrison_stock_runs.triggered_by) and skips the
+                    run if a daily run already started today (UK date).
+  HARRISON_SHUFFLE  '1' = read URLs in random order, not alphabetically.
+  HARRISON_STOP_AT  'HH:MM' UK time — stop taking new URLs at this time; the run is still
+                    saved as done, with a note of how many URLs were not read.
+  Block guard: after BLOCK_STREAK errors in a row the run pauses 3–6 minutes; if the next
+  BLOCK_STREAK reads also all fail, it stops and is marked failed ("may be blocking us").
+Times are stored to the minute (a database trigger also truncates them).
+
 Next stock due (from the "Stock & Lead Times" block, lines like "2,000  Due in 19/11/2026"):
   due_in        all listed deliveries [{qty, date}]
   next_due_date / next_due_qty  earliest delivery dated today or later
@@ -61,6 +71,7 @@ import random
 import re
 import sys
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Optional
 from urllib.parse import urlparse, parse_qs
 
@@ -82,6 +93,24 @@ MODE          = (os.environ.get("HARRISON_MODE") or "oos").strip().lower()
 CHECK         = MODE.split("_")[0]
 SCOPE         = "catalogue" if MODE.endswith("_catalogue") else "matches"
 BATCH         = 100
+TRIGGER       = (os.environ.get("HARRISON_TRIGGER") or "manual").strip().lower()
+SHUFFLE       = (os.environ.get("HARRISON_SHUFFLE") or "") in ("1", "true", "yes")
+STOP_AT       = (os.environ.get("HARRISON_STOP_AT") or "").strip()     # 'HH:MM' UK time
+BLOCK_STREAK  = 8
+UK            = ZoneInfo("Europe/London")
+
+
+def now_min() -> str:
+    """UTC now, to the minute: '2026-11-18 17:30+00'."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M+00")
+
+
+def past_stop_time() -> bool:
+    if not STOP_AT:
+        return False
+    hh, mm = (int(x) for x in STOP_AT.split(":"))
+    n = datetime.now(UK)
+    return (n.hour, n.minute) >= (hh, mm)
 
 PAGE_JS = r"""
 () => {
@@ -407,10 +436,23 @@ async def main():
         sys.exit(1)
 
     sb  = sb_client()
+    if TRIGGER == "daily":
+        today_uk = datetime.now(UK).date()
+        since = datetime(today_uk.year, today_uk.month, today_uk.day, tzinfo=UK).astimezone(timezone.utc).isoformat()
+        already = (sb.table("harrison_stock_runs").select("id").eq("triggered_by", "daily")
+                   .gte("started_at", since).limit(1).execute().data)
+        if already:
+            log.info("A daily Harrison run already started today (UK) — nothing to do.")
+            return
+        if past_stop_time():
+            log.info(f"Already past {STOP_AT} UK — not starting today's daily run.")
+            return
     run = sb.table("harrison_stock_runs").insert(
-        {"scope": SCOPE, "check_type": CHECK, "status": "running"}).execute().data[0]
+        {"scope": SCOPE, "check_type": CHECK, "status": "running", "triggered_by": TRIGGER,
+         "started_at": now_min()}).execute().data[0]
     run_id = run["id"]
-    log.info(f"Harrison stock run {run_id} — check={CHECK} scope={SCOPE}")
+    log.info(f"Harrison stock run {run_id} — check={CHECK} scope={SCOPE} trigger={TRIGGER} "
+             f"workers={WORKERS} delay={DELAY_MIN}-{DELAY_MAX}s shuffle={SHUFFLE} stop_at={STOP_AT or '-'}")
 
     try:
         async with async_playwright() as pw:
@@ -426,6 +468,8 @@ async def main():
                 before = len(urls)
                 urls = [u for u in urls if u not in oos]
                 log.info(f"Stock levels: skipping {before - len(urls)} URLs last seen out of stock")
+            if SHUFFLE:
+                random.shuffle(urls)
             log.info(f"{len(urls)} Harrison URLs to read")
             sb.table("harrison_stock_runs").update({"url_count": len(urls)}).eq("id", run_id).execute()
 
@@ -436,18 +480,24 @@ async def main():
                     seen.add(u)
                     queue.put_nowait(u)
             pending: list[dict] = []
-            done = {"n": 0, "ok": 0, "total": len(seen)}
+            done = {"n": 0, "ok": 0, "total": len(seen), "skipped": 0}
+            guard = {"streak": 0, "paused": False, "stop": None}   # stop: None | 'time' | 'blocked'
+            pause_lock = asyncio.Lock()
 
             async def handle(ctx: BrowserContext, u: str):
                 row = await read_product(ctx, u)
                 expand = row.pop("_expand", None) or []
                 row["run_id"] = run_id
                 row["ukpos_skus"] = matched.get(u) or None
-                row["scraped_at"] = datetime.now(timezone.utc).isoformat()
+                row["scraped_at"] = now_min()
                 pending.append(row)
                 done["n"] += 1
                 if row["stock_status"] != "error":
                     done["ok"] += 1
+                    guard["streak"] = 0
+                    guard["paused"] = False
+                else:
+                    await note_error()
                 base = u.split("?")[0]
                 added = 0
                 for code in expand:
@@ -467,13 +517,39 @@ async def main():
                     del pending[:BATCH]
                     write_rows(sb, chunk)
 
+            async def note_error():
+                # Many errors in a row = Harrison may be refusing us. Pause once, then give up.
+                guard["streak"] += 1
+                if guard["streak"] < BLOCK_STREAK or guard["stop"]:
+                    return
+                async with pause_lock:
+                    if guard["streak"] < BLOCK_STREAK or guard["stop"]:
+                        return
+                    if not guard["paused"]:
+                        wait = random.uniform(180, 360)
+                        log.warning(f"  {guard['streak']} errors in a row — pausing {wait/60:.1f} min")
+                        await asyncio.sleep(wait)
+                        guard["paused"] = True
+                        guard["streak"] = 0
+                    else:
+                        log.error(f"  still failing after a pause — stopping (Harrison may be blocking us)")
+                        guard["stop"] = "blocked"
+
             async def worker(ctx: BrowserContext):
                 while True:
                     u = await queue.get()
+                    if not guard["stop"] and past_stop_time():
+                        guard["stop"] = "time"
+                        log.warning(f"  reached {STOP_AT} UK — not reading the rest")
+                    if guard["stop"]:
+                        done["skipped"] += 1
+                        queue.task_done()
+                        continue
                     try:
                         await handle(ctx, u)
                     except Exception as e:
                         log.warning(f"  worker error on {u}: {e}")
+                        await note_error()
                     finally:
                         queue.task_done()
                     await asyncio.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
@@ -488,16 +564,23 @@ async def main():
             sb.table("harrison_stock_runs").update({"url_count": done["n"]}).eq("id", run_id).execute()
             await browser.close()
 
+        note = None
+        if guard["stop"] == "time":
+            note = f"Stopped at {STOP_AT} UK: {done['skipped']} URLs not read"
+        elif guard["stop"] == "blocked":
+            note = f"Stopped early: many errors in a row, Harrison may be blocking us ({done['skipped']} URLs not read)"
         sb.table("harrison_stock_runs").update({
-            "status": "done", "ok_count": done["ok"],
-            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "status": "failed" if guard["stop"] == "blocked" else "done", "ok_count": done["ok"],
+            "error_message": note, "finished_at": now_min(),
         }).eq("id", run_id).execute()
-        log.info(f"Done — {done['ok']}/{done['n']} read OK")
+        log.info(f"Done — {done['ok']}/{done['n']} read OK" + (f" · {note}" if note else ""))
+        if guard["stop"] == "blocked":
+            sys.exit(1)
     except Exception as e:
         log.exception("Harrison stock run failed")
         sb.table("harrison_stock_runs").update({
             "status": "failed", "error_message": str(e)[:500],
-            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "finished_at": now_min(),
         }).eq("id", run_id).execute()
         sys.exit(1)
 
