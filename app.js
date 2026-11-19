@@ -223,7 +223,7 @@ function ukposUrl(skuId, url, slug) {
 function skuLink(row) {
   const url = ukposUrl(row.sku_id, row.our_url || row.product_url, row.slug);
   return `<a class="prod-link" href="${url}" target="_blank" rel="noopener" onclick="event.stopPropagation()">
-    <span style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:var(--blu)">${row.sku_id}</span>
+    <span style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:var(--blu)">${row.sku_id} <i class="ti ti-external-link" style="font-size:10px;color:var(--t3)" title="Opens ukpos.com in a new tab"></i></span>
     <span style="font-size:10px;color:var(--t2);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block">${row.short_title||''}</span>
   </a>`;
 }
@@ -2510,7 +2510,9 @@ function renderSkusRows(rows) {
         ${ourPerUnit ? `<div style="font-size:12px;color:var(--t2)">${fmtPrice(ourPerUnit)}/unit</div>` : ''}
       </td>
       <td style="color:var(--t2)">${r.competitor_name||'—'}</td>
-      <td style="font-weight:500">${ex ? fmtPrice(ex) : '—'}${ex ? ` <span style="font-size:9px;color:var(--t3)">${vatPill(vat)}</span>` : ''}</td>
+      <td style="font-weight:500;white-space:nowrap">${ex ? (r.competitor_url
+        ? `<a href="${r.competitor_url}" target="_blank" rel="noopener" title="Opens ${r.competitor_name || 'the competitor'} in a new tab" style="color:var(--text);text-decoration:underline;text-decoration-color:rgba(0,0,0,.2);text-underline-offset:2px" onclick="event.stopPropagation()">${fmtPrice(ex)} <i class="ti ti-external-link" style="font-size:10px;color:var(--t3)"></i></a>`
+        : fmtPrice(ex)) : '—'}${ex ? ` <span style="font-size:9px;color:var(--t3)">${vatPill(vat)}</span>` : ''}</td>
       <td>
         <span class="${diffClass(diff)}">${diffLabel(diff)}</span>
         ${showPerUnit ? `<div style="font-size:12px;color:var(--t2)" title="Pack of ${unitQty} vs per-unit comparison">per unit · pack: <span class="${diffClass(packDiff)}">${diffLabel(packDiff)}</span></div>` : ''}
