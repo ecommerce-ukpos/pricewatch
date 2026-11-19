@@ -3492,37 +3492,6 @@ async function loadCsDetail(opts) {
       metric('Next stock due', last.next_due_date ? csDay(last.next_due_date) : '—', last.next_due_date ? `${last.next_due_qty ? Number(last.next_due_qty).toLocaleString('en-GB') + ' units' : ''}${last.due_scope === 'range' ? ' · whole range' : ''}` : ''),
     ].join('');
 
-    // Chart: stock level per check; out-of-stock checks plotted at 0
-    const pts = checks.map(r => ({ x: r.scraped_at, y: r.stock_status === 'out_of_stock' ? 0 : r.stock_level, oos: r.stock_status === 'out_of_stock', test: !!r.is_test }));
-    const plotted = pts.filter(p => p.y !== null && p.y !== undefined);
-    $('csd-chart-note').textContent = plotted.length
-      ? `${checks.length} check${checks.length === 1 ? '' : 's'} since ${csDay(checks[0].scraped_at)} · out of stock shown as 0`
-      : `${checks.length} check${checks.length === 1 ? '' : 's'} · Harrison shows no stock number for this item`;
-    csdChart = new Chart($('csd-chart'), {
-      type: 'line',
-      data: {
-        labels: plotted.map(p => csDayTxt(p.x)),
-        datasets: [{
-          data: plotted.map(p => p.y), borderColor: '#378ADD', backgroundColor: 'rgba(55,138,221,.08)', fill: true,
-          tension: 0, stepped: false, pointRadius: 4,
-          // Red = out of stock (filled at 0) or test data (hollow red ring)
-          pointBackgroundColor: plotted.map(p => p.oos ? '#A32D2D' : p.test ? '#fff' : '#378ADD'),
-          pointBorderColor: plotted.map(p => (p.oos || p.test) ? '#A32D2D' : '#378ADD'),
-          pointBorderWidth: plotted.map(p => p.test ? 2 : 1),
-          segment: { borderColor: c => (plotted[c.p0DataIndex].test || plotted[c.p1DataIndex].test) ? '#A32D2D' : '#378ADD',
-                     borderDash: c => (plotted[c.p0DataIndex].test || plotted[c.p1DataIndex].test) ? [4, 3] : undefined },
-        }],
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { title: it => it.length ? csFull(plotted[it[0].dataIndex].x) : '', label: c => (plotted[c.dataIndex].test ? 'TEST DATA · ' : '') + (plotted[c.dataIndex].oos ? 'Out of stock' : `${Number(c.parsed.y).toLocaleString('en-GB')} in stock`) } } },
-        scales: {
-          x: { grid: { display: false }, ticks: { color: '#6b6a64', font: { size: 9 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
-          y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,.05)' }, ticks: { color: '#6b6a64', font: { size: 9 }, precision: 0 } },
-        },
-      },
-    });
-
     // Table: every check, newest first, with change since the previous level reading
     const rowsHtml = [...checks].map((r, i) => {
       let change = '';
@@ -3546,6 +3515,49 @@ async function loadCsDetail(opts) {
   } catch (e) {
     $('csd-table').innerHTML = `<div style="padding:18px;color:var(--red)">Could not load stock history: ${csEsc(e.message)}</div>`;
   }
+}
+
+// Chart: stock level per check within the applied date range (the date picker above it);
+// out-of-stock checks plotted at 0.
+function csdDrawChart() {
+  if (csdChart) { csdChart.destroy(); csdChart = null; }
+  if (!csdData) return;
+  const checks = csdData.checks.filter(r => {
+    if (!csdApplied) return true;
+    const k = csdKey(new Date(r.scraped_at));
+    return k >= csdApplied.start && k <= csdApplied.end;
+  });
+  if (!checks.length) { $('csd-chart-note').textContent = 'No checks between these dates'; return; }
+  // Chart: stock level per check; out-of-stock checks plotted at 0
+  const pts = checks.map(r => ({ x: r.scraped_at, y: r.stock_status === 'out_of_stock' ? 0 : r.stock_level, oos: r.stock_status === 'out_of_stock', test: !!r.is_test }));
+  const plotted = pts.filter(p => p.y !== null && p.y !== undefined);
+  $('csd-chart-note').textContent = plotted.length
+    ? `${checks.length} check${checks.length === 1 ? '' : 's'} ${csDay(checks[0].scraped_at)} – ${csDay(checks[checks.length - 1].scraped_at)} · out of stock shown as 0`
+    : `${checks.length} check${checks.length === 1 ? '' : 's'} · Harrison shows no stock number for this item`;
+  csdChart = new Chart($('csd-chart'), {
+    type: 'line',
+    data: {
+      labels: plotted.map(p => csDayTxt(p.x)),
+      datasets: [{
+        data: plotted.map(p => p.y), borderColor: '#378ADD', backgroundColor: 'rgba(55,138,221,.08)', fill: true,
+        tension: 0, stepped: false, pointRadius: 4,
+        // Red = out of stock (filled at 0) or test data (hollow red ring)
+        pointBackgroundColor: plotted.map(p => p.oos ? '#A32D2D' : p.test ? '#fff' : '#378ADD'),
+        pointBorderColor: plotted.map(p => (p.oos || p.test) ? '#A32D2D' : '#378ADD'),
+        pointBorderWidth: plotted.map(p => p.test ? 2 : 1),
+        segment: { borderColor: c => (plotted[c.p0DataIndex].test || plotted[c.p1DataIndex].test) ? '#A32D2D' : '#378ADD',
+                   borderDash: c => (plotted[c.p0DataIndex].test || plotted[c.p1DataIndex].test) ? [4, 3] : undefined },
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { title: it => it.length ? csFull(plotted[it[0].dataIndex].x) : '', label: c => (plotted[c.dataIndex].test ? 'TEST DATA · ' : '') + (plotted[c.dataIndex].oos ? 'Out of stock' : `${Number(c.parsed.y).toLocaleString('en-GB')} in stock`) } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#6b6a64', font: { size: 9 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
+        y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,.05)' }, ticks: { color: '#6b6a64', font: { size: 9 }, precision: 0 } },
+      },
+    },
+  });
 }
 
 /* ── Harrison SKU page: stock position by date ──────────────────────────────
@@ -3581,6 +3593,7 @@ function csdGo() {
   if (start > end) { [start, end] = [end, start]; $('csd-start').value = start; $('csd-end').value = end; }
   csdApplied = { start, end };
   csdRenderPeriod();
+  csdDrawChart();
 }
 function csdMarkPending() {
   const pending = !csdApplied || $('csd-start').value !== csdApplied.start || $('csd-end').value !== csdApplied.end;
@@ -3638,7 +3651,7 @@ function csdRenderPeriod(preset) {
   if (!p) { $('csd-period').innerHTML = ''; return; }
   const price = csdData.price;
   const lvlCols = csdMode === 'all'
-    ? p.days.map((d, i) => ({ head: `<span title="${csdNice(d)}">Day ${i + 1}</span>`, cell: csdCell(p.cells[i]) }))
+    ? p.days.map((d, i) => ({ head: `<span title="${csdNice(d)}">${i + 1}</span>`, cell: csdCell(p.cells[i]) }))
     : [{ head: `<span title="${csdNice(p.start)}">Start</span>`, cell: csdCell(p.startRow) },
        { head: `<span title="${csdNice(p.end)}">End</span>`, cell: csdCell(p.endRow) }];
   const change = p.startRow && p.endRow ? csdLvl(p.endRow) - csdLvl(p.startRow) : null;
@@ -3650,8 +3663,16 @@ function csdRenderPeriod(preset) {
     ['Est daily sales value', p.daily === null || price === null ? '—' : csMoney(p.daily * price)],
     ['Published due in period', p.dues.length ? p.dues.map(x => csEsc(x)).join('<br>') : '—'],
   ];
-  $('csd-period').innerHTML = `<table><thead><tr><th>Their code</th><th>Price (ex VAT)</th>${lvlCols.map(c => `<th style="white-space:nowrap">${c.head}</th>`).join('')}${tail.map(t => `<th>${t[0]}</th>`).join('')}</tr></thead>
-    <tbody><tr><td>${csEsc(csdData.hsku)}</td><td>${csMoney(price)}</td>${lvlCols.map(c => `<td>${c.cell}</td>`).join('')}${tail.map(t => `<td>${t[1]}</td>`).join('')}</tr></tbody></table>`;
+  // Show all: "Day" spans the day columns, with 1, 2, 3… underneath (date on hover)
+  const two = csdMode === 'all';
+  const rs = two ? ' rowspan="2" style="vertical-align:bottom"' : '';
+  const ctr = 'text-align:center;white-space:nowrap';
+  const head = two
+    ? `<tr><th${rs}>Their code</th><th${rs}>Price (ex VAT)</th><th colspan="${lvlCols.length}" style="${ctr};border-bottom:1px solid var(--border)">Day</th>${tail.map(t => `<th${rs}>${t[0]}</th>`).join('')}</tr>
+       <tr>${lvlCols.map(c => `<th style="${ctr}">${c.head}</th>`).join('')}</tr>`
+    : `<tr><th>Their code</th><th>Price (ex VAT)</th>${lvlCols.map(c => `<th style="white-space:nowrap">${c.head}</th>`).join('')}${tail.map(t => `<th>${t[0]}</th>`).join('')}</tr>`;
+  $('csd-period').innerHTML = `<table><thead>${head}</thead>
+    <tbody><tr><td>${csEsc(csdData.hsku)}</td><td>${csMoney(price)}</td>${lvlCols.map(c => `<td${two ? ' style="text-align:center"' : ''}>${c.cell}</td>`).join('')}${tail.map(t => `<td>${t[1]}</td>`).join('')}</tr></tbody></table>`;
   $('csd-period-note').innerHTML = `${csdNice(p.start)} → ${csdNice(p.end)} (${p.days.length} days, Day 1 = ${csdNice(p.start)}). ` +
     `Each day shows that day's last check; — = not checked that day; 0 in red = out of stock. ` +
     `Units sold and inferred restock are minimums: a rise like 40 → 70 counts as a restock of at least 30, because stock may have kept falling before the delivery arrived.` +
