@@ -410,6 +410,27 @@
       <div class="content" style="overflow-y:auto">
         <div id="csd-metrics" class="metrics"></div>
         <div class="card">
+          <div class="card-hd" style="flex-wrap:wrap;gap:10px">
+            <div class="card-title">Stock position by date</div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px">
+              <label>Start <input type="date" id="csd-start" onchange="csdPeriodChanged()"></label>
+              <label>End <input type="date" id="csd-end" onchange="csdPeriodChanged()"></label>
+              <span class="icon-tog-wrap">
+                <button class="icon-tog" id="csd-p-1" onclick="csdPreset(1)">Daily</button>
+                <button class="icon-tog" id="csd-p-7" onclick="csdPreset(7)">Weekly</button>
+                <button class="icon-tog" id="csd-p-30" onclick="csdPreset(30)">Monthly</button>
+              </span>
+              <span class="icon-tog-wrap">
+                <button class="icon-tog" id="csd-v-ends" onclick="csdSetMode('ends')">Show start/end</button>
+                <button class="icon-tog" id="csd-v-all" onclick="csdSetMode('all')">Show all</button>
+              </span>
+              <button class="btn sm" onclick="csdExport()"><i class="ti ti-download"></i> Export CSV</button>
+            </div>
+          </div>
+          <div class="tw" id="csd-period"></div>
+          <div id="csd-period-note" style="font-size:11px;color:var(--t3);margin-top:8px"></div>
+        </div>
+        <div class="card">
           <div class="card-hd"><div class="card-title">Stock level history</div><span id="csd-chart-note" style="font-size:11px;color:var(--t2)"></span></div>
           <div style="position:relative;height:240px"><canvas id="csd-chart"></canvas></div>
         </div>
