@@ -99,7 +99,7 @@ a:hover{text-decoration-color:var(--blu)}
 
 /* ── URL bar (permalink indicator) ── */
 .url-bar{background:var(--bg);border-bottom:1px solid var(--border);padding:5px 18px;display:flex;align-items:center;gap:8px;font-size:14px;color:var(--t3);flex-shrink:0}
-.url-path{font-family:'SF Mono',monospace;color:var(--t2);font-size:14px}
+.url-path{font-family:Arial,Helvetica,sans-serif;color:var(--t2);font-size:14px}
 .url-copy-btn{background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;font-size:12px;cursor:pointer;color:var(--t2);font-family:inherit;transition:background .1s}
 .url-copy-btn:hover{background:var(--surface)}
 
@@ -229,7 +229,7 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
 .sku-card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(176px,1fr));gap:10px}
 .sku-card{border-radius:var(--rl);border:1px solid var(--border);padding:12px;cursor:pointer;transition:opacity .12s;display:flex;flex-direction:column;gap:6px}
 .sku-card:hover{opacity:.82}
-.sc-id{font-family:'SF Mono',monospace;font-size:12px}
+.sc-id{font-family:Arial,Helvetica,sans-serif;font-size:12px}
 .sc-name{font-size:14px;font-weight:500;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .sc-prices{display:flex;justify-content:space-between;font-size:14px;color:var(--t2)}
 .sc-diff{font-size:16px;font-weight:500}
@@ -265,7 +265,7 @@ tr.row-gray td:first-child{border-left:3px solid transparent;padding-left:10px}
 /* ── SKU hero ── */
 .sku-hero{display:flex;gap:16px;align-items:flex-start}
 .sku-img{width:72px;height:72px;border-radius:var(--r);border:1px solid var(--border);background:var(--bg);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--t3)}
-.sku-id-badge{font-family:'SF Mono',monospace;font-size:14px;color:var(--blu);margin-bottom:3px}
+.sku-id-badge{font-family:Arial,Helvetica,sans-serif;font-size:14px;color:var(--blu);margin-bottom:3px}
 .sku-name{font-size:17px;font-weight:500;margin-bottom:5px}
 .sku-price-main{font-size:22px;font-weight:500}
 .sku-attrs{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}

@@ -223,7 +223,7 @@ function ukposUrl(skuId, url, slug) {
 function skuLink(row) {
   const url = ukposUrl(row.sku_id, row.our_url || row.product_url, row.slug);
   return `<a class="prod-link" href="${url}" target="_blank" rel="noopener" onclick="event.stopPropagation()">
-    <span style="font-family:'SF Mono',monospace;font-size:11px;color:var(--blu)">${row.sku_id}</span>
+    <span style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:var(--blu)">${row.sku_id}</span>
     <span style="font-size:10px;color:var(--t2);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block">${row.short_title||''}</span>
   </a>`;
 }
@@ -1108,7 +1108,7 @@ function renderReviewRows(rows) {
       </td>
       <td style="min-width:140px">
         <a href="${ourUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()"
-          style="display:inline-flex;align-items:center;gap:4px;font-family:'SF Mono',monospace;font-size:12px;color:var(--blu);text-decoration:none;font-weight:600">
+          style="display:inline-flex;align-items:center;gap:4px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:var(--blu);text-decoration:none;font-weight:600">
           ${r.sku_id}<i class="ti ti-arrow-up-right" style="font-size:13px"></i>
         </a>
         <a href="${ourUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()"
@@ -1408,7 +1408,7 @@ function renderCategoryLevel() {
         <th style="width:50px"></th>
       </tr></thead><tbody>${page.map(s => `
         <tr class="tr-link" onclick="go('sku-detail',{skuId:'${s.sku_id}',fromPanel:'bycat'})">
-          <td><span style="font-family:'SF Mono',monospace;color:var(--blu)">${s.sku_id}</span></td>
+          <td><span style="font-family:Arial,Helvetica,sans-serif;color:var(--blu)">${s.sku_id}</span></td>
           <td style="color:var(--text)">${s.short_title||''}</td>
           <td style="font-weight:500">${fmtPrice(s.price_ex_vat)} <span class="vat vex">ex</span></td>
           <td>${stockBadge(s.availability)}</td>
@@ -1675,7 +1675,7 @@ function renderCompDetail() {
     const vat  = s.competitor_vat || s.competitor_vat_default || 'unknown';
     const ex   = raw ? normalisePrice(raw, vat) : null;
     return `<tr class="${rowClass(diff)} tr-link" onclick="openDrawer('${s.sku_id}','${(s.short_title||'').replace(/'/g,"\\'")}','${fmtPrice(s.our_price)}','comp-detail')">
-      <td><span style="font-family:'SF Mono',monospace;font-size:11px;color:var(--blu)">${s.sku_id}</span></td>
+      <td><span style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:var(--blu)">${s.sku_id}</span></td>
       <td style="font-size:11px;color:var(--t2);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.short_title||''}</td>
       <td style="font-weight:500">${fmtPrice(s.our_price)}</td>
       <td style="font-weight:500">${ex?fmtPrice(ex):'—'}</td>
@@ -2052,7 +2052,7 @@ async function loadCompetitorSettings() {
       const unkCls = c.vat_status==='unknown' ? 's-unk' : '';
       const rowBg  = c.vat_status==='unknown' ? 'background:rgba(133,79,11,.03)' : '';
       return `<tr style="${rowBg}${!c.active?';opacity:.5':''}">
-        <td style="font-family:'SF Mono',monospace;font-size:11px;color:var(--t3)">${c.id}</td>
+        <td style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:var(--t3)">${c.id}</td>
         <td style="font-weight:500">${c.name}</td>
         <td style="font-size:11px;color:var(--t2)">${c.domain}</td>
         <td>
@@ -2787,7 +2787,7 @@ function slcParse() {
   $('slc-parse').innerHTML = `
     <strong>${slcList.length}</strong> SKUs recognised${over ? ` <span style="color:var(--red)">(max ${SLC_MAX} per check)</span>` : ''}
     ${unknown.length ? `· <span style="color:var(--amb)">${unknown.length} not in PriceWatch:</span>
-      <span style="font-family:'SF Mono',monospace;font-size:11px;color:var(--t2)">${[...new Set(unknown)].slice(0, 40).join(', ')}${unknown.length > 40 ? '…' : ''}</span>` : ''}`;
+      <span style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:var(--t2)">${[...new Set(unknown)].slice(0, 40).join(', ')}${unknown.length > 40 ? '…' : ''}</span>` : ''}`;
   slcSave();
 }
 

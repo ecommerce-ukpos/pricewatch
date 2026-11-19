@@ -272,7 +272,7 @@
               <label class="btn sm" style="cursor:pointer"><i class="ti ti-upload"></i> Upload CSV
                 <input type="file" accept=".csv,.txt,text/csv,text/plain" style="display:none" onchange="slcFile(this)"></label>
             </div>
-            <textarea id="slc-text" rows="9" placeholder="One SKU per line, or comma separated. CSV files: a column headed &quot;sku&quot; is used, otherwise the first column." style="width:100%;box-sizing:border-box;font-family:'SF Mono',monospace;font-size:12px;padding:8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);color:var(--text);resize:vertical" oninput="debouncedSlcParse()"></textarea>
+            <textarea id="slc-text" rows="9" placeholder="One SKU per line, or comma separated. CSV files: a column headed &quot;sku&quot; is used, otherwise the first column." style="width:100%;box-sizing:border-box;font-family:Arial,Helvetica,sans-serif;font-size:12px;padding:8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);color:var(--text);resize:vertical" oninput="debouncedSlcParse()"></textarea>
             <div id="slc-parse" style="font-size:12px;color:var(--t2);margin-top:6px"></div>
             <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
               <button class="btn sm prim" onclick="slcRun(this)"><i class="ti ti-player-play"></i> Run price check</button>
@@ -722,7 +722,7 @@
     <div class="drawer" id="sku-drawer">
       <div class="drawer-hd">
         <div style="flex:1">
-          <div style="font-family:'SF Mono',monospace;font-size:11px;color:var(--blu);margin-bottom:2px" id="dr-id">—</div>
+          <div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:var(--blu);margin-bottom:2px" id="dr-id">—</div>
           <div style="font-size:15px;font-weight:500;margin-bottom:4px" id="dr-name">—</div>
           <div style="display:flex;align-items:center;gap:8px">
             <span style="font-size:18px;font-weight:500" id="dr-price">—</span>
