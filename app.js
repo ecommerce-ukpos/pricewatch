@@ -1,3 +1,5 @@
+// Charts use the same font as the app
+if (window.Chart) Chart.defaults.font.family = 'Arial, Helvetica, sans-serif';
 /* ════════════════════════════════════════
    CONFIG + GLOBALS
 ════════════════════════════════════════ */
