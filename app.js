@@ -3103,8 +3103,10 @@ function slcOpenReview() {
      In stock     → SKU, name, price, UKPOS price (if matched), Price +/-, stock level now,
                     previous stock level, previous check, est daily sales
      Out of stock → code, name, price, OOS since
-   "Check OOS items"  → harrison_stock job, check=oos    (reads every Harrison URL)
-   "Run stock levels" → harrison_stock job, check=levels (reads URLs last seen in stock)
+   "Run stock check" → harrison_stock job, check=oos (reads every Harrison URL in scope, so items
+   that come back in stock are seen). The old "Run stock levels" (check=levels, skipped URLs last
+   seen out of stock) was removed from the app: it could miss items coming back in stock. Old runs
+   of that type still show as "Stock levels (old)" in the run line.
    Both dispatched via smart-function; scraper/harrison_stock.py writes harrison_stock_runs +
    harrison_stock; the table reads the harrison_stock_latest view.
 ════════════════════════════════════════ */
@@ -3257,7 +3259,7 @@ function csLastRunText() {
   const r = csLastRun;
   if (!r) return 'No check has run yet';
   const scope = r.scope === 'catalogue' ? 'whole catalogue' : 'discovered URLs';
-  const what = (r.check_type === 'levels' ? 'Run stock levels' : 'Check OOS items') + (r.triggered_by === 'daily' ? ', daily schedule' : '');
+  const what = (r.check_type === 'levels' ? 'Stock levels (old)' : 'Stock check') + (r.triggered_by === 'daily' ? ', daily schedule' : '');
   if (r.status === 'failed') return `<span style="color:var(--red)">Last run ${csWhen(r.finished_at || r.started_at)} (${what}) failed: ${csEsc(r.error_message || 'unknown error')}</span>`;
   const errs = (r.url_count || 0) - (r.ok_count || 0);
   return `Last run ${csWhen(r.finished_at || r.started_at)} · ${what} (${scope}) — ${r.ok_count ?? 0} products read` +
@@ -3267,7 +3269,7 @@ function csLastRunText() {
 function csRunStateText() {
   if (csDispatchedAt && !csRunning) return '<i class="ti ti-loader"></i> Queued on GitHub — this updates automatically once it starts.';
   if (csRunning) {
-    const what = csRunning.check_type === 'levels' ? 'Run stock levels' : 'Check OOS items';
+    const what = csRunning.check_type === 'levels' ? 'Stock levels (old)' : 'Stock check';
     return `<i class="ti ti-loader"></i> ${what} running since ${csWhen(csRunning.started_at)}` +
            (csRunning.url_count ? ` — ${csRunning.url_count} products to read` : '') + '. The table updates when it finishes.';
   }
@@ -3354,7 +3356,7 @@ function csRender() {
   } else {
     const rows = csFiltered();
     if (!rows.length) {
-      body = emptyRow(!csRows.length ? 'No stock data yet — press <strong>Check OOS items</strong>.'
+      body = emptyRow(!csRows.length ? 'No stock data yet — press <strong>Run stock check</strong>.'
         : csView === 'oos' ? 'No out-of-stock items.' : 'No in-stock items.');
     } else if (csView === 'oos') {
       body = rows.map(r => `<tr><td>${csBox(r)}</td><td>${csTheirCode(r)}</td><td>${csOurSku(r)}</td><td>${csName(r)}</td><td>${csMoney(r.price_ex_vat)}</td><td>${csOosSince(r)}</td><td>${csDue(r)}</td></tr>`).join('');
@@ -3377,8 +3379,8 @@ async function csRun(btn, check) {
   if (!CS_SUPPORTED[csCompId()]) return;
   const scope = $('cs-scope').value;
   const what = check === 'oos'
-    ? 'Check OOS items: reads every product and finds the out-of-stock ones.'
-    : 'Run stock levels: re-reads the items last seen in stock.';
+    ? 'Run stock check: reads every product page (stock level, in/out of stock, price, next delivery).'
+    : 'Stock levels (old): re-reads only the items last seen in stock.';
   if (!confirm(`${csCompName()}\n\n${what}\n\nScope: ${scope === 'catalogue' ? 'whole catalogue' : 'discovered URLs'}. Runs on GitHub and usually takes a few minutes. Start now?`)) return;
   const orig = btn.innerHTML;
   btn.disabled = true;
