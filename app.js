@@ -294,12 +294,13 @@ function go(name, opts = {}) {
   let hash = '#' + name;
   if (opts.skuId) { hash = '#sku/' + opts.skuId; }
   else if (opts.hsku) { hash = '#harrison/' + encodeURIComponent(opts.hsku); }
+  else if (opts.hskus) { hash = '#harrison-multi/' + opts.hskus.map(encodeURIComponent).join(','); }
   else if (opts.compSlug) { hash = '#competitor/' + opts.compSlug; }
   history.replaceState(null, '', hash);
 
   const navKey = {
     'alerts':'alerts','review':'review','skus':'skus','bycat':'bycat',
-    'bycomp':'bycomp','comp-detail':'bycomp','sku-detail':'skus','skucheck':'skucheck','compstock':'compstock','csdetail':'compstock',
+    'bycomp':'bycomp','comp-detail':'bycomp','sku-detail':'skus','skucheck':'skucheck','compstock':'compstock','csdetail':'compstock','csmulti':'compstock',
     'schedule':'schedule','settings':'settings'
   }[name];
   if (navKey && $('nav-' + navKey)) $('nav-' + navKey).classList.add('active');
@@ -327,6 +328,7 @@ if (name === 'skus') {
   if (name === 'comp-detail') { loadCompDetail(opts); }
   if (name === 'sku-detail')  { loadSkuDetail(opts); }
   if (name === 'csdetail')    { loadCsDetail(opts); }
+  if (name === 'csmulti')     { loadCsMulti(opts); }
 }
 
 function restoreRoute() {
@@ -334,6 +336,8 @@ function restoreRoute() {
   if (!hash) { go('alerts'); return; }
   if (hash.startsWith('sku/')) {
     go('sku-detail', { skuId: hash.slice(4) });
+  } else if (hash.startsWith('harrison-multi/')) {
+    go('csmulti', { hskus: hash.slice(15).split(',').filter(Boolean).map(decodeURIComponent) });
   } else if (hash.startsWith('harrison/')) {
     go('csdetail', { hsku: decodeURIComponent(hash.slice(9)) });
   } else if (hash.startsWith('competitor/')) {
@@ -3296,6 +3300,37 @@ const CS_HEAD = {
   oos: ['Their code', 'Our SKU', 'Name', 'Price (ex VAT)', 'OOS since', 'Next stock due'],
 };
 
+// Ticked rows (by Harrison code) for "View detail". Kept while you move around the app.
+const csSel = new Set();
+const csBox = r => r.harrison_sku
+  ? `<input type="checkbox" class="cs-cb" data-h="${csEsc(r.harrison_sku)}" ${csSel.has(r.harrison_sku) ? 'checked' : ''} onclick="csSelToggle(this)">`
+  : '<input type="checkbox" disabled title="No Harrison code">';
+function csSelToggle(cb) {
+  const h = cb.dataset.h;
+  if (cb.checked) csSel.add(h); else csSel.delete(h);
+  csSelUpdate();
+}
+function csSelAll(cb) {
+  document.querySelectorAll('#cs-table .cs-cb').forEach(x => { x.checked = cb.checked; if (cb.checked) csSel.add(x.dataset.h); else csSel.delete(x.dataset.h); });
+  csSelUpdate();
+}
+function csSelClear() { csSel.clear(); document.querySelectorAll('#cs-table .cs-cb, #cs-cb-all').forEach(x => { x.checked = false; }); csSelUpdate(); }
+function csSelUpdate() {
+  const n = csSel.size;
+  $('cs-view-detail').style.display = n ? '' : 'none';
+  $('cs-sel-clear').style.display = n ? '' : 'none';
+  $('cs-sel-info').style.display = n ? '' : 'none';
+  $('cs-sel-info').textContent = `${n} selected`;
+  $('cs-view-detail').innerHTML = `<i class="ti ti-chart-line"></i> View detail (${n})`;
+  const boxes = [...document.querySelectorAll('#cs-table .cs-cb')];
+  const all = $('cs-cb-all');
+  if (all) { all.checked = boxes.length > 0 && boxes.every(b => b.checked); all.indeterminate = !all.checked && boxes.some(b => b.checked); }
+}
+function csViewDetail() {
+  if (!csSel.size) return;
+  go('csmulti', { hskus: [...csSel] });
+}
+
 function csRender() {
   $('cs-tog-in').classList.toggle('active', csView === 'in');
   $('cs-tog-oos').classList.toggle('active', csView === 'oos');
@@ -3307,7 +3342,7 @@ function csRender() {
   $('cs-runstate').innerHTML = csRunStateText();
 
   const head = CS_HEAD[csView];
-  const cols = head.length;
+  const cols = head.length + 1;
   const emptyRow = msg => `<tr><td colspan="${cols}" style="color:var(--t3);text-align:center;padding:18px">${msg}</td></tr>`;
   let body;
   if (!CS_SUPPORTED[csCompId()]) {
@@ -3318,11 +3353,11 @@ function csRender() {
       body = emptyRow(!csRows.length ? 'No stock data yet — press <strong>Check OOS items</strong>.'
         : csView === 'oos' ? 'No out-of-stock items.' : 'No in-stock items.');
     } else if (csView === 'oos') {
-      body = rows.map(r => `<tr><td>${csTheirCode(r)}</td><td>${csOurSku(r)}</td><td>${csName(r)}</td><td>${csMoney(r.price_ex_vat)}</td><td>${csOosSince(r)}</td><td>${csDue(r)}</td></tr>`).join('');
+      body = rows.map(r => `<tr><td>${csBox(r)}</td><td>${csTheirCode(r)}</td><td>${csOurSku(r)}</td><td>${csName(r)}</td><td>${csMoney(r.price_ex_vat)}</td><td>${csOosSince(r)}</td><td>${csDue(r)}</td></tr>`).join('');
     } else {
       body = rows.map(r => {
         const c = csCompare(r);
-        return `<tr><td>${csTheirCode(r)}</td><td>${csOurSku(r)}</td><td>${csName(r)}</td><td>${csMoney(r.price_ex_vat)}</td>
+        return `<tr><td>${csBox(r)}</td><td>${csTheirCode(r)}</td><td>${csOurSku(r)}</td><td>${csName(r)}</td><td>${csMoney(r.price_ex_vat)}</td>
           <td>${c.ours === null ? '—' : csMoney(c.ours)}</td>
           <td>${csDiffCell(c)}</td>
           <td>${csLevel(r.stock_level)}</td><td>${csLevel(r.prev_stock_level)}</td>
@@ -3330,7 +3365,8 @@ function csRender() {
       }).join('');
     }
   }
-  $('cs-table').innerHTML = `<div class="tw"><table><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
+  $('cs-table').innerHTML = `<div class="tw"><table><thead><tr><th style="width:26px"><input type="checkbox" id="cs-cb-all" title="Select all shown" onclick="csSelAll(this)"></th>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
+  csSelUpdate();
 }
 
 async function csRun(btn, check) {
@@ -3616,15 +3652,18 @@ function csdSetMode(m) { csdMode = m; csdRenderPeriod(); }
 // Everything the period table and the CSV need, for one SKU.
 function csdPeriod() {
   if (!csdApplied || !csdData) return null;
-  const { start, end } = csdApplied;
+  return csdPeriodFor(csdData.checks, csdApplied.start, csdApplied.end);
+}
+// Same figures for any one SKU's checks (used by the SKU page and the multi-SKU page).
+function csdPeriodFor(checks, start, end) {
   const days = [];
   for (let d = start; d <= end && days.length < 400; d = csdAddDays(d, 1)) days.push(d);
   // last reading per UK day
   const byDay = {};
-  csdData.checks.forEach(r => { const k = csdKey(new Date(r.scraped_at)); if (csdLvl(r) !== null && csdLvl(r) !== undefined) byDay[k] = r; });
+  checks.forEach(r => { const k = csdKey(new Date(r.scraped_at)); if (csdLvl(r) !== null && csdLvl(r) !== undefined) byDay[k] = r; });
   const cells = days.map(d => byDay[d] || null);
   // readings inside the period (every check, not just one per day) for sold / restock
-  const inP = csdData.checks.filter(r => { const k = csdKey(new Date(r.scraped_at)); return k >= start && k <= end && csdLvl(r) !== null && csdLvl(r) !== undefined; });
+  const inP = checks.filter(r => { const k = csdKey(new Date(r.scraped_at)); return k >= start && k <= end && csdLvl(r) !== null && csdLvl(r) !== undefined; });
   let sold = 0, restock = 0;
   for (let i = 1; i < inP.length; i++) {
     const d = csdLvl(inP[i]) - csdLvl(inP[i - 1]);
@@ -3633,7 +3672,7 @@ function csdPeriod() {
   const spanDays = inP.length >= 2 ? (Date.parse(inP[inP.length - 1].scraped_at) - Date.parse(inP[0].scraped_at)) / 86400000 : 0;
   const daily = spanDays >= 0.5 ? sold / spanDays : null;
   const startRow = cells[0], endRow = cells[cells.length - 1];
-  const dues = [...new Set(csdData.checks.filter(r => r.next_due_date && r.next_due_date >= start && r.next_due_date <= end)
+  const dues = [...new Set(checks.filter(r => r.next_due_date && r.next_due_date >= start && r.next_due_date <= end)
     .map(r => `${r.next_due_date}${r.next_due_qty ? ' (' + r.next_due_qty + ')' : ''}`))];
   const tests = inP.filter(r => r.is_test).length;
   return { start, end, days, cells, startRow, endRow, sold, restock, daily, readings: inP.length, tests, dues };
@@ -3695,6 +3734,248 @@ function csdExport() {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `harrison-${String(csdData.hsku).replace(/[^a-z0-9.]+/gi, '-')}-${p.start}-to-${p.end}-${csdMode === 'all' ? 'all-days' : 'start-end'}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+
+/* ════════════════════════════════════════
+   HARRISON MULTI-SKU PAGE — stock history for the codes ticked on Check Competitor Stock
+   Route: #harrison-multi/<code>,<code>,…  (shareable)
+   Layout: Dates bar (Go applies) → totals for the period → graph (one line per code, one
+   point per day = that day's last check) → Stock position by date (one row per code,
+   Show start/end or Show all with Day 1…N, plus a Total row) → Export CSV.
+   Figures per code are worked out exactly as on the single SKU page (csdPeriodFor).
+   Test data (is_test) is shown in red.
+════════════════════════════════════════ */
+let csmChart = null;
+let csmData = [];                   // [{ hsku, name, url, price, ours, last, checks }]
+let csmApplied = null;
+let csmMode = 'ends';
+const CSM_COLOURS = ['#378ADD', '#1D9E75', '#D85A30', '#7F77DD', '#BA7517', '#D4537E', '#0F6E56', '#185FA5', '#639922', '#888780'];
+
+async function loadCsMulti(opts) {
+  const codes = [...new Set((opts.hskus || []).filter(Boolean))];
+  $('csm-title').textContent = `${codes.length} Harrison SKU${codes.length === 1 ? '' : 's'}`;
+  $('csm-sub').textContent = 'Harrison Products · loading…';
+  $('csm-url').textContent = 'pricewatch.ukpos.com/harrison-multi/' + codes.join(',');
+  $('csm-metrics').innerHTML = '';
+  $('csm-period').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+  $('csm-period-note').innerHTML = '';
+  if (csmChart) { csmChart.destroy(); csmChart = null; }
+  if (!codes.length) { $('csm-period').innerHTML = '<div style="padding:18px;color:var(--t2)">No codes selected.</div>'; return; }
+  // keep the dashboard ticks in step with what's on this page
+  csSel.clear(); codes.forEach(c => csSel.add(c));
+  try {
+    const rows = [];
+    for (let i = 0; i < codes.length; i += 100) {
+      const chunk = codes.slice(i, i + 100);
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await sb.from('harrison_stock')
+          .select('run_id,scraped_at,competitor_url,product_name,harrison_sku,price_ex_vat,stock_level,stock_status,next_due_date,next_due_qty,due_scope,ukpos_skus,is_test')
+          .in('harrison_sku', chunk).order('scraped_at', { ascending: true }).range(from, from + 999);
+        if (error) throw error;
+        rows.push(...(data || []));
+        if (!data || data.length < 1000) break;
+      }
+    }
+    const by = {};
+    rows.forEach(r => { (by[r.harrison_sku] = by[r.harrison_sku] || []).push(r); });
+    csmData = codes.map(h => {
+      const checks = csdChecks(by[h] || []);
+      const last = checks[checks.length - 1] || null;
+      const name = [...checks].reverse().find(r => r.product_name)?.product_name || '';
+      const priceRow = [...checks].reverse().find(r => r.price_ex_vat !== null && r.price_ex_vat !== undefined);
+      return { hsku: h, name, url: last ? last.competitor_url : '', price: priceRow ? Number(priceRow.price_ex_vat) : null,
+               ours: [...new Set(checks.flatMap(r => r.ukpos_skus || []))], last, checks };
+    });
+    const missing = csmData.filter(d => !d.checks.length).length;
+    $('csm-sub').textContent = `Harrison Products · ${csmData.map(d => d.hsku).join(', ')}` + (missing ? ` · ${missing} with no checks` : '');
+
+    const tests = csmData.flatMap(d => d.checks.filter(r => r.is_test));
+    $('csm-test-note').style.display = tests.length ? '' : 'none';
+    if (tests.length) {
+      const t = tests.map(r => r.scraped_at).sort();
+      $('csm-test-note').innerHTML = `<i class="ti ti-flask"></i> <strong>Includes test data:</strong> ${tests.length} made-up checks, ${csDay(t[0])} – ${csDay(t[t.length - 1])}, shown in red. The figures include them. They will be deleted later.`;
+    }
+
+    // default dates: first check → today (kept if already set)
+    const firsts = csmData.filter(d => d.checks.length).map(d => csdKey(new Date(d.checks[0].scraped_at))).sort();
+    const today = csdKey(new Date());
+    if (!$('csm-end').value) $('csm-end').value = today;
+    if (!$('csm-start').value) $('csm-start').value = firsts.length && firsts[0] < $('csm-end').value ? firsts[0] : csdAddDays($('csm-end').value, -1);
+    csmGo();
+  } catch (e) {
+    $('csm-period').innerHTML = `<div style="padding:18px;color:var(--red)">Could not load stock history: ${csEsc(e.message)}</div>`;
+  }
+}
+
+function csmGo() {
+  let start = $('csm-start').value, end = $('csm-end').value;
+  if (!start || !end) return;
+  if (start > end) { [start, end] = [end, start]; $('csm-start').value = start; $('csm-end').value = end; }
+  csmApplied = { start, end };
+  csmRender();
+}
+function csmMarkPending() {
+  const pending = !csmApplied || $('csm-start').value !== csmApplied.start || $('csm-end').value !== csmApplied.end;
+  $('csm-pending').style.display = pending ? '' : 'none';
+  $('csm-go').classList.toggle('pulse', pending);
+  const s = $('csm-start').value, e = $('csm-end').value;
+  const n = s && e ? Math.round((Date.parse(e) - Date.parse(s)) / 86400000) + 1 : 0;
+  ['1', '7', '30'].forEach(k => $('csm-p-' + k).classList.toggle('active', n === (k === '1' ? 2 : Number(k))));
+}
+function csmPreset(n) {
+  const end = $('csm-end').value || csdKey(new Date());
+  $('csm-end').value = end;
+  $('csm-start').value = csdAddDays(end, n === 1 ? -1 : -(n - 1));
+  csmMarkPending();
+}
+function csmSetMode(m) { csmMode = m; csmRenderTable(); }
+
+function csmPeriods() {
+  if (!csmApplied) return [];
+  return csmData.map(d => ({ d, p: csdPeriodFor(d.checks, csmApplied.start, csmApplied.end) }));
+}
+
+function csmRender() {
+  csmMarkPending();
+  const list = csmPeriods();
+  if (!list.length) return;
+  // Totals for the period
+  const sum = f => list.reduce((a, x) => a + (f(x) || 0), 0);
+  const withSales = list.filter(x => x.p.daily !== null);
+  const inNow = csmData.filter(d => d.last && d.last.stock_status === 'in_stock').length;
+  const oosNow = csmData.filter(d => d.last && d.last.stock_status === 'out_of_stock').length;
+  const endStock = sum(x => x.p.endRow ? csdLvl(x.p.endRow) : 0);
+  const daily = sum(x => x.p.daily);
+  const value = sum(x => x.p.daily !== null && x.d.price !== null ? x.p.daily * x.d.price : 0);
+  const restock = sum(x => x.p.readings >= 2 ? x.p.restock : 0);
+  const sold = sum(x => x.p.readings >= 2 ? x.p.sold : 0);
+  const metric = (label, v, sub) => `<div class="metric" style="background:var(--surface);border-color:var(--border)"><span class="ml" style="color:var(--t2)">${label}</span><span class="mv">${v}</span><span class="ms" style="color:var(--t2)">${sub || '&nbsp;'}</span></div>`;
+  $('csm-metrics').style.gridTemplateColumns = 'repeat(6,minmax(0,1fr))';
+  $('csm-metrics').innerHTML = [
+    metric('Status now', `${inNow} <span style="font-size:13px;font-weight:400;color:var(--t2)">in</span> · <span style="color:var(--red)">${oosNow}</span> <span style="font-size:13px;font-weight:400;color:var(--t2)">out</span>`, `of ${csmData.length} codes`),
+    metric('Stock on end date', endStock.toLocaleString('en-GB'), `total · ${csDay(csmApplied.end)}`),
+    metric('Units sold (min)', sold.toLocaleString('en-GB'), 'in these dates'),
+    metric('Est daily sales', withSales.length ? daily.toFixed(1) : '—', `units/day · ${withSales.length} of ${list.length} codes`),
+    metric('Est daily sales value', withSales.length ? csMoney(value) : '—', 'at their prices, ex VAT'),
+    metric('Inferred restock (min)', restock ? '+' + restock.toLocaleString('en-GB') : '0', 'in these dates'),
+  ].join('');
+  csmDrawChart(list);
+  csmRenderTable();
+}
+
+function csmDrawChart(list) {
+  if (csmChart) { csmChart.destroy(); csmChart = null; }
+  const days = list[0].p.days;
+  const datasets = list.map((x, i) => {
+    const col = CSM_COLOURS[i % CSM_COLOURS.length];
+    const cells = x.p.cells;
+    return {
+      label: x.d.hsku, data: cells.map(r => r ? csdLvl(r) : null), borderColor: col, backgroundColor: col,
+      tension: 0, spanGaps: true, pointRadius: 3, borderWidth: 2,
+      pointBackgroundColor: cells.map(r => r && r.is_test ? '#fff' : col),
+      pointBorderColor: cells.map(r => r && (r.is_test || r.stock_status === 'out_of_stock') ? '#A32D2D' : col),
+      pointBorderWidth: cells.map(r => r && r.is_test ? 2 : 1),
+      segment: { borderDash: c => (cells[c.p0DataIndex]?.is_test || cells[c.p1DataIndex]?.is_test) ? [4, 3] : undefined },
+      _cells: cells, _name: x.d.name,
+    };
+  });
+  const checked = list.reduce((a, x) => a + x.p.readings, 0);
+  $('csm-chart-note').textContent = `${checked} checks · ${csDay(csmApplied.start)} – ${csDay(csmApplied.end)} · one point per day (that day's last check) · test data dashed with red rings`;
+  csmChart = new Chart($('csm-chart'), {
+    type: 'line',
+    data: { labels: days.map(d => csDayTxt(d + 'T12:00:00Z')), datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false, interaction: { mode: 'nearest', intersect: false },
+      plugins: {
+        legend: { display: true, position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } },
+        tooltip: { callbacks: {
+          title: it => it.length ? csdNice(days[it[0].dataIndex]) : '',
+          label: c => { const r = c.dataset._cells[c.dataIndex]; return `${c.dataset.label}: ${r && r.is_test ? 'TEST DATA · ' : ''}${r && r.stock_status === 'out_of_stock' ? 'out of stock' : Number(c.parsed.y).toLocaleString('en-GB')}`; },
+        } },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#6b6a64', font: { size: 9 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 } },
+        y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,.05)' }, ticks: { color: '#6b6a64', font: { size: 9 }, precision: 0 } },
+      },
+    },
+  });
+}
+
+function csmRenderTable() {
+  $('csm-v-ends').classList.toggle('active', csmMode === 'ends');
+  $('csm-v-all').classList.toggle('active', csmMode === 'all');
+  const list = csmPeriods();
+  if (!list.length) return;
+  const days = list[0].p.days;
+  const two = csmMode === 'all';
+  const rs = two ? ' rowspan="2" style="vertical-align:bottom"' : '';
+  const ctr = 'text-align:center;white-space:nowrap';
+  const lead = ['Their code', 'Name', 'Price (ex VAT)', 'Status now'];
+  const tail = ['Change', 'Units sold (min)', 'Inferred restock (min)', 'Est daily sales', 'Est daily sales value', 'Published due in period'];
+  const lvlHeads = two ? days.map((d, i) => `<span title="${csdNice(d)}">${i + 1}</span>`)
+    : [`<span title="${csdNice(csmApplied.start)}">Start</span>`, `<span title="${csdNice(csmApplied.end)}">End</span>`];
+  const head = two
+    ? `<tr>${lead.map(h => `<th${rs}>${h}</th>`).join('')}<th colspan="${days.length}" style="${ctr};border-bottom:1px solid var(--border)">Day</th>${tail.map(h => `<th${rs}>${h}</th>`).join('')}</tr>
+       <tr>${lvlHeads.map(h => `<th style="${ctr}">${h}</th>`).join('')}</tr>`
+    : `<tr>${lead.map(h => `<th>${h}</th>`).join('')}${lvlHeads.map(h => `<th>${h}</th>`).join('')}${tail.map(h => `<th>${h}</th>`).join('')}</tr>`;
+
+  const tot = { lv: lvlHeads.map(() => 0), lvAny: lvlHeads.map(() => false), change: 0, sold: 0, restock: 0, daily: 0, value: 0, any: false };
+  const body = list.map(({ d, p }) => {
+    const cells = two ? p.cells : [p.startRow, p.endRow];
+    cells.forEach((r, i) => { if (r) { tot.lv[i] += csdLvl(r); tot.lvAny[i] = true; } });
+    const change = p.startRow && p.endRow ? csdLvl(p.endRow) - csdLvl(p.startRow) : null;
+    if (change !== null) tot.change += change;
+    if (p.readings >= 2) { tot.sold += p.sold; tot.restock += p.restock; }
+    if (p.daily !== null) { tot.daily += p.daily; tot.any = true; if (d.price !== null) tot.value += p.daily * d.price; }
+    const code = `<a href="#harrison/${encodeURIComponent(d.hsku)}" onclick="event.preventDefault();go('csdetail',{hsku:${csEsc(JSON.stringify(d.hsku))}})">${csEsc(d.hsku)}</a>`;
+    const name = `<span title="${csEsc(d.name)}">${csEsc(d.name.length > 42 ? d.name.slice(0, 40) + '…' : d.name)}</span>`;
+    return `<tr><td>${code}</td><td>${name}</td><td>${csMoney(d.price)}</td><td>${d.last ? csdStatus(d.last.stock_status) : '—'}</td>
+      ${cells.map(r => `<td${two ? ' style="text-align:center"' : ''}>${csdCell(r)}</td>`).join('')}
+      <td>${change === null ? '—' : `<span style="color:${change < 0 ? 'var(--red)' : change > 0 ? 'var(--grn)' : 'var(--t3)'}">${change > 0 ? '+' : ''}${change.toLocaleString('en-GB')}</span>`}</td>
+      <td>${p.readings >= 2 ? p.sold.toLocaleString('en-GB') : '—'}</td>
+      <td>${p.readings >= 2 ? (p.restock ? '+' + p.restock.toLocaleString('en-GB') : '0') : '—'}</td>
+      <td>${p.daily === null ? '—' : p.daily.toFixed(1)}</td>
+      <td>${p.daily === null || d.price === null ? '—' : csMoney(p.daily * d.price)}</td>
+      <td>${p.dues.length ? p.dues.map(x => csEsc(x)).join('<br>') : '—'}</td></tr>`;
+  }).join('');
+  const totRow = list.length > 1 ? `<tr style="font-weight:600;border-top:2px solid var(--border)"><td colspan="4">Total (${list.length} codes)</td>
+      ${tot.lv.map((v, i) => `<td${two ? ' style="text-align:center"' : ''}>${tot.lvAny[i] ? v.toLocaleString('en-GB') : '—'}</td>`).join('')}
+      <td>${tot.change > 0 ? '+' : ''}${tot.change.toLocaleString('en-GB')}</td><td>${tot.sold.toLocaleString('en-GB')}</td>
+      <td>${tot.restock ? '+' + tot.restock.toLocaleString('en-GB') : '0'}</td><td>${tot.any ? tot.daily.toFixed(1) : '—'}</td>
+      <td>${tot.any ? csMoney(tot.value) : '—'}</td><td></td></tr>` : '';
+  $('csm-period').innerHTML = `<table><thead>${head}</thead><tbody>${body}${totRow}</tbody></table>`;
+  const tests = list.reduce((a, x) => a + x.p.tests, 0), readings = list.reduce((a, x) => a + x.p.readings, 0);
+  $('csm-period-note').innerHTML = `${csdNice(csmApplied.start)} → ${csdNice(csmApplied.end)} (${days.length} days, Day 1 = ${csdNice(csmApplied.start)}). ` +
+    `Each day shows that day's last check; — = not checked that day; 0 in red = out of stock. Totals add up the codes that have a figure. ` +
+    `Units sold and inferred restock are minimums (a rise like 40 → 70 is a restock of at least 30).` +
+    (tests ? ` <strong style="color:var(--red)">${tests} of the ${readings} readings in these dates are test data (red).</strong>` : '');
+}
+
+function csmExport() {
+  const list = csmPeriods();
+  if (!list.length) return;
+  const two = csmMode === 'all';
+  const days = list[0].p.days;
+  const val = r => !r ? '' : csdLvl(r);
+  const lvlHead = two ? days.map((d, i) => `Day ${i + 1} (${d})`) : [`Start (${csmApplied.start})`, `End (${csmApplied.end})`];
+  const head = ['Their code', 'Name', 'Our SKU', 'Price ex VAT', 'Status now', ...lvlHead, 'Change', 'Units sold (min)', 'Inferred restock (min)',
+    'Est daily sales (units)', 'Est daily sales value (ex VAT)', 'Published due in period', 'Test readings in period', 'URL'];
+  const rows = list.map(({ d, p }) => {
+    const cells = two ? p.cells : [p.startRow, p.endRow];
+    const change = p.startRow && p.endRow ? csdLvl(p.endRow) - csdLvl(p.startRow) : '';
+    return [d.hsku, d.name, d.ours.join(' '), d.price ?? '', d.last ? d.last.stock_status.replace(/_/g, ' ') : '', ...cells.map(val), change,
+      p.readings >= 2 ? p.sold : '', p.readings >= 2 ? p.restock : '', p.daily === null ? '' : p.daily.toFixed(1),
+      p.daily === null || d.price === null ? '' : (p.daily * d.price).toFixed(2), p.dues.join('; '),
+      p.tests ? `${p.tests} of ${p.readings} (test data)` : 0, d.url];
+  });
+  const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const blob = new Blob(['﻿' + [head, ...rows].map(r => r.map(q).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `harrison-${list.length}-skus-${csmApplied.start}-to-${csmApplied.end}-${two ? 'all-days' : 'start-end'}.csv`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }

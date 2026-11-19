@@ -315,12 +315,16 @@
             <select id="cs-comp" onchange="csSwitchComp()" title="Competitor" style="font-size:16px;font-weight:700;padding:6px 10px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);color:var(--text)">
               <option value="10">Harrison Products</option>
             </select>
-            <div id="cs-lastrun" style="font-size:14px;font-weight:600;color:var(--text);margin-right:auto"></div>
+            <div id="cs-lastrun" style="font-size:13px;font-weight:600;color:var(--text);flex:1 1 240px;min-width:0"></div>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:nowrap">
             <select id="cs-scope" title="Which products to check" style="font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);color:var(--text)">
               <option value="matches">Discovered URLs</option>
               <option value="catalogue">Whole catalogue</option>
             </select>
+            <button class="btn sm prim cs-run" onclick="csRun(this,'oos')"><i class="ti ti-player-play"></i> Check OOS items</button>
+            <button class="btn sm prim cs-run" onclick="csRun(this,'levels')"><i class="ti ti-player-play"></i> Run stock levels</button>
             <button class="btn sm" onclick="loadCompStock()"><i class="ti ti-refresh"></i> Refresh</button>
+            </div>
           </div>
         </div>
         <div class="card" style="margin-top:14px">
@@ -331,8 +335,9 @@
             </div>
             <input id="cs-q" type="search" placeholder="Filter by code or name" oninput="csRender()" style="font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);color:var(--text);min-width:200px">
             <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
-              <button class="btn sm prim cs-run" onclick="csRun(this,'oos')"><i class="ti ti-player-play"></i> Check OOS items</button>
-              <button class="btn sm prim cs-run" onclick="csRun(this,'levels')"><i class="ti ti-player-play"></i> Run stock levels</button>
+              <span id="cs-sel-info" style="display:none;align-self:center;font-size:12px;color:var(--t2)"></span>
+              <button class="btn sm" id="cs-sel-clear" style="display:none" onclick="csSelClear()">Clear</button>
+              <button class="btn sm prim" id="cs-view-detail" style="display:none" onclick="csViewDetail()"><i class="ti ti-chart-line"></i> View detail</button>
               <button class="btn sm" onclick="csExport()"><i class="ti ti-download"></i> CSV</button>
             </div>
           </div>
@@ -383,6 +388,63 @@
             <th class="sortable" onclick="sortCompSkuTable('scraped_at')">Updated</th>
             <th></th>
           </tr></thead><tbody id="comp-sku-tbody"></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── HARRISON MULTI-SKU STOCK HISTORY ── -->
+    <div id="p-csmulti" class="panel">
+      <div class="url-bar">
+        <i class="ti ti-link" style="font-size:12px"></i>
+        <span class="url-path" id="csm-url">pricewatch.ukpos.com/harrison-multi/…</span>
+        <button class="url-copy-btn" onclick="copyUrl()">Copy link</button>
+        <span style="margin-left:auto;font-size:10px;color:var(--t3)">Shareable permalink</span>
+      </div>
+      <div class="cmdbar">
+        <button class="cmdbar-back" onclick="go('compstock')"><i class="ti ti-arrow-left"></i> Check Competitor Stock</button>
+        <div class="cmdbar-divider"></div>
+        <div>
+          <div class="cmd-title" id="csm-title">—</div>
+          <div class="cmd-sub" id="csm-sub">Harrison Products</div>
+        </div>
+      </div>
+      <div class="content" style="overflow-y:auto">
+        <div id="csm-test-note" style="display:none;margin:0 0 12px;padding:9px 12px;border-radius:8px;background:var(--rb);color:var(--red);font-size:13px"></div>
+        <div class="card" style="padding:10px 14px">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px">
+            <span class="card-title" style="margin-right:4px">Dates</span>
+            <label>Start <input type="date" id="csm-start" onchange="csmMarkPending()"></label>
+            <label>End <input type="date" id="csm-end" onchange="csmMarkPending()"></label>
+            <span class="icon-tog-wrap">
+              <button class="icon-tog" id="csm-p-1" onclick="csmPreset(1)">Daily</button>
+              <button class="icon-tog" id="csm-p-7" onclick="csmPreset(7)">Weekly</button>
+              <button class="icon-tog" id="csm-p-30" onclick="csmPreset(30)">Monthly</button>
+            </span>
+            <button class="btn sm prim" id="csm-go" onclick="csmGo()" title="Apply these dates to the figures, the graph, the table and the CSV">Go</button>
+            <span id="csm-pending" style="display:none;color:#b7791f;font-weight:500">Press Go to apply</span>
+          </div>
+        </div>
+        <div id="csm-metrics" class="metrics"></div>
+        <div class="card">
+          <div class="card-hd" style="flex-wrap:wrap;gap:10px">
+            <div class="card-title">Stock level history</div>
+            <span id="csm-chart-note" style="font-size:11px;color:var(--t2)"></span>
+          </div>
+          <div style="position:relative;height:300px"><canvas id="csm-chart"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-hd" style="flex-wrap:wrap;gap:10px">
+            <div class="card-title">Stock position by date</div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px">
+              <span class="icon-tog-wrap">
+                <button class="icon-tog" id="csm-v-ends" onclick="csmSetMode('ends')">Show start/end</button>
+                <button class="icon-tog" id="csm-v-all" onclick="csmSetMode('all')">Show all</button>
+              </span>
+              <button class="btn sm" onclick="csmExport()"><i class="ti ti-download"></i> Export CSV</button>
+            </div>
+          </div>
+          <div class="tw" id="csm-period"></div>
+          <div id="csm-period-note" style="font-size:11px;color:var(--t3);margin-top:8px"></div>
         </div>
       </div>
     </div>
