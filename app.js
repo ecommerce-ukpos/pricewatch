@@ -293,12 +293,13 @@ function go(name, opts = {}) {
 
   let hash = '#' + name;
   if (opts.skuId) { hash = '#sku/' + opts.skuId; }
+  else if (opts.hsku) { hash = '#harrison/' + encodeURIComponent(opts.hsku); }
   else if (opts.compSlug) { hash = '#competitor/' + opts.compSlug; }
   history.replaceState(null, '', hash);
 
   const navKey = {
     'alerts':'alerts','review':'review','skus':'skus','bycat':'bycat',
-    'bycomp':'bycomp','comp-detail':'bycomp','sku-detail':'skus','skucheck':'skucheck','compstock':'compstock',
+    'bycomp':'bycomp','comp-detail':'bycomp','sku-detail':'skus','skucheck':'skucheck','compstock':'compstock','csdetail':'compstock',
     'schedule':'schedule','settings':'settings'
   }[name];
   if (navKey && $('nav-' + navKey)) $('nav-' + navKey).classList.add('active');
@@ -325,6 +326,7 @@ if (name === 'skus') {
   if (name === 'settings')    { goSett('configurables'); loadCompetitorSettings(); loadUsers(); }
   if (name === 'comp-detail') { loadCompDetail(opts); }
   if (name === 'sku-detail')  { loadSkuDetail(opts); }
+  if (name === 'csdetail')    { loadCsDetail(opts); }
 }
 
 function restoreRoute() {
@@ -332,6 +334,8 @@ function restoreRoute() {
   if (!hash) { go('alerts'); return; }
   if (hash.startsWith('sku/')) {
     go('sku-detail', { skuId: hash.slice(4) });
+  } else if (hash.startsWith('harrison/')) {
+    go('csdetail', { hsku: decodeURIComponent(hash.slice(9)) });
   } else if (hash.startsWith('competitor/')) {
     const slug = hash.slice(11);
     if (sb) {
@@ -3251,7 +3255,9 @@ function csFiltered() {
 }
 
 // Their code, and our SKU(s) when matched
-const csTheirCode = r => csEsc(r.harrison_sku || '—');
+const csTheirCode = r => r.harrison_sku
+  ? `<a href="#harrison/${encodeURIComponent(r.harrison_sku)}" title="Stock history for ${csEsc(r.harrison_sku)}" onclick="event.preventDefault();go('csdetail',{hsku:${csEsc(JSON.stringify(r.harrison_sku))}})">${csEsc(r.harrison_sku)}</a>`
+  : '—';
 const csOurSku = r => (r.ukpos_skus || []).length ? `<strong>${csEsc(r.ukpos_skus.join(', '))}</strong>` : '';
 const csName = r => `<a href="${csEsc(r.competitor_url)}" target="_blank" rel="noopener" style="color:var(--text)">${csEsc(r.product_name || r.competitor_url)}</a>`;
 const csOosSince = r => r.oos_since
@@ -3371,3 +3377,131 @@ function csExport() {
   URL.revokeObjectURL(a.href);
 }
 
+
+/* ════════════════════════════════════════
+   HARRISON SKU PAGE — scraped stock history for one Harrison SKU
+   Route: #harrison/<harrison_sku>. Opened from "Their code" on Check Competitor Stock.
+   Reads every harrison_stock row for the SKU; one point per check (a run can read the
+   same SKU more than once, e.g. once per variant URL — the last read in a run counts).
+════════════════════════════════════════ */
+let csdChart = null;
+
+function csdChecks(rows) {
+  const byRun = new Map();
+  rows.forEach(r => {
+    const k = r.run_id || r.scraped_at.slice(0, 16);
+    const prev = byRun.get(k);
+    if (!prev || r.scraped_at > prev.scraped_at) byRun.set(k, r);
+  });
+  return [...byRun.values()].sort((x, y) => x.scraped_at.localeCompare(y.scraped_at));
+}
+
+const CSD_STATUS = {
+  in_stock: '<span class="badge b-g">In stock</span>',
+  out_of_stock: '<span class="badge b-r" style="background:var(--rb);color:var(--red)">Out of stock</span>',
+};
+const csdStatus = s => CSD_STATUS[s] || `<span class="badge b-gray">${csEsc((s || 'unknown').replace(/_/g, ' '))}</span>`;
+
+async function loadCsDetail(opts) {
+  const hsku = opts.hsku;
+  $('csd-title').textContent = hsku || '—';
+  $('csd-sub').textContent = 'Harrison Products · loading…';
+  $('csd-url').textContent = 'pricewatch.ukpos.com/harrison/' + (hsku || '');
+  $('csd-metrics').innerHTML = '';
+  $('csd-table').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+  if (csdChart) { csdChart.destroy(); csdChart = null; }
+  if (!hsku) return;
+  try {
+    const { data, error } = await sb.from('harrison_stock')
+      .select('run_id,scraped_at,competitor_url,product_name,harrison_sku,price_ex_vat,stock_level,stock_status,next_due_date,next_due_qty,due_scope,error_message,ukpos_skus')
+      .eq('harrison_sku', hsku).order('scraped_at', { ascending: true }).limit(5000);
+    if (error) throw error;
+    if (!data || !data.length) {
+      $('csd-sub').textContent = 'Harrison Products';
+      $('csd-table').innerHTML = '<div style="padding:18px;color:var(--t2)">No stock checks found for this Harrison code.</div>';
+      return;
+    }
+    const checks = csdChecks(data);
+    const last = checks[checks.length - 1];
+    const name = [...checks].reverse().find(r => r.product_name)?.product_name || '';
+    const url = last.competitor_url;
+    const ours = [...new Set(checks.flatMap(r => r.ukpos_skus || []))];
+    $('csd-sub').innerHTML = `Harrison Products${name ? ' · ' + csEsc(name) : ''}${ours.length ? ` · our SKU ${ours.map(s => `<a href="#sku/${encodeURIComponent(s)}" onclick="event.preventDefault();go('sku-detail',{skuId:'${csEsc(s)}'})">${csEsc(s)}</a>`).join(', ')}` : ''}`;
+    $('csd-site-link').href = url || '#';
+
+    // Headline figures. A check that found it out of stock counts as a level of 0.
+    const lvl = r => r.stock_status === 'out_of_stock' ? 0 : r.stock_level;
+    const levels = checks.filter(r => lvl(r) !== null && lvl(r) !== undefined);
+    const lastL = [...checks].reverse().find(r => r.stock_level !== null && r.stock_level !== undefined);
+    // Est daily sales: stock that went down between checks, per day. Restocks (rises) are
+    // left out, so a delivery between checks doesn't hide the sales either side of it.
+    let daily = null;
+    if (levels.length >= 2) {
+      let sold = 0;
+      for (let i = 1; i < levels.length; i++) sold += Math.max(0, lvl(levels[i - 1]) - lvl(levels[i]));
+      const days = (Date.parse(levels[levels.length - 1].scraped_at) - Date.parse(levels[0].scraped_at)) / 86400000;
+      if (days >= 0.5) daily = sold / days;
+    }
+    const lastIn = [...checks].reverse().find(r => r.stock_status === 'in_stock');
+    const oos = last.stock_status === 'out_of_stock';
+    let oosSince = null;
+    if (oos) {
+      for (let i = checks.length - 1; i >= 0 && checks[i].stock_status === 'out_of_stock'; i--) oosSince = checks[i].scraped_at;
+    }
+    const metric = (label, value, sub) => `<div class="metric" style="background:var(--surface);border-color:var(--border)"><span class="ml" style="color:var(--t2)">${label}</span><span class="mv">${value}</span><span class="ms" style="color:var(--t2)">${sub || '&nbsp;'}</span></div>`;
+    $('csd-metrics').innerHTML = [
+      metric('Status now', csdStatus(last.stock_status), csWhen(last.scraped_at)),
+      metric('Stock level now', csLevel(last.stock_level), lastL && lastL !== last ? `last known ${csLevel(lastL.stock_level)} on ${csDay(lastL.scraped_at)}` : ''),
+      metric('Est daily sales', daily === null ? '—' : daily.toFixed(1), levels.length >= 2 ? `from ${levels.length} readings, restocks ignored` : 'needs 2+ readings a day apart'),
+      metric(oos ? 'Out of stock since' : 'Last seen in stock', oos ? csDay(oosSince) : (lastIn ? csDay(lastIn.scraped_at) : '—'), oos && !lastIn ? 'never seen in stock' : ''),
+      metric('Price (ex VAT)', csMoney(last.price_ex_vat ?? [...checks].reverse().find(r => r.price_ex_vat !== null)?.price_ex_vat), ''),
+      metric('Next stock due', last.next_due_date ? csDay(last.next_due_date) : '—', last.next_due_date ? `${last.next_due_qty ? Number(last.next_due_qty).toLocaleString('en-GB') + ' units' : ''}${last.due_scope === 'range' ? ' · whole range' : ''}` : ''),
+    ].join('');
+
+    // Chart: stock level per check; out-of-stock checks plotted at 0
+    const pts = checks.map(r => ({ x: r.scraped_at, y: r.stock_status === 'out_of_stock' ? 0 : r.stock_level, oos: r.stock_status === 'out_of_stock' }));
+    const plotted = pts.filter(p => p.y !== null && p.y !== undefined);
+    $('csd-chart-note').textContent = plotted.length
+      ? `${checks.length} check${checks.length === 1 ? '' : 's'} since ${csDay(checks[0].scraped_at)} · out of stock shown as 0`
+      : `${checks.length} check${checks.length === 1 ? '' : 's'} · Harrison shows no stock number for this item`;
+    csdChart = new Chart($('csd-chart'), {
+      type: 'line',
+      data: {
+        labels: plotted.map(p => csWhen(p.x)),
+        datasets: [{
+          data: plotted.map(p => p.y), borderColor: '#378ADD', backgroundColor: 'rgba(55,138,221,.08)', fill: true,
+          tension: 0, stepped: false, pointRadius: 4,
+          pointBackgroundColor: plotted.map(p => p.oos ? '#A32D2D' : '#378ADD'), pointBorderColor: plotted.map(p => p.oos ? '#A32D2D' : '#378ADD'),
+        }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => plotted[c.dataIndex].oos ? 'Out of stock' : `${Number(c.parsed.y).toLocaleString('en-GB')} in stock` } } },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: '#6b6a64', font: { size: 9 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
+          y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,.05)' }, ticks: { color: '#6b6a64', font: { size: 9 }, precision: 0 } },
+        },
+      },
+    });
+
+    // Table: every check, newest first, with change since the previous level reading
+    const rowsHtml = [...checks].map((r, i) => {
+      let change = '';
+      const cur = lvl(r);
+      if (cur !== null && cur !== undefined) {
+        const prev = checks.slice(0, i).reverse().find(p => lvl(p) !== null && lvl(p) !== undefined);
+        if (prev) {
+          const d = cur - lvl(prev);
+          change = d === 0 ? '<span style="color:var(--t3)">no change</span>'
+            : `<span style="color:${d < 0 ? 'var(--red)' : 'var(--grn)'}">${d > 0 ? '+' : ''}${d.toLocaleString('en-GB')}</span>` +
+              (d > 0 ? ' <span style="font-size:11px;color:var(--t3)">restock</span>' : cur === 0 && r.stock_status === 'out_of_stock' ? ' <span style="font-size:11px;color:var(--t3)">sold out</span>' : '');
+        }
+      }
+      const due = r.next_due_date ? `${csDay(r.next_due_date)}${r.next_due_qty ? ` · ${Number(r.next_due_qty).toLocaleString('en-GB')}` : ''}${r.due_scope === 'range' ? ' <span style="font-size:11px;color:var(--t3)">(range)</span>' : ''}` : '—';
+      return `<tr><td style="white-space:nowrap">${csWhen(r.scraped_at)}</td><td>${csdStatus(r.stock_status)}</td><td>${csLevel(r.stock_level)}</td><td>${change}</td><td>${csMoney(r.price_ex_vat)}</td><td>${due}</td><td style="font-size:11px;color:var(--red)">${csEsc(r.error_message || '')}</td></tr>`;
+    }).reverse().join('');
+    $('csd-table').innerHTML = `<table><thead><tr><th>Checked</th><th>Status</th><th>Stock level</th><th>Change</th><th>Price (ex VAT)</th><th>Next stock due</th><th>Error</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
+  } catch (e) {
+    $('csd-table').innerHTML = `<div style="padding:18px;color:var(--red)">Could not load stock history: ${csEsc(e.message)}</div>`;
+  }
+}

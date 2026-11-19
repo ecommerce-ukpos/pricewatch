@@ -388,6 +388,38 @@
     </div>
 
     <!-- ── SKU DETAIL PAGE ── -->
+    <!-- ── HARRISON SKU STOCK HISTORY ── -->
+    <div id="p-csdetail" class="panel">
+      <div class="url-bar">
+        <i class="ti ti-link" style="font-size:12px"></i>
+        <span class="url-path" id="csd-url">pricewatch.ukpos.com/harrison/…</span>
+        <button class="url-copy-btn" onclick="copyUrl()">Copy link</button>
+        <span style="margin-left:auto;font-size:10px;color:var(--t3)">Shareable permalink</span>
+      </div>
+      <div class="cmdbar">
+        <button class="cmdbar-back" onclick="go('compstock')"><i class="ti ti-arrow-left"></i> Check Competitor Stock</button>
+        <div class="cmdbar-divider"></div>
+        <div>
+          <div class="cmd-title" id="csd-title">—</div>
+          <div class="cmd-sub" id="csd-sub">—</div>
+        </div>
+        <div class="cmd-actions">
+          <a id="csd-site-link" href="#" target="_blank" rel="noopener" style="text-decoration:none"><button class="btn sm"><i class="ti ti-external-link"></i> View on Harrison</button></a>
+        </div>
+      </div>
+      <div class="content" style="overflow-y:auto">
+        <div id="csd-metrics" class="metrics"></div>
+        <div class="card">
+          <div class="card-hd"><div class="card-title">Stock level history</div><span id="csd-chart-note" style="font-size:11px;color:var(--t2)"></span></div>
+          <div style="position:relative;height:240px"><canvas id="csd-chart"></canvas></div>
+        </div>
+        <div class="card-0p">
+          <div style="padding:12px 14px;border-bottom:1px solid var(--border)"><div class="card-title">Every check <span style="font-weight:400;font-size:11px;color:var(--t2)">— newest first</span></div></div>
+          <div class="tw" id="csd-table"></div>
+        </div>
+      </div>
+    </div>
+
     <div id="p-sku-detail" class="panel">
       <div class="url-bar">
         <i class="ti ti-link" style="font-size:12px"></i>
