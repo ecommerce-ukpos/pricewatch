@@ -3408,6 +3408,7 @@ function csExport() {
 let csdChart = null;
 let csdData = null;                 // { hsku, name, url, price, checks } for the period view + CSV
 let csdMode = 'ends';               // 'ends' = Show start/end, 'all' = Show all (Day 1…N)
+let csdApplied = null;              // { start, end } last applied with Go — the table and CSV use this
 
 function csdChecks(rows) {
   const byRun = new Map();
@@ -3569,23 +3570,40 @@ function csdInitPeriod() {
   const first = csdData.checks.length ? csdKey(new Date(csdData.checks[0].scraped_at)) : today;
   if (!$('csd-end').value) $('csd-end').value = today;
   if (!$('csd-start').value) $('csd-start').value = first < $('csd-end').value ? first : csdAddDays($('csd-end').value, -1);
+  csdGo();
+}
+
+// Go: apply the date boxes. Until then, editing dates or clicking Daily/Weekly/Monthly only
+// fills in the boxes (and shows "Press Go to apply").
+function csdGo() {
+  let start = $('csd-start').value, end = $('csd-end').value;
+  if (!start || !end) return;
+  if (start > end) { [start, end] = [end, start]; $('csd-start').value = start; $('csd-end').value = end; }
+  csdApplied = { start, end };
   csdRenderPeriod();
+}
+function csdMarkPending() {
+  const pending = !csdApplied || $('csd-start').value !== csdApplied.start || $('csd-end').value !== csdApplied.end;
+  $('csd-pending').style.display = pending ? '' : 'none';
+  $('csd-go').classList.toggle('pulse', pending);
+  const s = $('csd-start').value, e = $('csd-end').value;
+  const n = s && e ? Math.round((Date.parse(e) - Date.parse(s)) / 86400000) + 1 : 0;
+  ['1', '7', '30'].forEach(k => $('csd-p-' + k).classList.toggle('active', n === (k === '1' ? 2 : Number(k))));
 }
 
 function csdPreset(n) {
   const end = $('csd-end').value || csdKey(new Date());
   $('csd-end').value = end;
   $('csd-start').value = csdAddDays(end, n === 1 ? -1 : -(n - 1));
-  csdRenderPeriod(n);
+  csdMarkPending();
 }
-function csdPeriodChanged() { csdRenderPeriod(); }
+function csdPeriodChanged() { csdMarkPending(); }
 function csdSetMode(m) { csdMode = m; csdRenderPeriod(); }
 
 // Everything the period table and the CSV need, for one SKU.
 function csdPeriod() {
-  let start = $('csd-start').value, end = $('csd-end').value;
-  if (!start || !end || !csdData) return null;
-  if (start > end) [start, end] = [end, start];
+  if (!csdApplied || !csdData) return null;
+  const { start, end } = csdApplied;
   const days = [];
   for (let d = start; d <= end && days.length < 400; d = csdAddDays(d, 1)) days.push(d);
   // last reading per UK day
@@ -3614,7 +3632,7 @@ const csdCell = r => !r ? '—'
 
 function csdRenderPeriod(preset) {
   const p = csdPeriod();
-  ['1', '7', '30'].forEach(n => $('csd-p-' + n).classList.toggle('active', !!p && p.days.length === (n === '1' ? 2 : Number(n)) && p.end === $('csd-end').value));
+  csdMarkPending();
   $('csd-v-ends').classList.toggle('active', csdMode === 'ends');
   $('csd-v-all').classList.toggle('active', csdMode === 'all');
   if (!p) { $('csd-period').innerHTML = ''; return; }
