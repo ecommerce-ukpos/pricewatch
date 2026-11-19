@@ -446,9 +446,6 @@ tr.row-m td:first-child{border-left:3px solid var(--abd);padding-left:8px}
 .comp-stats-bar{align-items:center}
 .comp-dist{flex:0 1 760px;min-width:380px;margin-left:32px;padding-left:20px}
 
-/* Harrison SKU page: Go button when the date boxes have changed but not been applied */
-#csd-go.pulse{box-shadow:0 0 0 3px rgba(55,138,221,.35)}
 /* Harrison SKU page: smaller column headings */
 #csd-period th, #csd-table th, #csm-period th{font-size:9px}
-#csd-go.pulse, #csm-go.pulse{box-shadow:0 0 0 3px rgba(55,138,221,.35)}
 #csm-period td{white-space:nowrap}

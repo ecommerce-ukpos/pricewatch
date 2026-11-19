@@ -3632,9 +3632,6 @@ function csdGo() {
   csdDrawChart();
 }
 function csdMarkPending() {
-  const pending = !csdApplied || $('csd-start').value !== csdApplied.start || $('csd-end').value !== csdApplied.end;
-  $('csd-pending').style.display = pending ? '' : 'none';
-  $('csd-go').classList.toggle('pulse', pending);
   const s = $('csd-start').value, e = $('csd-end').value;
   const n = s && e ? Math.round((Date.parse(e) - Date.parse(s)) / 86400000) + 1 : 0;
   ['1', '7', '30'].forEach(k => $('csd-p-' + k).classList.toggle('active', n === (k === '1' ? 2 : Number(k))));
@@ -3818,9 +3815,6 @@ function csmGo() {
   csmRender();
 }
 function csmMarkPending() {
-  const pending = !csmApplied || $('csm-start').value !== csmApplied.start || $('csm-end').value !== csmApplied.end;
-  $('csm-pending').style.display = pending ? '' : 'none';
-  $('csm-go').classList.toggle('pulse', pending);
   const s = $('csm-start').value, e = $('csm-end').value;
   const n = s && e ? Math.round((Date.parse(e) - Date.parse(s)) / 86400000) + 1 : 0;
   ['1', '7', '30'].forEach(k => $('csm-p-' + k).classList.toggle('active', n === (k === '1' ? 2 : Number(k))));
