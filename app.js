@@ -3258,12 +3258,9 @@ function csLastRunText() {
   if (!CS_SUPPORTED[csCompId()]) return '';
   const r = csLastRun;
   if (!r) return 'No check has run yet';
-  const scope = r.scope === 'catalogue' ? 'whole catalogue' : 'discovered URLs';
-  const what = (r.check_type === 'levels' ? 'Stock levels (old)' : 'Stock check') + (r.triggered_by === 'daily' ? ', daily schedule' : '');
-  if (r.status === 'failed') return `<span style="color:var(--red)">Last run ${csWhen(r.finished_at || r.started_at)} (${what}) failed: ${csEsc(r.error_message || 'unknown error')}</span>`;
-  const errs = (r.url_count || 0) - (r.ok_count || 0);
-  return `Last run ${csWhen(r.finished_at || r.started_at)} · ${what} (${scope}) — ${r.ok_count ?? 0} products read` +
-         (errs > 0 ? `, ${errs} could not be read` : '');
+  // Just the date (time on hover). A failed run says so in red, with the reason on hover.
+  if (r.status === 'failed') return `<span style="color:var(--red)" title="${csEsc(r.error_message || 'unknown error')}">Last run ${csWhen(r.finished_at || r.started_at)} failed</span>`;
+  return `Last run ${csWhen(r.finished_at || r.started_at)}`;
 }
 
 function csRunStateText() {
