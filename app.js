@@ -3652,10 +3652,10 @@ function csdSetMode(m) { csdMode = m; csdRenderPeriod(); }
 // Everything the period table and the CSV need, for one SKU.
 function csdPeriod() {
   if (!csdApplied || !csdData) return null;
-  return csdPeriodFor(csdData.checks, csdApplied.start, csdApplied.end);
+  return csdPeriodFor(csdData.checks, csdApplied.start, csdApplied.end, csdData.price);
 }
 // Same figures for any one SKU's checks (used by the SKU page and the multi-SKU page).
-function csdPeriodFor(checks, start, end) {
+function csdPeriodFor(checks, start, end, fallbackPrice = null) {
   const days = [];
   for (let d = start; d <= end && days.length < 400; d = csdAddDays(d, 1)) days.push(d);
   // last reading per UK day
@@ -3664,11 +3664,23 @@ function csdPeriodFor(checks, start, end) {
   const cells = days.map(d => byDay[d] || null);
   // readings inside the period (every check, not just one per day) for sold / restock
   const inP = checks.filter(r => { const k = csdKey(new Date(r.scraped_at)); return k >= start && k <= end && csdLvl(r) !== null && csdLvl(r) !== undefined; });
-  let sold = 0, restock = 0;
+  // Units sold = every fall between one check and the next (rises = likely restocks, not sales).
+  // Value sold = each fall × Harrison's ex-VAT price at that check (falls back to the earlier
+  // check's price, then the page price). Both are minimums.
+  let sold = 0, restock = 0, soldValue = 0, priced = true;
+  const priceAt = i => [inP[i]?.price_ex_vat, inP[i - 1]?.price_ex_vat, fallbackPrice].find(v => v !== null && v !== undefined && v !== '');
   for (let i = 1; i < inP.length; i++) {
     const d = csdLvl(inP[i]) - csdLvl(inP[i - 1]);
-    if (d < 0) sold += -d; else restock += d;
+    if (d < 0) {
+      sold += -d;
+      const pr = priceAt(i);
+      if (pr === undefined) priced = false; else soldValue += -d * Number(pr);
+    } else restock += d;
   }
+  // The simple (start − end) × price figure, shown on hover when a restock makes it misleading
+  const simpleUnits = inP.length >= 2 ? csdLvl(inP[0]) - csdLvl(inP[inP.length - 1]) : null;
+  const lastPrice = inP.length ? priceAt(inP.length - 1) : undefined;
+  const simpleValue = simpleUnits !== null && lastPrice !== undefined ? simpleUnits * Number(lastPrice) : null;
   const spanDays = inP.length >= 2 ? (Date.parse(inP[inP.length - 1].scraped_at) - Date.parse(inP[0].scraped_at)) / 86400000 : 0;
   const daily = spanDays >= 0.5 ? sold / spanDays : null;
   const startRow = cells[0], endRow = cells[cells.length - 1];
@@ -3679,8 +3691,24 @@ function csdPeriodFor(checks, start, end) {
   // (for Day 1, the last reading before the start date).
   let prevR = [...checks].reverse().find(r => csdKey(new Date(r.scraped_at)) < start && csdLvl(r) !== null && csdLvl(r) !== undefined) || null;
   const rises = cells.map(r => { if (!r) return 0; const d = prevR ? csdLvl(r) - csdLvl(prevR) : 0; prevR = r; return d > 0 ? d : 0; });
-  return { start, end, days, cells, rises, startRow, endRow, sold, restock, daily, readings: inP.length, tests, dues };
+  return { start, end, days, cells, rises, startRow, endRow, sold, restock, daily, readings: inP.length, tests, dues,
+           soldValue: inP.length >= 2 && priced ? soldValue : null, simpleUnits, simpleValue };
 }
+
+// Value sold cell: minimum £ sold in the dates; tagged "incl. restock" when stock rose in between.
+function csdValueSold(p) {
+  if (p.readings < 2 || p.soldValue === null) return '—';
+  let html = csMoney(p.soldValue);
+  if (p.restock > 0) {
+    const simple = p.simpleValue === null ? '' : ` A simple (start − end) × price would give ${p.simpleUnits.toLocaleString('en-GB')} units, ${csMoney(p.simpleValue)}.`;
+    const tip = `Stock went up during these dates: likely restock of at least +${p.restock.toLocaleString('en-GB')}. ` +
+      `Value sold adds up every fall between checks (${p.sold.toLocaleString('en-GB')} units) at Harrison's price at the time, so the restock doesn't cancel out sales. ` +
+      `It's still a minimum: sales hidden by a top-up between two checks can't be seen.` + simple;
+    html += ` <span style="background:lightgreen;font-size:9px;font-weight:600;padding:1px 4px;border-radius:3px;white-space:nowrap;cursor:help" title="${csEsc(tip)}">incl. restock</span>`;
+  }
+  return html;
+}
+const csdRestockFlag = p => p.restock > 0 ? 'yes' : 'no';
 
 // rise > 0 = likely restock since the previous reading → green (test data keeps its dotted underline)
 const csdCell = (r, rise) => !r ? '—'
@@ -3703,6 +3731,7 @@ function csdRenderPeriod(preset) {
   const tail = [
     ['Change', change === null ? '—' : `<span style="color:${change < 0 ? 'var(--red)' : change > 0 ? 'var(--grn)' : 'var(--t3)'}">${change > 0 ? '+' : ''}${change.toLocaleString('en-GB')}</span>`],
     ['Units sold (min)', p.readings >= 2 ? p.sold.toLocaleString('en-GB') : '—'],
+    ['Value sold (min, ex VAT)', csdValueSold(p)],
     ['Inferred restock (min)', p.readings >= 2 ? (p.restock ? '<span style="background:lightgreen;font-weight:600;padding:3px;">+' + p.restock.toLocaleString('en-GB') + '</span>' : '0') : '—'],
     ['Est daily sales', p.daily === null ? '—' : p.daily.toFixed(1)],
     ['Est daily sales value', p.daily === null || price === null ? '—' : csMoney(p.daily * price)],
@@ -3714,13 +3743,14 @@ function csdRenderPeriod(preset) {
   const ctr = 'text-align:center;white-space:nowrap';
   const head = two
     ? `<tr><th${rs}>Their code</th><th${rs}>Price (ex VAT)</th><th colspan="${lvlCols.length}" style="${ctr};border-bottom:1px solid var(--border)">Day</th>${tail.map(t => `<th${rs}>${t[0]}</th>`).join('')}</tr>
-       <tr>${lvlCols.map(c => `<th style="${ctr}">${c.head}</th>`).join('')}</tr>`
+       <tr>${lvlCols.map(c => `<th class="th-tight" style="${ctr}">${c.head}</th>`).join('')}</tr>`
     : `<tr><th>Their code</th><th>Price (ex VAT)</th>${lvlCols.map(c => `<th style="white-space:nowrap">${c.head}</th>`).join('')}${tail.map(t => `<th>${t[0]}</th>`).join('')}</tr>`;
   $('csd-period').innerHTML = `<table><thead>${head}</thead>
     <tbody><tr><td>${csEsc(csdData.hsku)}</td><td>${csMoney(price)}</td>${lvlCols.map(c => `<td${two ? ' style="text-align:center"' : ''}>${c.cell}</td>`).join('')}${tail.map(t => `<td>${t[1]}</td>`).join('')}</tr></tbody></table>`;
   $('csd-period-note').innerHTML = `${csdNice(p.start)} → ${csdNice(p.end)} (${p.days.length} days, Day 1 = ${csdNice(p.start)}). ` +
     `Each day shows that day's last check; — = not checked that day; 0 in red = out of stock; <span style="background:lightgreen;font-weight:600;padding:3px;">green background</span> = likely restock (higher than the check before). ` +
-    `Units sold and inferred restock are minimums: a rise like 40 → 70 counts as a restock of at least 30, because stock may have kept falling before the delivery arrived.` +
+    `Units sold, value sold and inferred restock are minimums: a rise like 40 → 70 counts as a restock of at least 30, because stock may have kept falling before the delivery arrived. ` +
+    `Value sold adds up every fall between checks at Harrison's price at the time, so a restock doesn't cancel out sales; <span style="background:lightgreen;padding:1px 4px;border-radius:3px">incl. restock</span> means stock went up in these dates (hover for details).` +
     (p.readings < 2 ? ' <strong>Needs at least 2 checks inside these dates for sales figures.</strong>' : '') +
     (p.tests ? ` <strong style="color:var(--red)">${p.tests} of the ${p.readings} readings in these dates are test data (red).</strong>` : '');
 }
@@ -3732,8 +3762,8 @@ function csdExport() {
   const lvlHead = csdMode === 'all' ? p.days.map((d, i) => `Day ${i + 1} (${d})`) : [`Start (${p.start})`, `End (${p.end})`];
   const lvlVals = csdMode === 'all' ? p.cells.map(val) : [val(p.startRow), val(p.endRow)];
   const change = p.startRow && p.endRow ? csdLvl(p.endRow) - csdLvl(p.startRow) : '';
-  const head = ['Their code', 'Name', 'Price ex VAT', ...lvlHead, 'Change', 'Units sold (min)', 'Inferred restock (min)', 'Est daily sales (units)', 'Est daily sales value (ex VAT)', 'Published due in period', 'Test readings in period', 'URL'];
-  const row = [csdData.hsku, csdData.name, csdData.price ?? '', ...lvlVals, change, p.readings >= 2 ? p.sold : '', p.readings >= 2 ? p.restock : '',
+  const head = ['Their code', 'Name', 'Price ex VAT', ...lvlHead, 'Change', 'Units sold (min)', 'Value sold (min, ex VAT)', 'Includes likely restock', 'Inferred restock (min)', 'Est daily sales (units)', 'Est daily sales value (ex VAT)', 'Published due in period', 'Test readings in period', 'URL'];
+  const row = [csdData.hsku, csdData.name, csdData.price ?? '', ...lvlVals, change, p.readings >= 2 ? p.sold : '', p.soldValue === null ? '' : p.soldValue.toFixed(2), p.readings >= 2 ? csdRestockFlag(p) : '', p.readings >= 2 ? p.restock : '',
     p.daily === null ? '' : p.daily.toFixed(1), p.daily === null || csdData.price === null ? '' : (p.daily * csdData.price).toFixed(2), p.dues.join('; '), p.tests ? `${p.tests} of ${p.readings} (test data)` : 0, csdData.url];
   const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const blob = new Blob(['\ufeff' + [head.map(q).join(','), row.map(q).join(',')].join('\r\n')], { type: 'text/csv;charset=utf-8' });
@@ -3838,7 +3868,7 @@ function csmSetMode(m) { csmMode = m; csmRenderTable(); }
 
 function csmPeriods() {
   if (!csmApplied) return [];
-  return csmData.map(d => ({ d, p: csdPeriodFor(d.checks, csmApplied.start, csmApplied.end) }));
+  return csmData.map(d => ({ d, p: csdPeriodFor(d.checks, csmApplied.start, csmApplied.end, d.price) }));
 }
 
 function csmRender() {
@@ -3855,12 +3885,15 @@ function csmRender() {
   const value = sum(x => x.p.daily !== null && x.d.price !== null ? x.p.daily * x.d.price : 0);
   const restock = sum(x => x.p.readings >= 2 ? x.p.restock : 0);
   const sold = sum(x => x.p.readings >= 2 ? x.p.sold : 0);
+  const soldVal = sum(x => x.p.soldValue || 0);
+  const withRestock = list.filter(x => x.p.restock > 0).length;
   const metric = (label, v, sub) => `<div class="metric" style="background:var(--surface);border-color:var(--border)"><span class="ml" style="color:var(--t2)">${label}</span><span class="mv">${v}</span><span class="ms" style="color:var(--t2)">${sub || '&nbsp;'}</span></div>`;
-  $('csm-metrics').style.gridTemplateColumns = 'repeat(6,minmax(0,1fr))';
+  $('csm-metrics').style.gridTemplateColumns = 'repeat(7,minmax(0,1fr))';
   $('csm-metrics').innerHTML = [
     metric('Status now', `${inNow} <span style="font-size:13px;font-weight:400;color:var(--t2)">in</span> · <span style="color:var(--red)">${oosNow}</span> <span style="font-size:13px;font-weight:400;color:var(--t2)">out</span>`, `of ${csmData.length} codes`),
     metric('Stock on end date', endStock.toLocaleString('en-GB'), `total · ${csDay(csmApplied.end)}`),
     metric('Units sold (min)', sold.toLocaleString('en-GB'), 'in these dates'),
+    metric('Value sold (min)', csMoney(soldVal), withRestock ? `ex VAT · <span style="background:lightgreen;padding:1px 4px;border-radius:3px;white-space:nowrap">${withRestock} incl. restock</span>` : 'ex VAT, at their prices'),
     metric('Est daily sales', withSales.length ? daily.toFixed(1) : '—', `units/day · ${withSales.length} of ${list.length} codes`),
     metric('Est daily sales value', withSales.length ? csMoney(value) : '—', 'at their prices, ex VAT'),
     metric('Inferred restock (min)', restock ? '+' + restock.toLocaleString('en-GB') : '0', 'in these dates'),
@@ -3917,21 +3950,22 @@ function csmRenderTable() {
   const rs = two ? ' rowspan="2" style="vertical-align:bottom"' : '';
   const ctr = 'text-align:center;white-space:nowrap';
   const lead = ['Their code', 'Name', 'Price (ex VAT)', 'Status now'];
-  const tail = ['Change', 'Units sold (min)', 'Inferred restock (min)', 'Est daily sales', 'Est daily sales value', 'Published due in period'];
+  const tail = ['Change', 'Units sold (min)', 'Value sold (min, ex VAT)', 'Inferred restock (min)', 'Est daily sales', 'Est daily sales value', 'Published due in period'];
   const lvlHeads = two ? days.map((d, i) => `<span title="${csdNice(d)}">${i + 1}</span>`)
     : [`<span title="${csdNice(csmApplied.start)}">Start</span>`, `<span title="${csdNice(csmApplied.end)}">End</span>`];
   const head = two
     ? `<tr>${lead.map(h => `<th${rs}>${h}</th>`).join('')}<th colspan="${days.length}" style="${ctr};border-bottom:1px solid var(--border)">Day</th>${tail.map(h => `<th${rs}>${h}</th>`).join('')}</tr>
-       <tr>${lvlHeads.map(h => `<th style="${ctr}">${h}</th>`).join('')}</tr>`
+       <tr>${lvlHeads.map(h => `<th class="th-tight" style="${ctr}">${h}</th>`).join('')}</tr>`
     : `<tr>${lead.map(h => `<th>${h}</th>`).join('')}${lvlHeads.map(h => `<th>${h}</th>`).join('')}${tail.map(h => `<th>${h}</th>`).join('')}</tr>`;
 
-  const tot = { lv: lvlHeads.map(() => 0), lvAny: lvlHeads.map(() => false), change: 0, sold: 0, restock: 0, daily: 0, value: 0, any: false };
+  const tot = { lv: lvlHeads.map(() => 0), lvAny: lvlHeads.map(() => false), change: 0, sold: 0, soldValue: 0, restock: 0, daily: 0, value: 0, any: false };
   const body = list.map(({ d, p }) => {
     const cells = two ? p.cells : [p.startRow, p.endRow];
     cells.forEach((r, i) => { if (r) { tot.lv[i] += csdLvl(r); tot.lvAny[i] = true; } });
     const change = p.startRow && p.endRow ? csdLvl(p.endRow) - csdLvl(p.startRow) : null;
     if (change !== null) tot.change += change;
     if (p.readings >= 2) { tot.sold += p.sold; tot.restock += p.restock; }
+    if (p.soldValue !== null) tot.soldValue += p.soldValue;
     if (p.daily !== null) { tot.daily += p.daily; tot.any = true; if (d.price !== null) tot.value += p.daily * d.price; }
     const code = `<a href="#harrison/${encodeURIComponent(d.hsku)}" onclick="event.preventDefault();go('csdetail',{hsku:${csEsc(JSON.stringify(d.hsku))}})">${csEsc(d.hsku)}</a>`;
     const name = `<span title="${csEsc(d.name)}">${csEsc(d.name.length > 42 ? d.name.slice(0, 40) + '…' : d.name)}</span>`;
@@ -3939,6 +3973,7 @@ function csmRenderTable() {
       ${cells.map((r, i) => `<td${two ? ' style="text-align:center"' : ''}>${csdCell(r, two ? p.rises[i] : 0)}</td>`).join('')}
       <td>${change === null ? '—' : `<span style="color:${change < 0 ? 'var(--red)' : change > 0 ? 'var(--grn)' : 'var(--t3)'}">${change > 0 ? '+' : ''}${change.toLocaleString('en-GB')}</span>`}</td>
       <td>${p.readings >= 2 ? p.sold.toLocaleString('en-GB') : '—'}</td>
+      <td>${csdValueSold(p)}</td>
       <td>${p.readings >= 2 ? (p.restock ? '<span style="background:lightgreen;font-weight:600;padding:3px;">+' + p.restock.toLocaleString('en-GB') + '</span>' : '0') : '—'}</td>
       <td>${p.daily === null ? '—' : p.daily.toFixed(1)}</td>
       <td>${p.daily === null || d.price === null ? '—' : csMoney(p.daily * d.price)}</td>
@@ -3946,14 +3981,14 @@ function csmRenderTable() {
   }).join('');
   const totRow = list.length > 1 ? `<tr style="font-weight:600;border-top:2px solid var(--border)"><td colspan="4">Total (${list.length} codes)</td>
       ${tot.lv.map((v, i) => `<td${two ? ' style="text-align:center"' : ''}>${tot.lvAny[i] ? v.toLocaleString('en-GB') : '—'}</td>`).join('')}
-      <td>${tot.change > 0 ? '+' : ''}${tot.change.toLocaleString('en-GB')}</td><td>${tot.sold.toLocaleString('en-GB')}</td>
+      <td>${tot.change > 0 ? '+' : ''}${tot.change.toLocaleString('en-GB')}</td><td>${tot.sold.toLocaleString('en-GB')}</td><td>${csMoney(tot.soldValue)}</td>
       <td>${tot.restock ? '<span style="background:lightgreen;padding:3px;">+' + tot.restock.toLocaleString('en-GB') + '</span>' : '0'}</td><td>${tot.any ? tot.daily.toFixed(1) : '—'}</td>
       <td>${tot.any ? csMoney(tot.value) : '—'}</td><td></td></tr>` : '';
   $('csm-period').innerHTML = `<table><thead>${head}</thead><tbody>${body}${totRow}</tbody></table>`;
   const tests = list.reduce((a, x) => a + x.p.tests, 0), readings = list.reduce((a, x) => a + x.p.readings, 0);
   $('csm-period-note').innerHTML = `${csdNice(csmApplied.start)} → ${csdNice(csmApplied.end)} (${days.length} days, Day 1 = ${csdNice(csmApplied.start)}). ` +
     `Each day shows that day's last check; — = not checked that day; 0 in red = out of stock; <span style="background:lightgreen;font-weight:600;padding:3px;">green background</span> = likely restock (higher than the check before). Totals add up the codes that have a figure. ` +
-    `Units sold and inferred restock are minimums (a rise like 40 → 70 is a restock of at least 30).` +
+    `Units sold, value sold and inferred restock are minimums (a rise like 40 → 70 is a restock of at least 30). Value sold adds up every fall between checks at Harrison's price at the time, so a restock doesn't cancel out sales; <span style="background:lightgreen;padding:1px 4px;border-radius:3px">incl. restock</span> marks a code whose stock went up in these dates (hover for details).` +
     (tests ? ` <strong style="color:var(--red)">${tests} of the ${readings} readings in these dates are test data (red).</strong>` : '');
 }
 
@@ -3966,11 +4001,13 @@ function csmExport() {
   const lvlHead = two ? days.map((d, i) => `Day ${i + 1} (${d})`) : [`Start (${csmApplied.start})`, `End (${csmApplied.end})`];
   const head = ['Their code', 'Name', 'Our SKU', 'Price ex VAT', 'Status now', ...lvlHead, 'Change', 'Units sold (min)', 'Inferred restock (min)',
     'Est daily sales (units)', 'Est daily sales value (ex VAT)', 'Published due in period', 'Test readings in period', 'URL'];
+  head.splice(head.indexOf('Inferred restock (min)'), 0, 'Value sold (min, ex VAT)', 'Includes likely restock');
   const rows = list.map(({ d, p }) => {
     const cells = two ? p.cells : [p.startRow, p.endRow];
     const change = p.startRow && p.endRow ? csdLvl(p.endRow) - csdLvl(p.startRow) : '';
     return [d.hsku, d.name, d.ours.join(' '), d.price ?? '', d.last ? d.last.stock_status.replace(/_/g, ' ') : '', ...cells.map(val), change,
-      p.readings >= 2 ? p.sold : '', p.readings >= 2 ? p.restock : '', p.daily === null ? '' : p.daily.toFixed(1),
+      p.readings >= 2 ? p.sold : '', p.soldValue === null ? '' : p.soldValue.toFixed(2), p.readings >= 2 ? csdRestockFlag(p) : '',
+      p.readings >= 2 ? p.restock : '', p.daily === null ? '' : p.daily.toFixed(1),
       p.daily === null || d.price === null ? '' : (p.daily * d.price).toFixed(2), p.dues.join('; '),
       p.tests ? `${p.tests} of ${p.readings} (test data)` : 0, d.url];
   });
@@ -4061,3 +4098,22 @@ document.addEventListener('click', e => {
   keyed.forEach(k => body.appendChild(k.tr));
   fixed.forEach(tr => body.appendChild(tr));
 });
+
+
+/* Wrap each table heading's content in <span class="th-w"> so long headings wrap (styles.css
+   caps the span's width) without narrowing the column. Runs for every table, including ones
+   drawn later. Group headings (colspan, e.g. "Day") are left as they are. */
+function thWrapAll(root) {
+  (root.querySelectorAll ? root : document).querySelectorAll('th:not([data-w]):not([colspan])').forEach(th => {
+    th.dataset.w = '1';
+    if (th.querySelector('input,select,button')) return;
+    const span = document.createElement('span');
+    span.className = 'th-w';
+    while (th.firstChild) span.appendChild(th.firstChild);
+    th.appendChild(span);
+  });
+}
+thWrapAll(document);
+new MutationObserver(muts => {
+  for (const m of muts) for (const n of m.addedNodes) if (n.nodeType === 1) thWrapAll(n.tagName === 'TH' ? n.parentElement || n : n);
+}).observe(document.body, { childList: true, subtree: true });
