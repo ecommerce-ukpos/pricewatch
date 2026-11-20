@@ -14,8 +14,13 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 //                                      (queued / in_progress / completed + conclusion), for the
 //                                      "Run progress" panel. Run names come from run-name in scraper.yml.
 //  POST {mode:"harrison_stock",       → Harrison Products stock check (the "Check Competitor Stock" page).
-//        check:"oos"|"levels",            oos = Check OOS items, levels = Run stock levels (in-stock items).
+//        check:"oos"|"levels",            oos = Run stock check (every page); levels = old, no longer in the app.
 //        scope:"matches"|"catalogue"}     matches = discovered Harrison URLs, catalogue = whole product sitemap.
+//  POST {mode:"harrison_daily"}      → the morning Harrison whole-catalogue stock check
+//                                      (.github/workflows/harrison_daily.yml, trigger=daily).
+//                                      Called by Supabase pg_cron at a random time 05:00–08:30 UK
+//                                      (public.harrison_daily_tick). The scraper itself skips the run
+//                                      if a daily run already started today, so repeat calls are harmless.
 //  Discovery never runs with force, so confirmed matches are never reset to review.
 //
 //  Secrets: GITHUB_PAT (fine-grained: Actions read+write on the repo), GITHUB_REPO ("owner/repo").
@@ -54,9 +59,9 @@ function tokenHint(status: number, text: string): string {
   return "";
 }
 
-async function dispatch(pat: string, repo: string, inputs: Record<string, string>) {
+async function dispatch(pat: string, repo: string, inputs: Record<string, string>, workflow = "scraper.yml") {
   const res = await fetch(
-    `https://api.github.com/repos/${repo}/actions/workflows/scraper.yml/dispatches`,
+    `https://api.github.com/repos/${repo}/actions/workflows/${workflow}/dispatches`,
     { method: "POST", headers: ghHeaders(pat), body: JSON.stringify({ ref: "main", inputs }) },
   );
   if (res.status === 204) return { ok: true };
@@ -114,6 +119,12 @@ Deno.serve(async (req: Request) => {
       : new Date(Date.now() - 24 * 3600_000).toISOString();
     const r = await listRuns(PAT, REPO, since);
     return r.ok ? json(r) : json(r, 502);
+  }
+
+  // ── Harrison morning check (from pg_cron) ─────────────────────────────────
+  if (body && body.mode === "harrison_daily") {
+    const r = await dispatch(PAT, REPO, { trigger: "daily", stop_at: "11:30" }, "harrison_daily.yml");
+    return r.ok ? json({ ok: true, dispatched: 1, workflow: "harrison_daily.yml" }) : json(r, 500);
   }
 
   // ── Harrison stock scrape ─────────────────────────────────────────────────
