@@ -459,3 +459,6 @@ a[target="_blank"]:not(:has(.ti))::after{content:"";display:inline-block;width:1
 
 /* Stock position by date card (Harrison SKU page + View detail page) */
 .card.stockpos-card{padding-top:36px;padding-bottom:36px}
+/* Every table heading can be clicked to sort (see "SORT ANY TABLE" in app.js) */
+th:not([colspan]):not(:has(input)){cursor:pointer;user-select:none}
+th:not([colspan]):not(:has(input)):hover{color:var(--text)}

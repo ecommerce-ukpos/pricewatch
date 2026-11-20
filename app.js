@@ -3985,3 +3985,82 @@ function csmExport() {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
+
+
+/* ════════════════════════════════════════
+   SORT ANY TABLE — click a column heading to sort by it, click again to reverse.
+   Applies to every table whose heading has no sort handler of its own (All SKUs and
+   Needs Review keep theirs). Works on what's shown: numbers (£, %, +, commas ignored),
+   dates like "18th Nov", then text. Blank / "—" always go last. Group headings that span
+   several columns (e.g. "Day") and rows that span columns (e.g. Total) aren't sorted.
+   A cell can set data-sort="…" to give its own sort value.
+════════════════════════════════════════ */
+const TS_MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+function tsValue(td) {
+  if (!td) return null;
+  const raw = (td.dataset.sort ?? td.textContent).replace(/\s+/g, ' ').trim();
+  if (!raw || raw === '—' || raw === '-' || raw === '–') return null;
+  const d = raw.match(/^(\d{1,2})(?:st|nd|rd|th)? ([A-Za-z]{3})[a-z]*\.?(?: (\d{4}))?(?:,? (\d{1,2}):(\d{2}))?/);
+  if (d && TS_MONTHS[d[2].toLowerCase()] !== undefined) {
+    return Date.UTC(d[3] ? +d[3] : new Date().getFullYear(), TS_MONTHS[d[2].toLowerCase()], +d[1], d[4] ? +d[4] : 0, d[5] ? +d[5] : 0);
+  }
+  const n = raw.replace(/[−–]/g, '-').match(/^(?:≥\s*)?([+-])?\s*£?\s*(-?[\d,]*\.?\d+)/);
+  if (n) { const v = parseFloat(n[2].replace(/,/g, '')); if (!isNaN(v)) return n[1] === '-' ? -v : v; }
+  return raw.toLowerCase();
+}
+function tsColumnIndex(th) {
+  const table = th.closest('table');
+  const head = th.closest('thead') ? [...th.closest('thead').rows] : [th.parentElement];
+  const grid = [];
+  for (let ri = 0; ri < head.length; ri++) {
+    let col = 0;
+    for (const cell of head[ri].cells) {
+      grid[ri] = grid[ri] || [];
+      while (grid[ri][col]) col++;
+      for (let i = 0; i < cell.rowSpan; i++) for (let j = 0; j < cell.colSpan; j++) {
+        grid[ri + i] = grid[ri + i] || [];
+        grid[ri + i][col + j] = cell;
+      }
+      if (cell === th) return cell.colSpan === 1 ? col : -1;
+      col += cell.colSpan;
+    }
+  }
+  return -1;
+}
+function tsCellAt(tr, idx) {
+  let col = 0;
+  for (const c of tr.cells) { if (col === idx) return c; col += c.colSpan; if (col > idx) return null; }
+  return null;
+}
+document.addEventListener('click', e => {
+  const th = e.target.closest('th');
+  if (!th || th.hasAttribute('onclick') || th.closest('.no-sort')) return;
+  if (e.target.closest('input,button,select,a')) return;
+  const table = th.closest('table');
+  if (!table || !table.tBodies.length) return;
+  const idx = tsColumnIndex(th);
+  if (idx < 0) return;
+  const desc = th.classList.contains('sort-asc');
+  table.querySelectorAll('th.sort-asc, th.sort-desc').forEach(x => x.classList.remove('sort-asc', 'sort-desc'));
+  th.classList.add(desc ? 'sort-desc' : 'sort-asc');
+  const body = table.tBodies[0];
+  const all = [...body.rows];
+  const headRows = all.filter(tr => tr.querySelector('th'));               // header rows kept in tbody stay on top
+  const fixed = all.filter(tr => !headRows.includes(tr) && [...tr.cells].some(c => c.colSpan > 1)); // totals / notes stay at the bottom
+  const rows = all.filter(tr => !headRows.includes(tr) && !fixed.includes(tr));
+  const keyed = rows.map((tr, i) => ({ tr, i, v: tsValue(tsCellAt(tr, idx)) }));
+  keyed.sort((a, b) => {
+    if (a.v === null && b.v === null) return a.i - b.i;
+    if (a.v === null) return 1;
+    if (b.v === null) return -1;
+    let r;
+    if (typeof a.v === 'number' && typeof b.v === 'number') r = a.v - b.v;
+    else if (typeof a.v === 'number') r = -1;
+    else if (typeof b.v === 'number') r = 1;
+    else r = a.v.localeCompare(b.v, 'en-GB', { numeric: true });
+    return (desc ? -r : r) || a.i - b.i;
+  });
+  headRows.forEach(tr => body.appendChild(tr));
+  keyed.forEach(k => body.appendChild(k.tr));
+  fixed.forEach(tr => body.appendChild(tr));
+});
