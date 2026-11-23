@@ -326,6 +326,24 @@
             </div>
           </div>
         </div>
+        <div class="card" style="padding:10px 14px;background:bisque;margin-top:14px">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px">
+            <span class="card-title" style="margin-right:4px">Dates</span>
+            <label>Start <input type="date" id="ccs-start"></label>
+            <label>End <input type="date" id="ccs-end"></label>
+            <span class="icon-tog-wrap">
+              <button class="icon-tog" id="ccs-p-1" onclick="ccsPreset(1)">Daily</button>
+              <button class="icon-tog" id="ccs-p-7" onclick="ccsPreset(7)">Weekly</button>
+              <button class="icon-tog" id="ccs-p-30" onclick="ccsPreset(30)">Monthly</button>
+            </span>
+            <button class="btn sm prim" id="ccs-go" onclick="ccsGo()" title="Apply these dates to the table and the CSV">Go</button>
+            <span class="icon-tog-wrap" style="margin-left:auto">
+              <button class="icon-tog" id="ccs-v-ends" onclick="ccsSetMode('ends')">Show start/end</button>
+              <button class="icon-tog" id="ccs-v-all" onclick="ccsSetMode('all')">Show all</button>
+            </span>
+            <span id="ccs-status" style="color:var(--t2)"></span>
+          </div>
+        </div>
         <div class="card" style="margin-top:14px">
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
             <div class="icon-tog-wrap">

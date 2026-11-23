@@ -3113,6 +3113,9 @@ function slcOpenReview() {
 const CS_SUPPORTED = { 10: true };        // competitor ids with a stock scraper
 let csRows = [], csLastRun = null, csRunning = null, csPollTimer = null, csOurs = {};
 let csView = 'in', csDispatchedAt = null, csCompsLoaded = false;
+// Dashboard date range (Dates bar). ccsApplied = dates last applied with Go; ccsHist = each
+// code's checks around those dates (key = Harrison code, else address); ccsMode as on the SKU page.
+let ccsApplied = null, ccsMode = 'all', ccsHist = null, ccsHistFor = '', ccsHistLoading = false;
 const csEsc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const csMoney = v => (v === null || v === undefined || v === '') ? '—' : '£' + Number(v).toFixed(2);
 // Dates on screen are short: "18th Nov" (year added only if not this year). csWhen adds the
@@ -3184,6 +3187,8 @@ async function loadCompStock() {
     if (csDispatchedAt && Date.now() - csDispatchedAt > 6 * 3600 * 1000) csDispatchedAt = null;
     csRows = rows;
     await csLoadOurs(rows);
+    ccsInitDates();
+    if (!csRunning || !ccsHist) await ccsLoadHist(true);
     csRender();
     if (csRunning || csDispatchedAt) csStartPoll(); else csStopPoll();
   } catch (e) {
@@ -3298,10 +3303,118 @@ const csDue = r => !r.next_due_date ? '—'
     (r.due_scope === 'range' ? ` <span style="font-size:11px;color:var(--t3)" title="Harrison lists deliveries for the whole product range, not per size or colour">(range)</span>` : '');
 const csLevel = v => (v === null || v === undefined) ? '—' : Number(v).toLocaleString('en-GB');
 
+// Columns either side of the date columns (Start/End, or Day 1…N in Show all)
 const CS_HEAD = {
-  in:  ['Their code', 'Our SKU', 'Name', 'Price (ex VAT)', 'UKPOS price (if matched)', 'Their price is', 'Stock level now', 'Previous stock level', 'Previous check date', 'Est daily sales', 'Est daily sales value', 'Next stock due'],
-  oos: ['Their code', 'Our SKU', 'Name', 'Price (ex VAT)', 'OOS since', 'Next stock due'],
+  in:  { lead: ['Their code', 'Our SKU', 'Name', 'Price (ex VAT)', 'UKPOS price (if matched)', 'Their price is', 'Stock level now'],
+         tail: ['Change', 'Units sold (min)', 'Value sold (min, ex VAT)', 'Inferred restock (min)', 'Est daily sales', 'Est daily sales value', 'Next stock due'] },
+  oos: { lead: ['Their code', 'Our SKU', 'Name', 'Price (ex VAT)', 'OOS since'],
+         tail: ['Change', 'Units sold (min)', 'Value sold (min, ex VAT)', 'Inferred restock (min)', 'Next stock due'] },
 };
+
+/* ── Dashboard Dates bar ──────────────────────────────────────────────
+   Same rules as the SKU page: each day = that day's last check (UK time); units sold = every
+   fall between checks; value sold = each fall × their price at the time; rises = inferred
+   restocks; est daily sales = units sold ÷ days between the first and last check in range. */
+function ccsInitDates() {
+  if (ccsApplied) return;
+  const end = csdKey(new Date());
+  $('ccs-end').value = end;
+  $('ccs-start').value = csdAddDays(end, -6);
+  ccsApplied = { start: $('ccs-start').value, end };
+  ccsMarkPreset();
+}
+function ccsMarkPreset() {
+  const s = $('ccs-start').value, e = $('ccs-end').value;
+  const n = s && e ? Math.round((Date.parse(e) - Date.parse(s)) / 86400000) + 1 : 0;
+  ['1', '7', '30'].forEach(k => $('ccs-p-' + k).classList.toggle('active', n === (k === '1' ? 2 : Number(k))));
+  $('ccs-v-ends').classList.toggle('active', ccsMode === 'ends');
+  $('ccs-v-all').classList.toggle('active', ccsMode === 'all');
+}
+function ccsPreset(n) {
+  const end = $('ccs-end').value || csdKey(new Date());
+  $('ccs-end').value = end;
+  $('ccs-start').value = csdAddDays(end, n === 1 ? -1 : -(n - 1));
+  ccsMarkPreset();
+}
+function ccsSetMode(m) { ccsMode = m; ccsMarkPreset(); csRender(); }
+async function ccsGo() {
+  let start = $('ccs-start').value, end = $('ccs-end').value;
+  if (!start || !end) return;
+  if (start > end) { [start, end] = [end, start]; $('ccs-start').value = start; $('ccs-end').value = end; }
+  ccsApplied = { start, end };
+  ccsMarkPreset();
+  await ccsLoadHist(false);
+  csRender();
+}
+// Checks for every code from 3 days before Start (so Day 1 can show a restock) to the day after End.
+async function ccsLoadHist(force) {
+  if (!ccsApplied || !CS_SUPPORTED[csCompId()]) return;
+  const key = ccsApplied.start + '|' + ccsApplied.end;
+  if (!force && ccsHist && ccsHistFor === key) return;
+  ccsHistLoading = true;
+  $('ccs-status').textContent = 'Loading stock history…';
+  try {
+    const from = csdAddDays(ccsApplied.start, -3) + 'T00:00:00Z';
+    const to = csdAddDays(ccsApplied.end, 2) + 'T00:00:00Z';
+    const by = {};
+    for (let i = 0; ; i += 1000) {
+      const { data, error } = await sb.from('harrison_stock')
+        .select('run_id,scraped_at,competitor_url,harrison_sku,price_ex_vat,stock_level,stock_status,is_test')
+        .gte('scraped_at', from).lt('scraped_at', to).neq('stock_status', 'error')
+        .order('scraped_at', { ascending: true }).order('id', { ascending: true }).range(i, i + 999);
+      if (error) throw error;
+      (data || []).forEach(r => { const k = r.harrison_sku || r.competitor_url; (by[k] = by[k] || []).push(r); });
+      if (!data || data.length < 1000) break;
+    }
+    ccsHist = {};
+    Object.keys(by).forEach(k => { ccsHist[k] = csdChecks(by[k]); });
+    ccsHistFor = key;
+    $('ccs-status').textContent = '';
+  } catch (e) {
+    $('ccs-status').innerHTML = `<span style="color:var(--red)">Could not load stock history: ${csEsc(e.message)}</span>`;
+  } finally {
+    ccsHistLoading = false;
+  }
+}
+function ccsPeriod(r) {
+  if (!ccsApplied || !ccsHist) return null;
+  return csdPeriodFor(ccsHist[r.harrison_sku || r.competitor_url] || [], ccsApplied.start, ccsApplied.end,
+    r.price_ex_vat === null || r.price_ex_vat === undefined ? null : Number(r.price_ex_vat));
+}
+function ccsDays() {
+  if (!ccsApplied) return [];
+  const out = [];
+  for (let d = ccsApplied.start; d <= ccsApplied.end; d = csdAddDays(d, 1)) out.push(d);
+  return out;
+}
+// The date and figure cells for one row (HTML), and the same as plain values for the CSV
+function ccsCells(r, p) {
+  const two = ccsMode === 'all';
+  const cells = !p ? [] : two ? p.cells : [p.startRow, p.endRow];
+  const rises = !p ? [] : two ? p.rises : [0, 0];
+  const change = p && p.startRow && p.endRow ? csdLvl(p.endRow) - csdLvl(p.startRow) : null;
+  const price = r.price_ex_vat === null || r.price_ex_vat === undefined ? null : Number(r.price_ex_vat);
+  const has = p && p.readings >= 2;
+  return {
+    lvl: cells.map((c, i) => `<td${two ? ' style="text-align:center"' : ''}>${csdCell(c, rises[i])}</td>`).join(''),
+    change: change === null ? '—' : `<span style="color:${change < 0 ? 'var(--red)' : change > 0 ? 'var(--grn)' : 'var(--t3)'}">${change > 0 ? '+' : ''}${change.toLocaleString('en-GB')}</span>`,
+    sold: has ? p.sold.toLocaleString('en-GB') : '—',
+    value: p ? csdValueSold(p) : '—',
+    restock: has ? (p.restock ? '<span style="background:lightgreen;font-weight:600;padding:3px;">+' + p.restock.toLocaleString('en-GB') + '</span>' : '0') : '—',
+    daily: p && p.daily !== null ? p.daily.toFixed(1) : '—',
+    dailyValue: p && p.daily !== null && price !== null ? csMoney(p.daily * price) : '—',
+    csv: {
+      lvl: cells.map(c => c ? csdLvl(c) : ''),
+      change: change === null ? '' : change,
+      sold: has ? p.sold : '',
+      value: p && p.soldValue !== null ? p.soldValue.toFixed(2) : '',
+      restockFlag: has ? csdRestockFlag(p) : '',
+      restock: has ? p.restock : '',
+      daily: p && p.daily !== null ? p.daily.toFixed(1) : '',
+      dailyValue: p && p.daily !== null && price !== null ? (p.daily * price).toFixed(2) : '',
+    },
+  };
+}
 
 // Ticked rows (by Harrison code) for "View detail". Kept while you move around the app.
 const csSel = new Set();
@@ -3344,8 +3457,12 @@ function csRender() {
   $('cs-lastrun').innerHTML  = csLastRunText();
   $('cs-runstate').innerHTML = csRunStateText();
 
-  const head = CS_HEAD[csView];
-  const cols = head.length + 1;
+  const H = CS_HEAD[csView];
+  const days = ccsDays();
+  const two = ccsMode === 'all';
+  const lvlHeads = two ? days.map((d, i) => `<span title="${csdNice(d)}">${i + 1}</span>`)
+    : ccsApplied ? [`<span title="${csdNice(ccsApplied.start)}">Start</span>`, `<span title="${csdNice(ccsApplied.end)}">End</span>`] : [];
+  const cols = H.lead.length + lvlHeads.length + H.tail.length + 1;
   const emptyRow = msg => `<tr><td colspan="${cols}" style="color:var(--t3);text-align:center;padding:18px">${msg}</td></tr>`;
   let body;
   if (!CS_SUPPORTED[csCompId()]) {
@@ -3356,19 +3473,31 @@ function csRender() {
       body = emptyRow(!csRows.length ? 'No stock data yet — press <strong>Run stock check</strong>.'
         : csView === 'oos' ? 'No out-of-stock items.' : 'No in-stock items.');
     } else if (csView === 'oos') {
-      body = rows.map(r => `<tr><td>${csBox(r)}</td><td>${csTheirCode(r)}</td><td>${csOurSku(r)}</td><td>${csName(r)}</td><td>${csMoney(r.price_ex_vat)}</td><td>${csOosSince(r)}</td><td>${csDue(r)}</td></tr>`).join('');
+      body = rows.map(r => {
+        const x = ccsCells(r, ccsPeriod(r));
+        return `<tr><td>${csBox(r)}</td><td>${csTheirCode(r)}</td><td>${csOurSku(r)}</td><td>${csName(r)}</td><td>${csMoney(r.price_ex_vat)}</td><td>${csOosSince(r)}</td>
+          ${x.lvl}<td>${x.change}</td><td>${x.sold}</td><td>${x.value}</td><td>${x.restock}</td><td>${csDue(r)}</td></tr>`;
+      }).join('');
     } else {
       body = rows.map(r => {
         const c = csCompare(r);
+        const x = ccsCells(r, ccsPeriod(r));
         return `<tr><td>${csBox(r)}</td><td>${csTheirCode(r)}</td><td>${csOurSku(r)}</td><td>${csName(r)}</td><td>${csMoney(r.price_ex_vat)}</td>
           <td>${c.ours === null ? '—' : csMoney(c.ours)}</td>
           <td>${csDiffCell(c)}</td>
-          <td>${csLevel(r.stock_level)}</td><td>${csLevel(r.prev_stock_level)}</td>
-          <td>${r.prev_scraped_at ? csWhen(r.prev_scraped_at) : '—'}</td><td>${csDaily(r)}</td><td>${csDailyValue(r)}</td><td>${csDue(r)}</td></tr>`;
+          <td>${csLevel(r.stock_level)}</td>
+          ${x.lvl}<td>${x.change}</td><td>${x.sold}</td><td>${x.value}</td><td>${x.restock}</td><td>${x.daily}</td><td>${x.dailyValue}</td><td>${csDue(r)}</td></tr>`;
       }).join('');
     }
   }
-  $('cs-table').innerHTML = `<div class="tw"><table><thead><tr><th style="width:26px"><input type="checkbox" id="cs-cb-all" title="Select all shown" onclick="csSelAll(this)"></th>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
+  const rs = two ? ' rowspan="2" style="vertical-align:bottom"' : '';
+  const ctr = 'text-align:center;white-space:nowrap';
+  const box = `<th${two ? ' rowspan="2" style="width:26px;vertical-align:bottom"' : ' style="width:26px"'}><input type="checkbox" id="cs-cb-all" title="Select all shown" onclick="csSelAll(this)"></th>`;
+  const thead = two && lvlHeads.length
+    ? `<tr>${box}${H.lead.map(h => `<th${rs}>${h}</th>`).join('')}<th colspan="${lvlHeads.length}" style="${ctr};border-bottom:1px solid var(--border)">Day</th>${H.tail.map(h => `<th${rs}>${h}</th>`).join('')}</tr>
+       <tr>${lvlHeads.map(h => `<th class="th-tight" style="${ctr}">${h}</th>`).join('')}</tr>`
+    : `<tr>${box}${[...H.lead, ...lvlHeads, ...H.tail].map(h => `<th>${h}</th>`).join('')}</tr>`;
+  $('cs-table').innerHTML = `<div class="tw"><table><thead>${thead}</thead><tbody>${body}</tbody></table></div>`;
   csSelUpdate();
 }
 
@@ -3419,20 +3548,28 @@ function csExport() {
   const rows = CS_SUPPORTED[csCompId()] ? csFiltered() : [];
   if (!rows.length) return alert('Nothing to export.');
   const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const two = ccsMode === 'all';
+  const lvlHead = !ccsApplied ? [] : two ? ccsDays().map((d, i) => `Day ${i + 1} (${d})`) : [`Start (${ccsApplied.start})`, `End (${ccsApplied.end})`];
+  const period = ['Change', 'Units sold (min)', 'Value sold (min, ex VAT)', 'Includes likely restock', 'Inferred restock (min)'];
   const head = csView === 'oos'
-    ? ['Their code','Our SKU','Name','Price ex VAT','OOS since','OOS since first check','Next stock due','Next due qty','Due for','URL']
-    : ['Their code','Our SKU','Name','Price ex VAT','UKPOS price','Their price is (%; minus = cheaper than us)','Their price is','Stock level now','Previous stock level','Previous check date','Est daily sales (units)','Est daily sales value (ex VAT)','Next stock due','Next due qty','Due for','URL'];
+    ? ['Their code','Our SKU','Name','Price ex VAT','OOS since','OOS since first check', ...lvlHead, ...period, 'Next stock due','Next due qty','Due for','URL']
+    : ['Their code','Our SKU','Name','Price ex VAT','UKPOS price','Their price is (%; minus = cheaper than us)','Their price is','Stock level now', ...lvlHead, ...period,
+       'Est daily sales (units)','Est daily sales value (ex VAT)','Next stock due','Next due qty','Due for','URL'];
   const body = rows.map(r => {
-    if (csView === 'oos') return [r.harrison_sku, (r.ukpos_skus || []).join(' '), r.product_name, r.price_ex_vat, r.oos_since, r.seen_in_stock_before ? '' : 'yes', r.next_due_date, r.next_due_qty, r.next_due_date ? (r.due_scope === 'range' ? 'product range' : 'this item') : '', r.competitor_url];
-    const c = csCompare(r), d = csDaily(r).replace(/<[^>]+>/g, '');
+    const x = ccsCells(r, ccsPeriod(r)).csv;
+    const per = [...x.lvl, x.change, x.sold, x.value, x.restockFlag, x.restock];
+    const due = [r.next_due_date, r.next_due_qty, r.next_due_date ? (r.due_scope === 'range' ? 'product range' : 'this item') : ''];
+    if (csView === 'oos') return [r.harrison_sku, (r.ukpos_skus || []).join(' '), r.product_name, r.price_ex_vat, r.oos_since, r.seen_in_stock_before ? '' : 'yes', ...per, ...due, r.competitor_url];
+    const c = csCompare(r);
     return [r.harrison_sku, (r.ukpos_skus || []).join(' '), r.product_name, r.price_ex_vat, c.ours,
-      c.diff === null ? '' : c.diff.toFixed(1), c.diff === null ? '' : csDiffWords(c.diff), r.stock_level, r.prev_stock_level, r.prev_scraped_at,
-      d === '—' ? '' : d, csDailyValueNum(r) === null ? '' : csDailyValueNum(r).toFixed(2), r.next_due_date, r.next_due_qty, r.next_due_date ? (r.due_scope === 'range' ? 'product range' : 'this item') : '', r.competitor_url];
+      c.diff === null ? '' : c.diff.toFixed(1), c.diff === null ? '' : csDiffWords(c.diff), r.stock_level, ...per,
+      x.daily, x.dailyValue, ...due, r.competitor_url];
   }).map(row => row.map(q).join(','));
   const blob = new Blob([[head.map(q).join(','), ...body].join('\n')], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `${csCompName().toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${csView === 'oos' ? 'out-of-stock' : 'in-stock'}-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `${csCompName().toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${csView === 'oos' ? 'out-of-stock' : 'in-stock'}` +
+    (ccsApplied ? `-${ccsApplied.start}-to-${ccsApplied.end}-${two ? 'all-days' : 'start-end'}` : '') + '.csv';
   a.click();
   URL.revokeObjectURL(a.href);
 }
