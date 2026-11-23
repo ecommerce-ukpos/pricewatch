@@ -3446,7 +3446,7 @@ function csExport() {
 ════════════════════════════════════════ */
 let csdChart = null;
 let csdData = null;                 // { hsku, name, url, price, checks } for the period view + CSV
-let csdMode = 'ends';               // 'ends' = Show start/end, 'all' = Show all (Day 1…N)
+let csdMode = 'all';                // 'ends' = Show start/end, 'all' = Show all (Day 1…N)
 let csdApplied = null;              // { start, end } last applied with Go — the table and CSV use this
 
 function csdChecks(rows) {
@@ -3787,7 +3787,7 @@ function csdExport() {
 let csmChart = null;
 let csmData = [];                   // [{ hsku, name, url, price, ours, last, checks }]
 let csmApplied = null;
-let csmMode = 'ends';
+let csmMode = 'all';
 const CSM_COLOURS = ['#378ADD', '#1D9E75', '#D85A30', '#7F77DD', '#BA7517', '#D4537E', '#0F6E56', '#185FA5', '#639922', '#888780'];
 
 async function loadCsMulti(opts) {
