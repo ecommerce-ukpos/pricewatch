@@ -3292,6 +3292,14 @@ const csTheirCode = r => r.harrison_sku
   ? `<a href="#harrison/${encodeURIComponent(r.harrison_sku)}" title="Stock history for ${csEsc(r.harrison_sku)}" onclick="event.preventDefault();go('csdetail',{hsku:${csEsc(JSON.stringify(r.harrison_sku))}})">${csEsc(r.harrison_sku)}</a>`
   : '—';
 const csOurSku = r => (r.ukpos_skus || []).length ? `<strong>${csEsc(r.ukpos_skus.join(', '))}</strong>` : '';
+// Whole row opens the SKU page, except the Name cell (opens Harrison) and the checkbox / links.
+const csRowAttrs = r => r.harrison_sku
+  ? ` class="cs-row" data-h="${csEsc(r.harrison_sku)}" onclick="csRowClick(event,this)" title="Open stock history for ${csEsc(r.harrison_sku)}"`
+  : '';
+function csRowClick(e, tr) {
+  if (e.target.closest('td.cs-name, input, a, button, label')) return;
+  go('csdetail', { hsku: tr.dataset.h });
+}
 const csName = r => `<a href="${csEsc(r.competitor_url)}" target="_blank" rel="noopener" style="color:var(--text)">${csEsc(r.product_name || r.competitor_url)}</a>`;
 const csOosSince = r => r.oos_since
   ? (r.seen_in_stock_before ? csDay(r.oos_since) : `${csDay(r.oos_since)} <span style="font-size:11px;color:var(--t3)">(first check)</span>`)
@@ -3475,14 +3483,14 @@ function csRender() {
     } else if (csView === 'oos') {
       body = rows.map(r => {
         const x = ccsCells(r, ccsPeriod(r));
-        return `<tr><td>${csBox(r)}</td><td>${csTheirCode(r)}</td><td>${csOurSku(r)}</td><td>${csName(r)}</td><td>${csMoney(r.price_ex_vat)}</td><td>${csOosSince(r)}</td>
+        return `<tr${csRowAttrs(r)}><td>${csBox(r)}</td><td>${csTheirCode(r)}</td><td>${csOurSku(r)}</td><td class="cs-name">${csName(r)}</td><td>${csMoney(r.price_ex_vat)}</td><td>${csOosSince(r)}</td>
           ${x.lvl}<td>${x.change}</td><td>${x.sold}</td><td>${x.value}</td><td>${x.restock}</td><td>${csDue(r)}</td></tr>`;
       }).join('');
     } else {
       body = rows.map(r => {
         const c = csCompare(r);
         const x = ccsCells(r, ccsPeriod(r));
-        return `<tr><td>${csBox(r)}</td><td>${csTheirCode(r)}</td><td>${csOurSku(r)}</td><td>${csName(r)}</td><td>${csMoney(r.price_ex_vat)}</td>
+        return `<tr${csRowAttrs(r)}><td>${csBox(r)}</td><td>${csTheirCode(r)}</td><td>${csOurSku(r)}</td><td class="cs-name">${csName(r)}</td><td>${csMoney(r.price_ex_vat)}</td>
           <td>${c.ours === null ? '—' : csMoney(c.ours)}</td>
           <td>${csDiffCell(c)}</td>
           <td>${csLevel(r.stock_level)}</td>

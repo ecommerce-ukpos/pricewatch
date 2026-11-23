@@ -467,3 +467,8 @@ th:not([colspan]):not(:has(input)):hover{color:var(--text)}
    is wrapped in <span class="th-w"> (done automatically in app.js) whose width is capped, so only
    the heading wraps: the column is still as wide as its data needs. */
 .th-w{display:inline-block;max-width:10em;white-space:normal;vertical-align:bottom}
+
+/* Check Competitor Stock: whole row opens the SKU page (not the Name cell, which opens Harrison) */
+tr.cs-row{cursor:pointer}
+tr.cs-row:hover td{background:var(--os)}
+tr.cs-row td.cs-name{cursor:auto}
